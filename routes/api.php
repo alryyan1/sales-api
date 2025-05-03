@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Route;
 // It's good practice to group API controllers, e.g., under App\Http\Controllers\Api
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\SaleController;
@@ -39,7 +40,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // -- Authentication --
     Route::get('/user', [AuthController::class, 'user'])->name('api.user');       // Get authenticated user details
     Route::post('/logout', [AuthController::class, 'logout'])->name('api.logout'); // Invalidate the current token
-
+    Route::get('/products/autocomplete', [App\Http\Controllers\Api\ProductController::class, 'autocomplete'])->name('api.products.autocomplete');
+    Route::get('/clients/autocomplete', [App\Http\Controllers\Api\ClientController::class, 'autocomplete'])->name('api.clients.autocomplete');
     // -- Clients Management --
     Route::apiResource('clients', ClientController::class);
     // This provides:
@@ -64,7 +66,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('sales', SaleController::class);
 
     // -- Dashboard Data (Example - Uncomment and create Controller/etc. later) --
-    // Route::get('/dashboard-summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
+    Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
 
 
     // --- Add other protected resource or custom action routes here ---

@@ -116,4 +116,26 @@ class ClientController extends Controller
         // Or:
         // return response()->noContent(); // Returns 204
     }
+    public function autocomplete(Request $request)
+{
+    $search = $request->input('search', '');
+    $limit = $request->input('limit', 15);
+
+    if (empty($search)) {
+        return response()->json(['data' => []]); // Return empty if no search term
+    }
+
+    $clients = Client::select(['id', 'name', 'email']) // Select only needed fields
+        ->where(function ($query) use ($search) {
+            $query->where('name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+                  // Add phone search if needed
+                  // ->orWhere('phone', 'like', "%{$search}%");
+        })
+         ->orderBy('name')
+         ->limit($limit)
+         ->get();
+
+    return response()->json(['data' => $clients]);
+}
 }

@@ -43,7 +43,7 @@ class SaleController extends Controller
 
         $sales = $query->latest()->paginate($request->input('per_page', 15));
 
-        return SaleResource::collection($sales);
+        return $sales;
     }
 
     /**

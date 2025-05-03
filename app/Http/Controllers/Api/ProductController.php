@@ -167,4 +167,27 @@ class ProductController extends Controller
         return response()->json(['product' => new ProductResource($product->fresh())]);
     }
     */
+    public function autocomplete(Request $request)
+{
+    $search = $request->input('search', '');
+    $limit = $request->input('limit', 15); // Limit results per request
+
+    if (empty($search)) {
+        // Optionally return popular/recent items or empty array if search is required
+        return response()->json(['data' => []]);
+    }
+
+    $products = Product::select(['id', 'name', 'sku', 'sale_price', 'stock_quantity']) // Select only needed fields
+        ->where(function ($query) use ($search) {
+            $query->where('name', 'like', "%{$search}%")
+                  ->orWhere('sku', 'like', "%{$search}%");
+        })
+         // ->where('stock_quantity', '>', 0) // Optionally filter by stock > 0
+         ->orderBy('name') // Or order by relevance
+         ->limit($limit)
+         ->get();
+
+    // No pagination needed here, just return the limited flat list
+    return response()->json(['data' => $products]);
+}
 }
