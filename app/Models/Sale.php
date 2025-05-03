@@ -4,8 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import BelongsTo
-use Illuminate\Database\Eloquent\Relations\HasMany;   // Import HasMany
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Sale extends Model
 {
@@ -13,10 +13,10 @@ class Sale extends Model
 
     protected $fillable = [
         'client_id',
-        'user_id', // Added this field
+        'user_id',
         'sale_date',
         'invoice_number',
-        'total_amount',
+        'total_amount', // Usually calculated, but make fillable
         'paid_amount',
         'status',
         'notes',
@@ -37,7 +37,7 @@ class Sale extends Model
     }
 
     /**
-     * Get the user (salesperson) associated with the sale.
+     * Get the user (salesperson) who made the sale.
      */
     public function user(): BelongsTo
     {
@@ -45,9 +45,9 @@ class Sale extends Model
     }
 
     /**
-     * Get the items included in the sale.
+     * Get the items included in this sale.
      */
-    public function items(): HasMany
+    public function items(): HasMany // Renamed from saleItems for consistency
     {
         return $this->hasMany(SaleItem::class);
     }

@@ -44,11 +44,16 @@ class User extends Authenticatable
         'password' => 'hashed', // Use 'hashed' for Laravel 10+
     ];
 
-     /**
+    /**
      * Get the sales associated with the user (as salesperson).
      */
     public function sales(): HasMany
     {
         return $this->hasMany(Sale::class);
+    }
+    // Add this relationship method
+    public function purchasesRecorded(): HasMany
+    {
+        return $this->hasMany(Purchase::class); // Assumes user_id foreign key in purchases
     }
 }

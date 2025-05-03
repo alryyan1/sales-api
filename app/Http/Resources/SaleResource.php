@@ -1,0 +1,41 @@
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class SaleResource extends JsonResource
+{
+    /**
+     * Transform the resource into an array.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            // Client Info
+            'client_id' => $this->client_id,
+            'client_name' => $this->whenLoaded('client', fn() => $this->client?->name), // Use optional chaining
+
+             // User (Salesperson) Info
+             'user_id' => $this->user_id,
+             'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
+
+            'sale_date' => $this->sale_date->format('Y-m-d'),
+            'invoice_number' => $this->invoice_number,
+            'status' => $this->status,
+            'total_amount' => $this->total_amount, // Cast in model
+            'paid_amount' => $this->paid_amount,   // Cast in model
+            'due_amount' => $this->total_amount - $this->paid_amount, // Calculated field example
+            'notes' => $this->notes,
+            'created_at' => $this->created_at->toISOString(),
+            'updated_at' => $this->updated_at->toISOString(), // Include if needed
+
+            // Conditionally include sale items
+            'items' => SaleItemResource::collection($this->whenLoaded('items')),
+        ];
+    }
+}

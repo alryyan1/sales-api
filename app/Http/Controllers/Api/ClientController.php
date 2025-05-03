@@ -23,7 +23,7 @@ class ClientController extends Controller
         // Consider adding search/filtering capabilities later based on query parameters
         // e.g., if ($request->has('search')) { ... }
 
-        return ClientResource::collection($clients);
+        return $clients;
     }
 
     /**

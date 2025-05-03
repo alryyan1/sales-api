@@ -18,7 +18,10 @@ use Illuminate\Support\Facades\Route;
 // It's good practice to group API controllers, e.g., under App\Http\Controllers\Api
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
-// use App\Http\Controllers\Api\SupplierController; // Uncomment when created
+use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\PurchaseController;
+use App\Http\Controllers\Api\SaleController;
+use App\Http\Controllers\Api\SupplierController; // Uncomment when created
 // use App\Http\Controllers\Api\ProductController;  // Uncomment when created
 // use App\Http\Controllers\Api\PurchaseController; // Uncomment when created
 // use App\Http\Controllers\Api\SaleController;     // Uncomment when created
@@ -47,18 +50,18 @@ Route::middleware('auth:sanctum')->group(function () {
     // DELETE  /api/clients/{client} (destroy) -> name: clients.destroy
 
     // -- Suppliers Management (Example - Uncomment and create Controller/etc. later) --
-    // Route::apiResource('suppliers', SupplierController::class);
+    Route::apiResource('suppliers', SupplierController::class);
 
     // -- Products Management (Example - Uncomment and create Controller/etc. later) --
-    // Route::apiResource('products', ProductController::class);
+    Route::apiResource('products', ProductController::class);
     // You might add custom product routes, e.g., for stock adjustment
     // Route::post('/products/{product}/adjust-stock', [ProductController::class, 'adjustStock'])->name('api.products.adjustStock');
-
-    // -- Purchases Management (Example - Uncomment and create Controller/etc. later) --
-    // Route::apiResource('purchases', PurchaseController::class)->except(['update']); // Purchases usually aren't updated directly once created
+ // --- Purchase Routes ---
+    // Exclude 'update' as purchases typically aren't modified after creation
+    Route::apiResource('purchases', PurchaseController::class)->except(['update']); // <-- Add this line
 
     // -- Sales Management (Example - Uncomment and create Controller/etc. later) --
-    // Route::apiResource('sales', SaleController::class);
+    Route::apiResource('sales', SaleController::class);
 
     // -- Dashboard Data (Example - Uncomment and create Controller/etc. later) --
     // Route::get('/dashboard-summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');

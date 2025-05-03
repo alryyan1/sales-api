@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import BelongsTo
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SaleItem extends Model
 {
@@ -15,7 +15,7 @@ class SaleItem extends Model
         'product_id',
         'quantity',
         'unit_price',
-        'total_price',
+        'total_price', // Usually calculated, but make fillable
     ];
 
     protected $casts = [
@@ -24,10 +24,8 @@ class SaleItem extends Model
         'total_price' => 'decimal:2',
     ];
 
-    // public $timestamps = false; // Often not needed for line items
-
     /**
-     * Get the sale header record associated with this item.
+     * Get the parent sale record.
      */
     public function sale(): BelongsTo
     {

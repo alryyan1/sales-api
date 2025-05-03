@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import BelongsTo
+use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship type
 
 class PurchaseItem extends Model
 {
@@ -15,20 +15,17 @@ class PurchaseItem extends Model
         'product_id',
         'quantity',
         'unit_cost',
-        'total_cost',
+        'total_cost', // Often calculated, but fillable if set directly
     ];
 
     protected $casts = [
-        'quantity' => 'integer',
-        'unit_cost' => 'decimal:2',
-        'total_cost' => 'decimal:2',
+        'quantity' => 'integer',   // Cast to integer
+        'unit_cost' => 'decimal:2', // Cast to decimal
+        'total_cost' => 'decimal:2', // Cast to decimal
     ];
 
-    // No timestamps needed by default for line items, unless specifically required
-    // public $timestamps = false;
-
     /**
-     * Get the purchase header record associated with this item.
+     * Get the parent purchase record.
      */
     public function purchase(): BelongsTo
     {
