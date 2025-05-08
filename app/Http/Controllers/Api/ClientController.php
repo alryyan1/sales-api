@@ -7,16 +7,20 @@ use App\Models\Client;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\ClientResource;
-use Illuminate\Validation\Rule; // Import Rule for unique validation on update
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Validation\Rule; 
+use PharIo\Manifest\Author;// Import Rule for unique validation on update
 
 class ClientController extends Controller
 {
+    use AuthorizesRequests;
     /**
      * Display a listing of the resource.
      * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
      */
     public function index(Request $request) // Added Request for potential filtering/searching later
     {
+
         // Basic pagination
         $clients = Client::latest()->paginate($request->input('per_page', 15)); // Default 15 per page
     
@@ -33,6 +37,8 @@ class ClientController extends Controller
      */
     public function store(Request $request)
     {
+        $this->authorize('create', Client::class); // Checks ClientPolicy@create
+
         // Validation rules matching the form requirements
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
@@ -59,6 +65,8 @@ class ClientController extends Controller
      */
     public function show(Client $client)
     {
+        $this->authorize('view', $client); // Checks ClientPolicy@view
+
         // Route model binding automatically finds the client by ID or throws 404
         // Optionally load relations: $client->load('sales');
         return response()->json(['client' => new ClientResource($client)]);
@@ -74,6 +82,8 @@ class ClientController extends Controller
      */
     public function update(Request $request, Client $client)
     {
+        $this->authorize('update', $client); // Checks ClientPolicy@update
+
         // Validation rules for update
         // 'sometimes' means validate only if the field is present in the request
         $validatedData = $request->validate([
@@ -108,6 +118,7 @@ class ClientController extends Controller
     {
         // Optional: Add authorization check here (e.g., using Policies)
         // $this->authorize('delete', $client);
+        $this->authorize('delete', $client); // Checks ClientPolicy@delete
 
         $client->delete();
 

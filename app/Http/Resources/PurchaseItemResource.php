@@ -12,19 +12,21 @@ class PurchaseItemResource extends JsonResource
      *
      * @return array<string, mixed>
      */
+    // app/Http/Resources/PurchaseItemResource.php
     public function toArray(Request $request): array
     {
         return [
             'id' => $this->id,
-            // Include product details (using ProductResource) when the relationship is loaded
-            // 'product' => new ProductResource($this->whenLoaded('product')), // Option 1: Full product details
-             'product_id' => $this->product_id,                           // Option 2a: Just ID
-             'product_name' => $this->whenLoaded('product', fn() => $this->product->name), // Option 2b: ID + Name
-             'product_sku' => $this->whenLoaded('product', fn() => $this->product->sku),   // Option 2c: ID + Name + SKU
+            'product_id' => $this->product_id,
+            'product_name' => $this->whenLoaded('product', fn() => $this->product->name),
+            'product_sku' => $this->whenLoaded('product', fn() => $this->product->sku),
             'quantity' => $this->quantity,
-            'unit_cost' => $this->unit_cost, // Already cast in model
-            'total_cost' => $this->total_cost, // Already cast in model
-            // 'created_at' => $this->created_at->toISOString(), // Optional timestamp
+            'unit_cost' => $this->unit_cost, // This IS the cost price for this batch
+            'total_cost' => $this->total_cost,
+            'sale_price' => $this->sale_price,   // New
+            'batch_number' => $this->batch_number, // New
+            'expiry_date' => $this->expiry_date ? $this->expiry_date->format('Y-m-d') : null, // New
+            'remaining_quantity' => $this->remaining_quantity
         ];
     }
 }

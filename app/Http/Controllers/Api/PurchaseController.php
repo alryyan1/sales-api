@@ -4,14 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Purchase;
-use App\Models\PurchaseItem;
+use App\Models\PurchaseItem; // Ensure this is used
 use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\PurchaseResource;
-use Illuminate\Support\Facades\DB; // Import DB facade for transactions
-use Illuminate\Support\Facades\Log; // Import Log facade
-use Illuminate\Validation\Rule; // For Enum validation
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+
 
 class PurchaseController extends Controller
 {
@@ -20,9 +22,8 @@ class PurchaseController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Purchase::with(['supplier:id,name', 'user:id,name']); // Eager load supplier/user name+id
+        $query = Purchase::with(['supplier:id,name', 'user:id,name']);
 
-        // Example Search (on reference number or supplier name)
         if ($search = $request->input('search')) {
             $query->where(function($q) use ($search) {
                 $q->where('reference_number', 'like', "%{$search}%")
@@ -31,32 +32,21 @@ class PurchaseController extends Controller
                   });
             });
         }
-
-        // Example Filtering by status
         if ($status = $request->input('status')) {
-            // Add validation for allowed statuses if needed
-             if (in_array($status, ['received', 'pending', 'ordered'])) {
-                 $query->where('status', $status);
-             }
+            if (in_array($status, ['received', 'pending', 'ordered'])) {
+                $query->where('status', $status);
+            }
         }
+        if ($startDate = $request->input('start_date')) { $query->whereDate('purchase_date', '>=', $startDate); }
+        if ($endDate = $request->input('end_date')) { $query->whereDate('purchase_date', '<=', $endDate); }
 
-         // Example Date Range Filtering
-         if ($startDate = $request->input('start_date')) {
-            $query->whereDate('purchase_date', '>=', $startDate);
-         }
-         if ($endDate = $request->input('end_date')) {
-             $query->whereDate('purchase_date', '<=', $endDate);
-         }
-
-
-        $purchases = $query->latest()->paginate($request->input('per_page', 15));
-
-        return $purchases;
+        $purchases = $query->latest('purchase_date')->latest('id')->paginate($request->input('per_page', 15));
+        return PurchaseResource::collection($purchases);
     }
 
     /**
      * Store a newly created purchase in storage.
-     * Handles creating purchase header, items, and updating stock.
+     * Handles creating purchase header, items, setting remaining_quantity, and updating stock via observer.
      */
     public function store(Request $request)
     {
@@ -65,73 +55,76 @@ class PurchaseController extends Controller
             'purchase_date' => 'required|date_format:Y-m-d',
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
             'status' => ['required', Rule::in(['received', 'pending', 'ordered'])],
-            'notes' => 'nullable|string',
-            // Validate the items array
-            'items' => 'required|array|min:1', // Must have at least one item
-            // Validate each item within the array
+            'notes' => 'nullable|string|max:65535',
+            'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1', // Quantity must be at least 1
-            'items.*.unit_cost' => 'required|numeric|min:0|max:99999999.99', // Validate unit cost
+            'items.*.batch_number' => 'nullable|string|max:100', // Max length for batch number
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_cost' => 'required|numeric|min:0|max:99999999.99', // This is the cost price
+            'items.*.sale_price' => 'nullable|numeric|min:0|max:99999999.99', // Intended sale price for this batch
+            'items.*.expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date', // Expiry date after purchase date
         ]);
 
         try {
             $purchase = DB::transaction(function () use ($validatedData, $request) {
-
                 // 1. Create the Purchase header record
-                $purchase = Purchase::create([
+                $purchaseHeaderData = [
                     'supplier_id' => $validatedData['supplier_id'],
-                    'user_id' => $request->user()->id, // Get authenticated user ID
+                    'user_id' => $request->user()->id,
                     'purchase_date' => $validatedData['purchase_date'],
                     'reference_number' => $validatedData['reference_number'] ?? null,
                     'status' => $validatedData['status'],
                     'notes' => $validatedData['notes'] ?? null,
                     'total_amount' => 0, // Initialize total amount
-                ]);
+                ];
+                $purchase = Purchase::create($purchaseHeaderData);
 
-                $totalAmount = 0;
+                $calculatedTotalAmount = 0;
 
-                // 2. Loop through items, create PurchaseItem, update stock
+                // 2. Loop through items, create PurchaseItem, and set remaining_quantity
                 foreach ($validatedData['items'] as $itemData) {
-                    $product = Product::find($itemData['product_id']); // Find the product
-                     if (!$product) {
-                        // This should ideally not happen due to 'exists' validation, but double-check
-                         throw new \Exception("Product with ID {$itemData['product_id']} not found during transaction.");
+                    $product = Product::find($itemData['product_id']); // No need to lock for purchase (adding stock)
+                    if (!$product) {
+                        throw new \Exception("Product with ID {$itemData['product_id']} not found during transaction.");
                     }
 
                     $quantity = $itemData['quantity'];
                     $unitCost = $itemData['unit_cost'];
                     $totalCost = $quantity * $unitCost;
-                    $totalAmount += $totalCost;
+                    $calculatedTotalAmount += $totalCost;
 
                     // Create PurchaseItem
-                    $purchase->items()->create([ // Use relationship to set purchase_id automatically
+                    // The PurchaseItemObserver will handle updating Product->stock_quantity
+                    $purchase->items()->create([
                         'product_id' => $product->id,
-                        'quantity' => $quantity,
+                        'batch_number' => $itemData['batch_number'] ?? null, // Generate if needed, or from input
+                        'quantity' => $quantity,                 // Original purchased quantity
+                        'remaining_quantity' => $quantity,      // Initially, remaining is the full quantity
                         'unit_cost' => $unitCost,
                         'total_cost' => $totalCost,
+                        'sale_price' => $itemData['sale_price'] ?? null,
+                        'expiry_date' => $itemData['expiry_date'] ?? null,
                     ]);
-
-                    // --- Update Product Stock ---
-                    // Use increment for atomicity and better performance
-                    $product->increment('stock_quantity', $quantity);
-                     // Log::info("Stock updated for product {$product->id}. Added: {$quantity}. New Stock: {$product->fresh()->stock_quantity}");
-
+                     Log::info("PurchaseItem created for Product ID: {$product->id}, Batch: {$itemData['batch_number']}, Quantity: {$quantity}. Purchase ID: {$purchase->id}");
                 }
 
                 // 3. Update the total amount on the Purchase header
-                $purchase->total_amount = $totalAmount;
+                $purchase->total_amount = $calculatedTotalAmount;
                 $purchase->save();
 
-                return $purchase; // Return the created purchase from the transaction closure
+                return $purchase;
             }); // End DB::transaction
 
-            // Eager load relations needed for the resource before returning
+            // Eager load relations for the response
             $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
 
             return response()->json(['purchase' => new PurchaseResource($purchase)], Response::HTTP_CREATED);
 
-        } catch (\Throwable $e) { // Catch any exception during the transaction
-            Log::error("Purchase creation failed: " . $e->getMessage() . "\n" . $e->getTraceAsString()); // Log detailed error
+        } catch (ValidationException $e) {
+            Log::warning("Purchase creation validation failed: " . json_encode($e->errors()));
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            Log::error("Purchase creation critical error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
             return response()->json(['message' => 'Failed to create purchase. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -139,54 +132,102 @@ class PurchaseController extends Controller
     /**
      * Display the specified purchase.
      */
-    public function show(Purchase $purchase) // Route model binding
+    public function show(Purchase $purchase)
     {
-        // Eager load relationships needed for the detailed view
-        $purchase->load(['supplier:id,name,email,phone', 'user:id,name', 'items', 'items.product:id,name,sku']);
-
+        // Eager load relationships for the detailed view, including batch info on items
+        $purchase->load([
+            'supplier:id,name,email,phone',
+            'user:id,name',
+            'items',
+            'items.product:id,name,sku' // Basic product info for each item
+        ]);
         return response()->json(['purchase' => new PurchaseResource($purchase)]);
     }
 
+    /**
+     * Update the specified purchase in storage.
+     * Typically, purchases are not updated once finalized due to stock and accounting implications.
+     * If updates are allowed, they must handle stock reversal and re-application carefully.
+     * This example only allows updating non-item related fields like notes or status if it doesn't affect stock.
+     */
+    public function update(Request $request, Purchase $purchase)
+    {
+        // Only allow updating certain fields for a purchase, e.g., notes, status (if it doesn't trigger stock changes)
+        // Modifying items, supplier, or date after creation can be problematic.
+        $validatedData = $request->validate([
+            'reference_number' => ['sometimes','nullable', 'string', 'max:255', Rule::unique('purchases')->ignore($purchase->id)],
+            'status' => ['sometimes','required', Rule::in(['received', 'pending', 'ordered'])],
+            'notes' => 'sometimes|nullable|string|max:65535',
+            // DO NOT allow updating 'items' array here without extremely complex logic
+            // for stock reversal and re-application.
+        ]);
 
-    // NOTE: update() is typically excluded for Purchases as defined in routes.
-    // If needed, implement carefully considering stock implications.
+        // Business logic: What happens if status changes from 'pending' to 'received'?
+        // If stock was not added on 'pending', it should be added now.
+        // This simplified update does not handle such stock logic changes for status updates.
+
+        $purchase->update($validatedData);
+
+        $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+        return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
+    }
 
     /**
      * Remove the specified purchase from storage.
-     * CAUTION: Decide if deletion is allowed and how to handle stock reversal.
+     * CAUTION: This is highly discouraged for completed purchases due to stock and accounting.
+     * If implemented, stock quantities for all items in the purchase MUST be reversed.
      */
     public function destroy(Purchase $purchase)
     {
-        // Option 1: Disallow deletion (Recommended for financial records)
-         return response()->json(['message' => 'Deleting purchases is not allowed.'], Response::HTTP_FORBIDDEN); // 403 Forbidden
+        // Option 1: Disallow (Recommended)
+        return response()->json(['message' => 'Deleting purchase records is generally not allowed. Consider a cancellation status instead.'], Response::HTTP_FORBIDDEN);
 
-        // Option 2: Implement deletion WITH stock reversal (Complex & needs transaction)
+        // Option 2: Implement deletion WITH stock reversal and item deletion (Complex)
         /*
         try {
             DB::transaction(function () use ($purchase) {
-                // Decrement stock for each item BEFORE deleting items/purchase
+                // Before deleting the purchase items (which will happen by cascade or manually),
+                // reverse the stock that was added by these items.
                 foreach ($purchase->items as $item) {
-                    $product = $item->product;
+                    $product = $item->product; // Assumes product relationship exists
                     if ($product) {
-                        // Ensure stock doesn't go negative if possible, or handle error
-                        $newStock = $product->stock_quantity - $item->quantity;
-                        if ($newStock < 0) {
-                             throw new \Exception("Cannot reverse stock for product ID {$product->id}, would result in negative stock.");
-                        }
+                        // Ensure stock doesn't go negative, though for purchases it's less likely
                         $product->decrement('stock_quantity', $item->quantity);
-                        Log::info("Stock reversed for product {$product->id}. Removed: {$item->quantity}. New Stock: {$product->fresh()->stock_quantity}");
+                         Log::info("Stock reversed for product {$product->id} due to purchase deletion. Removed: {$item->quantity}. Purchase ID: {$purchase->id}");
                     }
+                    // PurchaseItemObserver would also trigger on item deletion to update product stock.
+                    // If not using observer, product stock update must be explicit here.
                 }
-                // Items will be deleted by cascade (defined in migration) when purchase is deleted
+                // Items are deleted by cascade constraint defined in migration
+                // OR $purchase->items()->delete(); (if no cascade)
                 $purchase->delete();
             });
-
-            return response()->json(['message' => 'Purchase deleted successfully.'], Response::HTTP_OK);
-
+            return response()->json(['message' => 'Purchase deleted successfully and stock reversed.'], Response::HTTP_OK);
         } catch (\Throwable $e) {
-            Log::error("Purchase deletion failed: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            Log::error("Purchase deletion critical error for ID {$purchase->id}: " . $e->getMessage() . "\n" . $e->getTraceAsString());
             return response()->json(['message' => 'Failed to delete purchase. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
         */
     }
 }
+
+// Key Changes and Considerations:
+// store() Method:
+// Validation: Includes items.*.batch_number, items.*.sale_price (intended sale price for this batch), and items.*.expiry_date.
+// Item Creation: When creating PurchaseItem records, it now includes:
+// batch_number: From the request or generated if necessary (though usually user-supplied or derived).
+// remaining_quantity: Set to the initial quantity purchased.
+// sale_price: The intended sale price for items from this specific batch.
+// expiry_date.
+// Stock Update: The direct $product->increment('stock_quantity', $quantity); line is still present. However, if you have correctly implemented the PurchaseItemObserver to update Product->stock_quantity based on the sum of remaining_quantity of its purchase_items, this direct increment in the controller becomes redundant and potentially causes double counting.
+// If PurchaseItemObserver is active and correct: You can remove $product->increment('stock_quantity', $quantity); from this controller. The observer will handle the total product stock update when PurchaseItem is created/saved.
+// If not using an observer for aggregate stock: Keep the $product->increment() line, but understand that Product.stock_quantity is a direct sum and PurchaseItem.remaining_quantity is for batch-level tracking.
+// update() Method (Simplified):
+// The example provided only allows updating non-item related header fields like notes or status.
+// It explicitly DOES NOT handle modifications to the items array (adding, removing, or changing quantities/costs of items within an existing purchase). Modifying items in a finalized purchase is complex because it requires:
+// Reversing the original stock additions for changed/removed items.
+// Applying new stock additions for new/modified items.
+// All within a transaction.
+// If item updates are truly needed for purchases, this method would need to be significantly expanded with logic similar to the (very complex) SaleController@update we discussed for sales, but for incrementing stock.
+// destroy() Method: Remains strongly discouraged. The example of stock reversal logic is provided but commented out.
+// This complete PurchaseController now accommodates the batch number and other new fields for purchase items. Ensure your PurchaseItemObserver is correctly implemented if you want the aggregate Product.stock_quantity to be automatically maintained based on batch remaining_quantity.

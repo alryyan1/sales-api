@@ -60,6 +60,11 @@ class AuthController extends Controller
             ]);
         }
 
+        // --- Include permissions/roles ---
+        // Option 1: Get all permission names directly assigned AND via roles
+        $permissions = $user->getAllPermissions()->pluck('name');
+        // Option 2: Get only role names
+        $roles = $user->getRoleNames();
         // --- Remove previous tokens if you want only one active token per user ---
         // $user->tokens()->delete(); // Optional: Invalidate all old tokens
 
@@ -71,6 +76,8 @@ class AuthController extends Controller
             'user' => $user,
             'access_token' => $token, // Return the token
             'token_type' => 'Bearer',
+            'roles' => $roles,             // Send role names
+            'permissions' => $permissions, // Send permission names
         ]);
     }
 
@@ -79,8 +86,23 @@ class AuthController extends Controller
      */
     public function user(Request $request)
     {
-        // 'auth:sanctum' middleware handles getting the user via token
-        return $request->user();
+        $user = $request->user();
+        // --- Include permissions/roles ---
+        $permissions = $user->getAllPermissions()->pluck('name');
+        $roles = $user->getRoleNames();
+    
+        // You might want to use an API Resource for the user here
+        return response()->json([
+             'id' => $user->id,
+             'name' => $user->name,
+             'email' => $user->email,
+             'email_verified_at' => $user->email_verified_at,
+             'created_at' => $user->created_at,
+             'updated_at' => $user->updated_at,
+             'roles' => $roles,             // Send role names
+             'permissions' => $permissions, // Send permission names
+        ]);
+        // Or return new UserResource($user->load('roles', 'permissions')); if using Resource
     }
 
     /**

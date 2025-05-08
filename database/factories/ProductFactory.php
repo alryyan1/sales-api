@@ -31,9 +31,7 @@ class ProductFactory extends Factory
             'name' => fake()->words(rand(2, 5), true), // Product name with 2-5 words
             'sku' => 'SKU-' . Str::upper(Str::random(8)), // Generate a somewhat unique SKU
             'description' => fake()->optional(0.8)->paragraph(), // 80% chance of description
-            'purchase_price' => $purchasePrice,
             // Sale price is typically higher than purchase price
-            'sale_price' => $purchasePrice * fake()->randomFloat(2, 1.2, 2.5), // 20% to 150% markup
             'stock_quantity' => fake()->numberBetween(0, 500), // Random stock level
             'stock_alert_level' => fake()->optional(0.9, 10)->numberBetween(5, 50), // 90% chance, between 5-50, default 10
             // 'unit' => fake()->randomElement(['piece', 'kg', 'box', 'liter']), // Example if unit field exists
