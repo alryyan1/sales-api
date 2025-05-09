@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Category;
 use App\Models\Product; // Correct model import
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str; // For generating SKU
@@ -27,6 +28,9 @@ class ProductFactory extends Factory
     {
         $purchasePrice = fake()->randomFloat(2, 5, 200); // Random price between 5.00 and 200.00
 
+         // Find an existing category or create one
+        $category = Category::inRandomOrder()->first() ?? Category::factory()->create();
+
         return [
             'name' => fake()->words(rand(2, 5), true), // Product name with 2-5 words
             'sku' => 'SKU-' . Str::upper(Str::random(8)), // Generate a somewhat unique SKU
@@ -35,7 +39,7 @@ class ProductFactory extends Factory
             'stock_quantity' => fake()->numberBetween(0, 500), // Random stock level
             'stock_alert_level' => fake()->optional(0.9, 10)->numberBetween(5, 50), // 90% chance, between 5-50, default 10
             // 'unit' => fake()->randomElement(['piece', 'kg', 'box', 'liter']), // Example if unit field exists
-            // 'category_id' => null, // Assign later or use Category::factory() if exists
+            'category_id' => $category->id, // <-- Assign category_id
         ];
     }
 

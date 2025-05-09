@@ -33,6 +33,9 @@ class ProductResource extends JsonResource
             // Conditionally include batches if loaded
         // Use a different key like 'available_batches' to avoid confusion if 'purchaseItems' is used elsewhere
         'available_batches' => PurchaseItemResource::collection($this->whenLoaded('purchaseItems')),
+        'category_id'=> $this->category_id,
+        'category' => new CategoryResource($this->whenLoaded('category')),
+        'category_name' => $this->whenLoaded('category',fn()=> $this->category->name),
         ];
     }
 }

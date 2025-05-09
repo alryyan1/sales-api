@@ -45,7 +45,7 @@ class DatabaseSeeder extends Seeder
         // });
         // User::factory()->count(2)->create()->each(function ($user) {
         //     $user->assignRole('inventory_manager');
-        // });
+        // });r
 
         // Seed transactional data if needed
         // \App\Models\Purchase::factory(25)->create();

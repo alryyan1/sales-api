@@ -17,14 +17,18 @@ use Illuminate\Support\Facades\Route;
 // --- Import Controllers ---
 // It's good practice to group API controllers, e.g., under App\Http\Controllers\Api
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SaleController;
+use App\Http\Controllers\Api\SettingController;
+use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\SupplierController; // Uncomment when created
 use App\Http\Controllers\Api\UserController;
 
@@ -55,22 +59,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/', [ProfileController::class, 'show'])->name('show');
     Route::put('/', [ProfileController::class, 'update'])->name('update'); // Use PUT for replacing profile data
     Route::put('/password', [ProfileController::class, 'updatePassword'])->name('updatePassword'); // Separate endpoint for password
+
   });
 
-  // --- Admin Only Routes Group ---
-  Route::middleware(['role:admin'])->prefix('admin')->name('api.admin.')->group(function () {
-    // User Management (already protected by Policy checks inside controller now)
-    Route::apiResource('users', UserController::class);
-    Route::get('/roles', [RoleController::class, 'index'])->name('roles.index');
 
-    // Role Listing (already protected by Policy/Controller check inside)
 
-    // Add routes for managing roles/permissions here later if needed
-    // Route::post('/roles', [RoleController::class, 'store'])->name('roles.store');
-    // Route::put('/roles/{role}', [RoleController::class, 'update'])->name('roles.update');
-    // Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
-});
-
+  // --- Stock Adjustments ---
+  // Protect with specific permission middleware or rely on controller authorization
+  Route::middleware(['permission:adjust-stock|view-stock-adjustments'])->group(function () { // Example group middleware
+    Route::get('/stock-adjustments', [StockAdjustmentController::class, 'index'])->name('api.stock-adjustments.index')->middleware('permission:view-stock-adjustments'); // View history
+    Route::post('/stock-adjustments', [StockAdjustmentController::class, 'store'])->name('api.stock-adjustments.store')->middleware('permission:adjust-stock'); // Create adjustment
+  });
 
   // --- Reporting Routes ---
   Route::prefix('reports')->name('api.reports.')->group(function () { // Group report routes
@@ -82,16 +81,27 @@ Route::middleware('auth:sanctum')->group(function () {
     // Route::get('/inventory', [ReportController::class, 'inventoryReport'])->name('inventory'); // Add later
   });
   // --- Admin Only Routes Example ---
-  Route::middleware(['role:admin'])->group(function () { // Only accessible by users with 'admin' role
-    // Route::apiResource('users', UserController::class); // Example user management
-    // Route::post('/roles', [RoleController::class, 'store']); // Example role management
-    // ... other admin routes
+  // --- Admin Only Routes Group ---
+  Route::middleware(['role:admin'])->prefix('admin')->name('api.admin.')->group(function () {
+    // User Management
+    Route::apiResource('users', UserController::class);
+    Route::apiResource('categories', CategoryController::class);
+
+    // Role Management
+    Route::apiResource('roles', RoleController::class); // Full resource for roles
+    // --- Settings Routes ---
+    Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
+    Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
+    // Permission Listing
+    Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index'); // Route to list permissions
   });
+
 
   // -- Suppliers Management (Example - Uncomment and create Controller/etc. later) --
   Route::apiResource('suppliers', SupplierController::class);
 
   // -- Products Management (Example - Uncomment and create Controller/etc. later) --
+  Route::get('/product/by-ids', [ProductController::class, 'getByIds']);
   Route::apiResource('products', ProductController::class);
   // You might add custom product routes, e.g., for stock adjustment
   // Route::post('/products/{product}/adjust-stock', [ProductController::class, 'adjustStock'])->name('api.products.adjustStock');
@@ -104,7 +114,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Dashboard Data (Example - Uncomment and create Controller/etc. later) --
   Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
-
 
   // --- Add other protected resource or custom action routes here ---
 

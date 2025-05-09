@@ -57,7 +57,7 @@ class Product extends Model
         'description',
         'stock_quantity',
         'stock_alert_level',
-        // 'category_id', // Add if using categories
+        'category_id', // Add if using categories
         // 'unit',        // Add if using units
     ];
 
@@ -92,10 +92,10 @@ class Product extends Model
     }
 
     // Optional: Relationship to Category
-    // public function category(): BelongsTo
-    // {
-    //     return $this->belongsTo(Category::class);
-    // }
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(Category::class);
+    }
 
     // Example: Get the latest purchase cost for this product
     public function getLatestPurchaseCostAttribute(): ?float // Accessor: $product->latest_purchase_cost

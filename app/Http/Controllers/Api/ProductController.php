@@ -67,7 +67,7 @@ class ProductController extends Controller
             'stock_quantity' => 'required|integer|min:0', // Initial stock (can be 0)
             'stock_alert_level' => 'nullable|integer|min:0',
             // 'unit' => 'nullable|string|max:50',
-            // 'category_id' => 'nullable|exists:categories,id',
+            'category_id' => 'nullable|exists:categories,id',
         ]);
 
         $product = Product::create($validatedData);
@@ -106,7 +106,7 @@ class ProductController extends Controller
             // 'stock_quantity' => 'sometimes|required|integer|min:0', // BE VERY CAREFUL allowing direct stock edit
             'stock_alert_level' => 'sometimes|nullable|integer|min:0',
             // 'unit' => 'sometimes|nullable|string|max:50',
-            // 'category_id' => 'sometimes|nullable|exists:categories,id',
+            'category_id' => 'sometimes|nullable|exists:categories,id',
         ]);
 
         // Important Note on stock_quantity:

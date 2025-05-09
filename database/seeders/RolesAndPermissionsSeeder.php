@@ -26,6 +26,7 @@ class RolesAndPermissionsSeeder extends Seeder
         Permission::firstOrCreate(['name' => 'create-clients', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'edit-clients', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'delete-clients', 'guard_name' => 'web']);
+        // Permission::firstOrCreate(['name' => 'adjust-stock', 'guard_name' => 'web']); // Add new permission
 
         // Suppliers
         Permission::firstOrCreate(['name' => 'view-suppliers', 'guard_name' => 'web']);
@@ -38,7 +39,14 @@ class RolesAndPermissionsSeeder extends Seeder
         Permission::firstOrCreate(['name' => 'create-products', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'edit-products', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'delete-products', 'guard_name' => 'web']);
-        // Permission::firstOrCreate(['name' => 'adjust-stock', 'guard_name' => 'web']); // Example
+        Permission::firstOrCreate(['name' => 'adjust-stock', 'guard_name' => 'web']); // Example
+        Permission::firstOrCreate(['name' => 'view-stock-adjustments', 'guard_name' => 'web']); // Example
+
+        // (e.g., manage-categories or view-categories, create-categories, etc.) and assign them to admin role.
+        // Categories
+        Permission::firstOrCreate(['name' => 'view-categories', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'create-categories', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'manage-categories', 'guard_name' => 'web']);
 
         // Purchases
         Permission::firstOrCreate(['name' => 'view-purchases', 'guard_name' => 'web']);
@@ -58,6 +66,10 @@ class RolesAndPermissionsSeeder extends Seeder
         Permission::firstOrCreate(['name' => 'manage-users', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'manage-roles', 'guard_name' => 'web']);
 
+        // Settings
+        Permission::firstOrCreate(['name' => 'view-settings', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'update-settings', 'guard_name' => 'web']);
+
         $this->command->info('Permissions created.');
 
         // --- Define Roles ---
@@ -73,20 +85,43 @@ class RolesAndPermissionsSeeder extends Seeder
         // $adminRole->givePermissionTo(Permission::all());
         // Or more explicitly:
         $adminPermissions = [
-            'view-clients', 'create-clients', 'edit-clients', 'delete-clients',
-            'view-suppliers', 'create-suppliers', 'edit-suppliers', 'delete-suppliers',
-            'view-products', 'create-products', 'edit-products', 'delete-products',
-            'view-purchases', 'create-purchases',
-            'view-sales', 'create-sales', /* 'edit-sales', */
+            'view-clients',
+            'create-clients',
+            'edit-clients',
+            'delete-clients',
+            'view-suppliers',
+            'create-suppliers',
+            'edit-suppliers',
+            'delete-suppliers',
+            'view-products',
+            'create-products',
+            'edit-products',
+            'delete-products',
+            'view-purchases',
+            'create-purchases',
+            'view-sales',
+            'create-sales', /* 'edit-sales', */
             'view-reports',
-            'manage-users', 'manage-roles',
+            'manage-users',
+            'manage-roles',
+            'view-stock-adjustments',
+            'adjust-stock', // New permission
+            'view-categories',
+            'create-categories',
+            'manage-categories',
+            'view-settings',
+            'update-settings',
         ];
         $adminRole->syncPermissions($adminPermissions);
+        // Add 'adjust-stock' to relevant roles (e.g., admin, inventory_manager)
+        // $adminRole->givePermissionTo('adjust-stock');
         $this->command->info('Admin permissions assigned.');
 
         // Salesperson
         $salesPermissions = [
-            'view-clients', 'create-clients', 'edit-clients', // Maybe not delete?
+            'view-clients',
+            'create-clients',
+            'edit-clients', // Maybe not delete?
             'view-products', // View products to sell
             'view-sales',    // View own sales? Or all? Needs policy maybe
             'create-sales',
@@ -96,15 +131,21 @@ class RolesAndPermissionsSeeder extends Seeder
 
         // Inventory Manager
         $inventoryPermissions = [
-            'view-suppliers', 'create-suppliers', 'edit-suppliers', // Maybe not delete?
-            'view-products', 'create-products', 'edit-products', // Maybe not delete?
-            'view-purchases', 'create-purchases',
+            'view-suppliers',
+            'create-suppliers',
+            'edit-suppliers', // Maybe not delete?
+            'view-products',
+            'create-products',
+            'edit-products', // Maybe not delete?
+            'view-purchases',
+            'create-purchases',
             // Maybe view stock reports?
             'view-reports',
         ];
         $inventoryRole->syncPermissions($inventoryPermissions);
+        // $inventoryRole->givePermissionTo('adjust-stock');
         $this->command->info('Inventory Manager permissions assigned.');
 
-         $this->command->info('Roles and Permissions seeded successfully!');
+        $this->command->info('Roles and Permissions seeded successfully!');
     }
 }
