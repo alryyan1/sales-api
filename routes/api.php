@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SaleController;
+use App\Http\Controllers\Api\SaleReturnController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\StockAdjustmentController;
 use App\Http\Controllers\Api\SupplierController; // Uncomment when created
@@ -99,7 +100,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Suppliers Management (Example - Uncomment and create Controller/etc. later) --
   Route::apiResource('suppliers', SupplierController::class);
-
+  Route::apiResource('sale-returns', SaleReturnController::class)->except(['update', 'destroy']); // Typically returns are not updated/deleted once processed
+  // Route to get items from an original sale (for populating return form)
+  Route::get('/sales/{sale}/returnable-items', [SaleController::class, 'getReturnableItems'])->name('api.sales.returnableItems'); // Add this method to SaleController
   // -- Products Management (Example - Uncomment and create Controller/etc. later) --
   Route::get('/product/by-ids', [ProductController::class, 'getByIds']);
   Route::apiResource('products', ProductController::class);

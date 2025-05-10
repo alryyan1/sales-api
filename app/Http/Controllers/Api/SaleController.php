@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\SaleItemResource;
 use App\Models\Sale;
 use App\Models\SaleItem; // Though items are created via relationship
 use App\Models\Product;
@@ -10,6 +11,7 @@ use App\Models\PurchaseItem; // Needed for batch selection
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\SaleResource;
+use App\Models\SaleReturnItem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -27,7 +29,7 @@ class SaleController extends Controller
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('invoice_number', 'like', "%{$search}%")
-                  ->orWhereHas('client', fn($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
+                    ->orWhereHas('client', fn($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
             });
         }
         if ($status = $request->input('status')) {
@@ -35,11 +37,31 @@ class SaleController extends Controller
                 $query->where('status', $status);
             }
         }
-        if ($startDate = $request->input('start_date')) { $query->whereDate('sale_date', '>=', $startDate); }
-        if ($endDate = $request->input('end_date')) { $query->whereDate('sale_date', '<=', $endDate); }
+        if ($startDate = $request->input('start_date')) {
+            $query->whereDate('sale_date', '>=', $startDate);
+        }
+        if ($endDate = $request->input('end_date')) {
+            $query->whereDate('sale_date', '<=', $endDate);
+        }
 
         $sales = $query->latest('sale_date')->latest('id')->paginate($request->input('per_page', 15));
         return SaleResource::collection($sales);
+    }
+    public function getReturnableItems(Sale $sale)
+    {
+        // $this->authorize('createReturn', $sale); // Policy check if user can create return for this sale
+
+        // Fetch items, calculate already returned quantity for each original sale item
+        $items = $sale->items()->with('product:id,name,sku')->get()->map(function ($saleItem) {
+            $alreadyReturnedQty = SaleReturnItem::where('original_sale_item_id', $saleItem->id)
+                ->whereHas('saleReturn', fn($q) => $q->where('status', '!=', 'cancelled'))
+                ->sum('quantity_returned');
+            $saleItem->max_returnable_quantity = $saleItem->quantity - $alreadyReturnedQty;
+            $saleItem->age = 99;
+            return $saleItem;
+        })->filter(fn($item) => $item->max_returnable_quantity > 0); // Only items that can still be returned
+
+        return SaleItemResource::collection($items); // Or a custom resource
     }
 
     /**
@@ -71,7 +93,7 @@ class SaleController extends Controller
                     $stockErrors["items.{$index}.quantity"] = ["Insufficient total stock for product '{$product->name}'. Available: {$totalAvailableStock}, Requested: {$itemData['quantity']}."];
                 }
             } else {
-                 $stockErrors["items.{$index}.product_id"] = ["Product ID {$itemData['product_id']} not found."]; // Should be caught by 'exists' rule
+                $stockErrors["items.{$index}.product_id"] = ["Product ID {$itemData['product_id']} not found."]; // Should be caught by 'exists' rule
             }
         }
         if (!empty($stockErrors)) {
@@ -114,9 +136,9 @@ class SaleController extends Controller
                     // Double check total available stock for this item within transaction
                     $currentTotalStockForItem = $availableBatches->sum('remaining_quantity');
                     if ($currentTotalStockForItem < $quantityToSellForThisItem) {
-                         throw ValidationException::withMessages([
-                             'items' => ["Transaction Error: Insufficient stock for '{$product->name}'. Available: {$currentTotalStockForItem}, Requested: {$quantityToSellForThisItem}."]
-                         ]);
+                        throw ValidationException::withMessages([
+                            'items' => ["Transaction Error: Insufficient stock for '{$product->name}'. Available: {$currentTotalStockForItem}, Requested: {$quantityToSellForThisItem}."]
+                        ]);
                     }
 
                     foreach ($availableBatches as $batch) {
@@ -153,12 +175,12 @@ class SaleController extends Controller
 
                 // 3. Update Sale Header Total
                 $saleHeader->total_amount = $newTotalSaleAmount;
-                 // Ensure paid amount doesn't exceed new total (Zod refine should catch this on frontend)
-                if ($saleHeader->paid_amount > $newTotalSaleAmount && $newTotalSaleAmount >=0) { // Check total is not negative
+                // Ensure paid amount doesn't exceed new total (Zod refine should catch this on frontend)
+                if ($saleHeader->paid_amount > $newTotalSaleAmount && $newTotalSaleAmount >= 0) { // Check total is not negative
                     // Adjust paid amount or throw error based on business rule
                     // For now, let's assume paid_amount can't exceed total. Frontend should prevent this.
-                     Log::warning("Sale ID {$saleHeader->id}: Paid amount {$saleHeader->paid_amount} exceeds calculated total {$newTotalSaleAmount}. This should be caught by frontend validation.");
-                     // throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed calculated total.']]);
+                    Log::warning("Sale ID {$saleHeader->id}: Paid amount {$saleHeader->paid_amount} exceeds calculated total {$newTotalSaleAmount}. This should be caught by frontend validation.");
+                    // throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed calculated total.']]);
                 }
                 $saleHeader->save();
 
@@ -167,7 +189,6 @@ class SaleController extends Controller
 
             $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'items.purchaseItemBatch:id,batch_number,unit_cost']);
             return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
-
         } catch (ValidationException $e) {
             Log::warning("Sale creation validation failed: " . json_encode($e->errors()));
             return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
