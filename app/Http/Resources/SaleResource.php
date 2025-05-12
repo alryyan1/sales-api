@@ -28,14 +28,15 @@ class SaleResource extends JsonResource
             'invoice_number' => $this->invoice_number,
             'status' => $this->status,
             'total_amount' => $this->total_amount, // Cast in model
-            'paid_amount' => $this->paid_amount,   // Cast in model
-            'due_amount' => $this->total_amount - $this->paid_amount, // Calculated field example
             'notes' => $this->notes,
             'created_at' => $this->created_at->toISOString(),
             'updated_at' => $this->updated_at->toISOString(), // Include if needed
 
             // Conditionally include sale items
             'items' => SaleItemResource::collection($this->whenLoaded('items')),
+            'paid_amount' => $this->getCalculatedPaidAmountAttribute(), // Use accessor
+            'due_amount' => $this->getCalculatedDueAmountAttribute(),   // Use accessor
+            'payments' => PaymentResource::collection($this->whenLoaded('payments')),
         ];
     }
 }

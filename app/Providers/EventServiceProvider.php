@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\Payment;
 use App\Models\PurchaseItem;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
@@ -14,6 +15,9 @@ class EventServiceProvider extends ServiceProvider
         PurchaseItem::class => [
             \App\Observers\PurchaseItemObserver::class,
         ],
+        Payment::class => [
+            \App\Observers\PaymentObserver::class
+        ]
     ];
     /**
      * The event to listener mappings for the application.

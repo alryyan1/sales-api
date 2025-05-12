@@ -29,7 +29,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RolesAndPermissionsSeeder::class, // Creates roles & permissions
             AdminUserSeeder::class, // Create an admin user
-            ProductSeeder::class, // Create an admin user
+            // ProductSeeder::class, // Create an admin user
             // Add other seeders here if needed
         ]);
         // Assign 'admin' role to the admin user AFTER roles are created
@@ -51,8 +51,8 @@ class DatabaseSeeder extends Seeder
         // \App\Models\Purchase::factory(25)->create();
         // \App\Models\Sale::factory(40)->create();
         // Create 50 fake clients
-        Client::factory()->count(500)->create();
-        Supplier::factory()->count(500)->create();
+        // Client::factory()->count(500)->create();
+        // Supplier::factory()->count(500)->create();
         // Purchase::factory()->count(20)->create();
         // Product::factory()->count(50)->create();
         // Sale::factory()->count(30)->create();

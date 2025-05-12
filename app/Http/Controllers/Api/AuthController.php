@@ -31,12 +31,18 @@ class AuthController extends Controller
         // Create a token for the new user
         // You can provide a name for the token (e.g., 'auth_token', 'device_name')
         $token = $user->createToken('auth_token')->plainTextToken;
-
+   // --- Include permissions/roles ---
+        // Option 1: Get all permission names directly assigned AND via roles
+        $permissions = $user->getAllPermissions()->pluck('name');
+        // Option 2: Get only role names
+        $roles = $user->getRoleNames();
         return response()->json([
             'message' => 'User registered successfully.',
             'user' => $user,
             'access_token' => $token, // Return the token
             'token_type' => 'Bearer',
+            'roles' => $roles,             // Send role names
+            'permissions' => $permissions, // Send permission names
         ], 201);
     }
 

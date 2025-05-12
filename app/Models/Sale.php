@@ -86,4 +86,18 @@ class Sale extends Model
     {
         return $this->hasMany(SaleItem::class);
     }
+    
+    public function payments(): HasMany { return $this->hasMany(Payment::class); }
+
+    // Accessor to always get the up-to-date paid amount
+    public function getCalculatedPaidAmountAttribute(): float
+    {
+        return (float) $this->payments()->sum('amount');
+    }
+
+    // Accessor for due amount
+    public function getCalculatedDueAmountAttribute(): float
+    {
+        return (float) $this->total_amount - $this->getCalculatedPaidAmountAttribute();
+    }
 }

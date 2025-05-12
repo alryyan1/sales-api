@@ -64,140 +64,204 @@ class SaleController extends Controller
         return SaleItemResource::collection($items); // Or a custom resource
     }
 
-    /**
-     * Store a newly created sale in storage, deducting stock from specific batches (FIFO).
+ /**
+     * Store a newly created sale in storage.
+     * Handles creating sale header, items (FIFO from batches), payments, and decrementing stock.
      */
     public function store(Request $request)
     {
-        $validatedData = $request->validate([
+        $validatedData = $this->validateSaleRequest($request);
+
+        $this->performStockPreCheck($validatedData);
+
+        $calculatedTotals = $this->calculateTotals($validatedData);
+
+        $this->validatePaidAmount($calculatedTotals);
+
+        try {
+            $sale = DB::transaction(function () use ($validatedData, $request, $calculatedTotals) {
+                $saleHeader = $this->createSaleHeader($validatedData, $request, $calculatedTotals);
+
+                $this->processSaleItems($validatedData, $saleHeader);
+
+                $this->createPaymentRecords($validatedData, $saleHeader, $request);
+
+                return $saleHeader;
+            });
+
+            $sale->load([
+                'client:id,name',
+                'user:id,name',
+                'items.product:id,name,sku',
+                'items.purchaseItemBatch:id,batch_number,unit_cost',
+                'payments.user:id,name'
+            ]);
+
+            return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
+
+        } catch (ValidationException $e) {
+            Log::warning("Sale creation validation failed: " . json_encode($e->errors()));
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            Log::error("Sale creation critical error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return response()->json(['message' => 'Failed to create sale. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private function validateSaleRequest(Request $request)
+    {
+        return $request->validate([
             'client_id' => 'required|exists:clients,id',
             'sale_date' => 'required|date_format:Y-m-d',
             'invoice_number' => 'nullable|string|max:255|unique:sales,invoice_number',
             'status' => ['required', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
-            'paid_amount' => 'required|numeric|min:0|max:99999999.99',
             'notes' => 'nullable|string|max:65535',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1',
             'items.*.unit_price' => 'required|numeric|min:0|max:99999999.99',
+            'payments' => 'present|array',
+            'payments.*.method' => [
+                'required_with:payments.*.amount',
+                Rule::in(['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'other', 'store_credit'])
+            ],
+            'payments.*.amount' => 'required_with:payments.*.method|numeric|min:0.01',
+            'payments.*.payment_date' => 'required_with:payments.*.amount|date_format:Y-m-d',
+            'payments.*.reference_number' => 'nullable|string|max:255',
+            'payments.*.notes' => 'nullable|string|max:65535',
         ]);
+    }
 
-        // --- Stock Pre-Check (Optional but recommended for better UX) ---
+    private function performStockPreCheck(array $validatedData)
+    {
         $stockErrors = [];
         foreach ($validatedData['items'] as $index => $itemData) {
-            $product = Product::find($itemData['product_id']); // Find the generic product
+            $product = Product::find($itemData['product_id']);
             if ($product) {
-                // Sum of remaining_quantity from all batches for this product
                 $totalAvailableStock = $product->purchaseItems()->sum('remaining_quantity');
                 if ($totalAvailableStock < $itemData['quantity']) {
-                    $stockErrors["items.{$index}.quantity"] = ["Insufficient total stock for product '{$product->name}'. Available: {$totalAvailableStock}, Requested: {$itemData['quantity']}."];
+                    $stockErrors["items.{$index}.quantity"] = ["الكمية الإجمالية المتوفرة للمنتج '{$product->name}' غير كافية. المتوفر: {$totalAvailableStock}، المطلوب: {$itemData['quantity']}."];
                 }
             } else {
-                $stockErrors["items.{$index}.product_id"] = ["Product ID {$itemData['product_id']} not found."]; // Should be caught by 'exists' rule
+                $stockErrors["items.{$index}.product_id"] = ["Product ID {$itemData['product_id']} not found."];
             }
         }
         if (!empty($stockErrors)) {
             throw ValidationException::withMessages($stockErrors);
         }
-        // --- End Stock Pre-Check ---
+    }
 
-        try {
-            $sale = DB::transaction(function () use ($validatedData, $request) {
-                // 1. Create Sale Header
-                $saleHeader = Sale::create([
-                    'client_id' => $validatedData['client_id'],
-                    'user_id' => $request->user()->id,
-                    'sale_date' => $validatedData['sale_date'],
-                    'invoice_number' => $validatedData['invoice_number'] ?? null,
-                    'status' => $validatedData['status'],
-                    'paid_amount' => $validatedData['paid_amount'],
-                    'notes' => $validatedData['notes'] ?? null,
-                    'total_amount' => 0, // Initialize
-                ]);
+    private function calculateTotals(array $validatedData)
+    {
+        $calculatedTotalSaleAmount = 0;
+        foreach ($validatedData['items'] as $itemData) {
+            $calculatedTotalSaleAmount += ($itemData['quantity'] * $itemData['unit_price']);
+        }
 
-                $newTotalSaleAmount = 0;
-
-                // 2. Process Sale Items (FIFO logic)
-                foreach ($validatedData['items'] as $itemData) {
-                    $product = Product::findOrFail($itemData['product_id']);
-                    $quantityToSellForThisItem = $itemData['quantity'];
-                    $unitPrice = $itemData['unit_price'];
-                    $quantityFulfilled = 0;
-
-                    // Get available batches for this product, ordered by FIFO (e.g., oldest expiry or created_at)
-                    // and lock them for update to prevent race conditions.
-                    $availableBatches = PurchaseItem::where('product_id', $product->id)
-                        ->where('remaining_quantity', '>', 0)
-                        ->orderBy('expiry_date', 'asc') // Or purchase_date/created_at of purchase_item
-                        ->orderBy('created_at', 'asc')
-                        ->lockForUpdate() // IMPORTANT for concurrent sales
-                        ->get();
-
-                    // Double check total available stock for this item within transaction
-                    $currentTotalStockForItem = $availableBatches->sum('remaining_quantity');
-                    if ($currentTotalStockForItem < $quantityToSellForThisItem) {
-                        throw ValidationException::withMessages([
-                            'items' => ["Transaction Error: Insufficient stock for '{$product->name}'. Available: {$currentTotalStockForItem}, Requested: {$quantityToSellForThisItem}."]
-                        ]);
-                    }
-
-                    foreach ($availableBatches as $batch) {
-                        if ($quantityFulfilled >= $quantityToSellForThisItem) break;
-
-                        $canSellFromBatch = min($quantityToSellForThisItem - $quantityFulfilled, $batch->remaining_quantity);
-
-                        if ($canSellFromBatch > 0) {
-                            // Create SaleItem linked to this specific PurchaseItem (batch)
-                            $saleHeader->items()->create([
-                                'product_id' => $product->id,
-                                'purchase_item_id' => $batch->id, // Link to the batch
-                                'batch_number_sold' => $batch->batch_number, // Store for easy display
-                                'quantity' => $canSellFromBatch,
-                                'unit_price' => $unitPrice,
-                                'total_price' => $canSellFromBatch * $unitPrice,
-                            ]);
-
-                            // Decrement remaining_quantity of the batch
-                            $batch->decrement('remaining_quantity', $canSellFromBatch);
-                            // Product total stock will be updated by PurchaseItemObserver via this save.
-
-                            $newTotalSaleAmount += $canSellFromBatch * $unitPrice;
-                            $quantityFulfilled += $canSellFromBatch;
-                        }
-                    }
-
-                    if ($quantityFulfilled < $quantityToSellForThisItem) {
-                        // This should not be reached if pre-check and transactional check are correct
-                        // but acts as a final safeguard within the loop.
-                        throw new \Exception("Logical error during FIFO stock allocation for product '{$product->name}'. Could not fulfill requested quantity.");
-                    }
+        $calculatedTotalPaidAmount = 0;
+        if (!empty($validatedData['payments'])) {
+            foreach ($validatedData['payments'] as $paymentData) {
+                if (isset($paymentData['amount']) && is_numeric($paymentData['amount'])) {
+                    $calculatedTotalPaidAmount += (float) $paymentData['amount'];
                 }
+            }
+        }
 
-                // 3. Update Sale Header Total
-                $saleHeader->total_amount = $newTotalSaleAmount;
-                // Ensure paid amount doesn't exceed new total (Zod refine should catch this on frontend)
-                if ($saleHeader->paid_amount > $newTotalSaleAmount && $newTotalSaleAmount >= 0) { // Check total is not negative
-                    // Adjust paid amount or throw error based on business rule
-                    // For now, let's assume paid_amount can't exceed total. Frontend should prevent this.
-                    Log::warning("Sale ID {$saleHeader->id}: Paid amount {$saleHeader->paid_amount} exceeds calculated total {$newTotalSaleAmount}. This should be caught by frontend validation.");
-                    // throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed calculated total.']]);
-                }
-                $saleHeader->save();
+        return [
+            'totalSaleAmount' => $calculatedTotalSaleAmount,
+            'totalPaidAmount' => $calculatedTotalPaidAmount,
+        ];
+    }
 
-                return $saleHeader;
-            }); // End DB::transaction
-
-            $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'items.purchaseItemBatch:id,batch_number,unit_cost']);
-            return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
-        } catch (ValidationException $e) {
-            Log::warning("Sale creation validation failed: " . json_encode($e->errors()));
-            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
-        } catch (\Throwable $e) {
-            Log::error("Sale creation failed: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-            return response()->json(['message' => 'Failed to create sale. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+    private function validatePaidAmount(array $calculatedTotals)
+    {
+        if ($calculatedTotals['totalPaidAmount'] > $calculatedTotals['totalSaleAmount']) {
+            throw ValidationException::withMessages(['payments' => ['Total paid amount cannot exceed the total sale amount.']]);
         }
     }
 
+    private function createSaleHeader(array $validatedData, Request $request, array $calculatedTotals)
+    {
+        return Sale::create([
+            'client_id' => $validatedData['client_id'],
+            'user_id' => $request->user()->id,
+            'sale_date' => $validatedData['sale_date'],
+            'invoice_number' => $validatedData['invoice_number'] ?? null,
+            'status' => $validatedData['status'],
+            'notes' => $validatedData['notes'] ?? null,
+            'total_amount' => $calculatedTotals['totalSaleAmount'],
+            'paid_amount' => $calculatedTotals['totalPaidAmount'],
+        ]);
+    }
+
+    private function processSaleItems(array $validatedData, Sale $saleHeader)
+    {
+        foreach ($validatedData['items'] as $itemData) {
+            $product = Product::findOrFail($itemData['product_id']);
+            $quantityToSellForThisItem = $itemData['quantity'];
+            $unitPrice = $itemData['unit_price'];
+            $quantityFulfilled = 0;
+
+            $availableBatches = PurchaseItem::where('product_id', $product->id)
+                ->where('remaining_quantity', '>', 0)
+                ->orderBy('expiry_date', 'asc')
+                ->orderBy('created_at', 'asc')
+                ->lockForUpdate()
+                ->get();
+
+            $currentTotalStockForItem = $availableBatches->sum('remaining_quantity');
+            if ($currentTotalStockForItem < $quantityToSellForThisItem) {
+                throw ValidationException::withMessages([
+                    "items" => ["خطأ في المعاملة: الكمية المتوفرة من المنتج '{$product->name}' غير كافية. المتوفر: {$currentTotalStockForItem}، المطلوب: {$quantityToSellForThisItem}."]
+                ]);
+            }
+
+            foreach ($availableBatches as $batch) {
+                if ($quantityFulfilled >= $quantityToSellForThisItem) break;
+
+                $canSellFromBatch = min($quantityToSellForThisItem - $quantityFulfilled, $batch->remaining_quantity);
+
+                if ($canSellFromBatch > 0) {
+                    $saleHeader->items()->create([
+                        'product_id' => $product->id,
+                        'purchase_item_id' => $batch->id,
+                        'batch_number_sold' => $batch->batch_number,
+                        'quantity' => $canSellFromBatch,
+                        'unit_price' => $unitPrice,
+                        'total_price' => $canSellFromBatch * $unitPrice,
+                    ]);
+
+                    $batch->decrement('remaining_quantity', $canSellFromBatch);
+                }
+                $quantityFulfilled += $canSellFromBatch;
+            }
+
+            if ($quantityFulfilled < $quantityToSellForThisItem) {
+                throw new \Exception("حدث خطأ منطقي أثناء تخصيص المخزون بطريقة الوارد أولاً يصرف أولاً (FIFO) للمنتج '{$product->name}'.");
+            }
+        }
+    }
+
+    private function createPaymentRecords(array $validatedData, Sale $saleHeader, Request $request)
+    {
+        if (!empty($validatedData['payments'])) {
+            foreach ($validatedData['payments'] as $paymentData) {
+                if (isset($paymentData['amount']) && is_numeric($paymentData['amount']) && (float)$paymentData['amount'] > 0) {
+                    $saleHeader->payments()->create([
+                        'user_id' => $request->user()->id,
+                        'method' => $paymentData['method'],
+                        'amount' => (float) $paymentData['amount'],
+                        'payment_date' => $paymentData['payment_date'],
+                        'reference_number' => $paymentData['reference_number'] ?? null,
+                        'notes' => $paymentData['notes'] ?? null,
+                    ]);
+                }
+            }
+        }
+    }
     /**
      * Display the specified sale.
      */
@@ -208,7 +272,8 @@ class SaleController extends Controller
             'user:id,name',
             'items',
             'items.product:id,name,sku',
-            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date' // Load batch info for each sale item
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
+            'payments'
         ]);
         return response()->json(['sale' => new SaleResource($sale)]);
     }

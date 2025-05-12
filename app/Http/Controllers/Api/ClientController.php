@@ -69,7 +69,7 @@ class ClientController extends Controller
 
         // Route model binding automatically finds the client by ID or throws 404
         // Optionally load relations: $client->load('sales');
-        return response()->json(['client' => new ClientResource($client)]);
+        return response()->json(new ClientResource($client));
         // Or return directly:
         // return new ClientResource($client);
     }

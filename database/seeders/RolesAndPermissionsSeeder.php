@@ -76,7 +76,11 @@ class RolesAndPermissionsSeeder extends Seeder
         $adminRole = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
         $salesRole = Role::firstOrCreate(['name' => 'salesperson', 'guard_name' => 'web']);
         $inventoryRole = Role::firstOrCreate(['name' => 'inventory_manager', 'guard_name' => 'web']);
-
+        // Stock Requisitions
+        Permission::firstOrCreate(['name' => 'request-stock', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'view-own-stock-requisitions', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'view-all-stock-requisitions', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'process-stock-requisitions', 'guard_name' => 'web']);
         $this->command->info('Roles created.');
 
         // --- Assign Permissions to Roles ---
@@ -111,6 +115,10 @@ class RolesAndPermissionsSeeder extends Seeder
             'manage-categories',
             'view-settings',
             'update-settings',
+            'request-stock',
+            'view-own-stock-requisitions',
+            'view-all-stock-requisitions',
+            'process-stock-requisitions',
         ];
         $adminRole->syncPermissions($adminPermissions);
         // Add 'adjust-stock' to relevant roles (e.g., admin, inventory_manager)
