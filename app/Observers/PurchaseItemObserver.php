@@ -19,6 +19,12 @@ class PurchaseItemObserver
             $product->saveQuietly(); // saveQuietly to avoid triggering other events recursively
         }
     }
+
+    public function updated(PurchaseItem $purchaseItem): void
+    {
+        $this->updateProductStock($purchaseItem);
+    }
+
     public function saved(PurchaseItem $purchaseItem): void
     {
         $this->updateProductStock($purchaseItem);

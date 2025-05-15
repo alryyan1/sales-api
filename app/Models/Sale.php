@@ -40,6 +40,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereTotalAmount($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUpdatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUserId($value)
+ * @property-read float $calculated_due_amount
+ * @property-read float $calculated_paid_amount
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Payment> $payments
+ * @property-read int|null $payments_count
  * @mixin \Eloquent
  */
 class Sale extends Model

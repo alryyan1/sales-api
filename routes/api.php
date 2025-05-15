@@ -54,13 +54,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/stock-adjustments', [StockAdjustmentController::class, 'index'])->name('api.stock-adjustments.index')->middleware('permission:view-stock-adjustments');
     Route::post('/stock-adjustments', [StockAdjustmentController::class, 'store'])->name('api.stock-adjustments.store')->middleware('permission:adjust-stock');
   });
-
+  // -- Settings Management --
+  
+    Route::get('admin/settings', [SettingController::class, 'index'])->name('settings.index');
+    Route::put('admin/settings', [SettingController::class, 'update'])->name('settings.update');
   // -- Reporting Routes --
   Route::prefix('reports')->name('api.reports.')->group(function () {
     Route::get('/sales', [ReportController::class, 'salesReport'])->name('sales');
     Route::get('/purchases', [ReportController::class, 'purchasesReport'])->name('purchases');
     Route::get('/inventory', [ReportController::class, 'inventoryReport'])->name('inventory');
     Route::get('/profit-loss', [ReportController::class, 'profitLossReport'])->name('profit-loss');
+
   });
 
   // -- Admin Only Routes --
@@ -68,8 +72,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('users', UserController::class);
     Route::apiResource('categories', CategoryController::class);
     Route::apiResource('roles', RoleController::class);
-    Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
-    Route::put('/settings', [SettingController::class, 'update'])->name('settings.update');
+
     Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
   });
 
@@ -90,7 +93,9 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class)->except(['update']);
   Route::post('/sales/{sale}/payments', [SaleController::class, 'addPayment'])->name('api.sales.addPayment');
+    Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf'); // <-- New Route
 
+  //reports/sales/pdf
   // -- Dashboard Data --
   Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
   Route::get('/reports/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('api.reports.inventory-log');

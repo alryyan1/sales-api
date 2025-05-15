@@ -9,9 +9,10 @@ use App\Models\Sale; // Import the Sale model
 use App\Http\Resources\SaleResource; // Reuse SaleResource for formatting
 use App\Models\Product;
 use App\Models\SaleItem;
+use App\Services\Pdf\MyCustomTCPDF;
 use Arr;
 use DB;
-use Illuminate\Support\Carbon; // For date handling
+use Carbon\Carbon; // Ensure correct Carbon namespace is used
 use Illuminate\Validation\Rule; // For status validation
 
 class ReportController extends Controller
@@ -197,16 +198,16 @@ class ReportController extends Controller
 
         // --- Calculate Total Revenue (Based on Sales created within the period) ---
         $revenueQuery = Sale::whereBetween('sale_date', [$startDate, $endDate]);
-         // Apply filters if provided
-         if (!empty($validated['client_id'])) {
+        // Apply filters if provided
+        if (!empty($validated['client_id'])) {
             $revenueQuery->where('client_id', $validated['client_id']);
-         }
-          // Note: Filtering by product_id for total revenue is complex, as a sale can have multiple products.
-          // You'd typically calculate revenue per product separately if needed.
+        }
+        // Note: Filtering by product_id for total revenue is complex, as a sale can have multiple products.
+        // You'd typically calculate revenue per product separately if needed.
 
         // We sum total_amount from the Sale header as it represents the total billed amount
         $totalRevenue = $revenueQuery->whereIn('status', ['completed', 'pending']) // Include pending or only completed? Depends on accounting practice. Let's include pending for now.
-                                    ->sum('total_amount');
+            ->sum('total_amount');
 
 
         // --- Calculate Cost of Goods Sold (COGS) ---
@@ -214,22 +215,22 @@ class ReportController extends Controller
         $cogsQuery = SaleItem::query()
             // Join with sales table to filter by sale_date
             ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
-             // Join with the *specific* purchase_item (batch) the sale item came from
-             // Use leftJoin in case the link is somehow broken (though constraint should prevent)
-             ->leftJoin('purchase_items', 'sale_items.purchase_item_id', '=', 'purchase_items.id')
-             ->whereBetween('sales.sale_date', [$startDate, $endDate])
-             ->whereIn('sales.status', ['completed', 'pending']); // Match revenue status inclusion
+            // Join with the *specific* purchase_item (batch) the sale item came from
+            // Use leftJoin in case the link is somehow broken (though constraint should prevent)
+            ->leftJoin('purchase_items', 'sale_items.purchase_item_id', '=', 'purchase_items.id')
+            ->whereBetween('sales.sale_date', [$startDate, $endDate])
+            ->whereIn('sales.status', ['completed', 'pending']); // Match revenue status inclusion
 
 
-         // Apply filters if provided
-         if (!empty($validated['client_id'])) {
+        // Apply filters if provided
+        if (!empty($validated['client_id'])) {
             // Filter SaleItems based on the client_id of their parent Sale
             $cogsQuery->where('sales.client_id', $validated['client_id']);
-         }
-         if (!empty($validated['product_id'])) {
-             // Filter SaleItems directly by product_id
-             $cogsQuery->where('sale_items.product_id', $validated['product_id']);
-         }
+        }
+        if (!empty($validated['product_id'])) {
+            // Filter SaleItems directly by product_id
+            $cogsQuery->where('sale_items.product_id', $validated['product_id']);
+        }
 
 
         // Calculate COGS: Sum of (quantity sold * cost price from the specific batch)
@@ -258,6 +259,123 @@ class ReportController extends Controller
 
         return response()->json(['data' => $reportData]);
     }
+    public function downloadSalesReportPDF(Request $request)
+    {
+        // 1. Validate Input Parameters
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+            'client_id' => 'nullable|integer|exists:clients,id',
+            'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
+        ]);
+
+        // 2. Fetch and Filter Sales Data
+        $query = Sale::query()->with(['client:id,name', 'user:id,name']);
+        $startDate = isset($validated['start_date']) ? Carbon::parse($validated['start_date'])->startOfDay() : Carbon::today()->startOfDay();
+        $endDate = isset($validated['end_date']) ? Carbon::parse($validated['end_date'])->endOfDay() : Carbon::today()->endOfDay();
+
+        if ($startDate) {
+            $query->where('sale_date', '>=', $startDate);
+        }
+        if ($endDate) {
+            $query->where('sale_date', '<=', $endDate);
+        }
+        if (!empty($validated['client_id'])) {
+            $query->where('client_id', $validated['client_id']);
+        }
+        if (!empty($validated['status'])) {
+            $query->where('status', $validated['status']);
+        }
+
+        $sales = $query->orderBy('sale_date', 'desc')->get();
+
+        // 3. Generate PDF
+        $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->SetTitle('Sales Report');
+        // $pdf->SetSubject("Sales Report from {$startDate->format('Y-m-d') ?? 'All Time'} to {$endDate->format('Y-m-d') ?? 'All Time'}");
+        $pdf->AddPage();
+        $pdf->setRTL(true);
+
+        // PDF Header
+        $this->generatePDFHeader($pdf, $startDate, $endDate);
+
+        // PDF Table
+        $this->generatePDFTable($pdf, $sales);
+
+        // Output PDF
+        $pdfFileName = 'sales_report_' . now()->format('Ymd_His') . '.pdf';
+        $pdfContent = $pdf->Output($pdfFileName, 'S');
+
+        return response($pdfContent, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', "attachment; filename=\"{$pdfFileName}\"");
+    }
+
+    private function generatePDFHeader($pdf, $startDate, $endDate)
+    {
+        $formattedStartDate = $startDate ? $startDate->format('Y-m-d') : 'All Time';
+        $formattedEndDate = $endDate ? $endDate->format('Y-m-d') : 'All Time';
+
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
+        $pdf->Cell(0, 12, 'Sales Report', 0, 1, 'C');
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
+        $pdf->Cell(0, 8, "Period: {$formattedStartDate} to {$formattedEndDate}", 0, 1, 'C');
+        $pdf->Ln(6);
+    }
+
+    private function generatePDFTable($pdf, $sales)
+    {
+        $headers = ['Due', 'Paid', 'Total', 'Client', 'Invoice No.', 'Date'];
+        $columnWidths = [25, 25, 30, 55, 30, 25];
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
+        $pdf->SetFillColor(230, 230, 230);
+
+        foreach ($headers as $i => $header) {
+            $pdf->Cell($columnWidths[$i], 8, $header, 1, 0, 'C', true);
+        }
+        $pdf->Ln();
+
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
+        $pdf->SetFillColor(245, 245, 245);
+        $fill = false;
+
+        $totals = ['grandTotal' => 0, 'paid' => 0, 'due' => 0];
+
+        if ($sales->isEmpty()) {
+            $pdf->Cell(array_sum($columnWidths), 10, 'No sales data available for the selected period.', 1, 1, 'C');
+        } else {
+            foreach ($sales as $sale) {
+                $due = (float)$sale->total_amount - (float)$sale->paid_amount;
+
+                $totals['grandTotal'] += $sale->total_amount;
+                $totals['paid'] += $sale->paid_amount;
+                $totals['due'] += $due;
+
+                $rowData = [
+                    Carbon::parse($sale->sale_date)->format('Y-m-d'),
+                    $sale->invoice_number ?? '---',
+                    $sale->client?->name ?? 'Not Specified',
+                    number_format($sale->total_amount, 2),
+                    number_format($sale->paid_amount, 2),
+                    number_format($due, 2),
+                ];
+
+                foreach (array_reverse($rowData) as $i => $cellData) {
+                    $pdf->Cell($columnWidths[$i], 6, $cellData, 'LRB', 0, 'R', $fill);
+                }
+                $pdf->Ln();
+                $fill = !$fill;
+            }
+        }
+
+        // Summary Totals
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
+        $pdf->Cell(25, 7, number_format($totals['due'], 2), 1, 0, 'R', true);
+        $pdf->Cell(25, 7, number_format($totals['paid'], 2), 1, 0, 'R', true);
+        $pdf->Cell(30, 7, number_format($totals['grandTotal'], 2), 1, 0, 'R', true);
+        $pdf->Cell(110, 7, 'Totals:', 1, 1, 'R', true);
+    }
+
     // --- Placeholder for other report methods ---
     /*
     public function purchasesReport(Request $request) { ... }

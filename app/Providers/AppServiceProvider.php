@@ -1,7 +1,6 @@
 <?php
-
 namespace App\Providers;
-
+use App\Services\WhatsAppService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -12,6 +11,9 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         //
+        $this->app->singleton(WhatsAppService::class,function(){
+            return new \App\Services\WhatsAppService();
+        });
     }
 
     /**

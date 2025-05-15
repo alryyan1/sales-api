@@ -21,7 +21,7 @@ class SettingController extends Controller
      */
     public function index(Request $request)
     {
-        $this->checkAuthorization('view-settings'); // Policy or Gate check
+        // $this->checkAuthorization('view-settings'); // Policy or Gate check
 
         // Fetch settings directly from the config file
         // We use 'app_settings' as the config file name (config/app_settings.php)

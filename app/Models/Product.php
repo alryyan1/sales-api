@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany; // For relationships
 
 /**
@@ -39,6 +40,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany; // For relationships
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereStockAlertLevel($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereStockQuantity($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereUpdatedAt($value)
+ * @property int|null $category_id
+ * @property-read \App\Models\Category|null $category
+ * @property-read int $calculated_total_stock
+ * @method static \Illuminate\Database\Eloquent\Builder|Product hasStock()
+ * @method static \Illuminate\Database\Eloquent\Builder|Product lowStock()
+ * @method static \Illuminate\Database\Eloquent\Builder|Product whereCategoryId($value)
  * @mixin \Eloquent
  */
 class Product extends Model
@@ -134,5 +141,42 @@ class Product extends Model
     public function purchaseItemsWithStock(): HasMany
     {
         return $this->hasMany(PurchaseItem::class)->where('remaining_quantity', '>', 0)->orderBy('expiry_date', 'asc');
+    }
+    
+    /**
+     * If NOT using an Observer, this accessor calculates total stock on demand.
+     * This is less efficient for querying/filtering than having a dedicated updated column.
+     * If using PurchaseItemObserver, this accessor becomes less critical but can be a fallback.
+     * Note: $this->calculated_total_stock
+     */
+    public function getCalculatedTotalStockAttribute(): int
+    {
+        return (int) $this->purchaseItems()->sum('remaining_quantity');
+    }
+
+
+    // --- SCOPES for querying ---
+
+    /**
+     * Scope a query to only include products that have batches with stock.
+     */
+    public function scopeHasStock($query)
+    {
+        return $query->whereHas('purchaseItems', function ($q) {
+            $q->where('remaining_quantity', '>', 0);
+        });
+        // OR if 'stock_quantity' on products table is reliably updated by observer:
+        // return $query->where('stock_quantity', '>', 0);
+    }
+
+    /**
+     * Scope a query to only include products that are low on stock.
+     */
+    public function scopeLowStock($query)
+    {
+        return $query->whereNotNull('stock_alert_level')
+                     ->whereColumn('stock_quantity', '<=', 'stock_alert_level');
+        // If stock_quantity is an aggregate, this whereColumn will work if it's updated.
+        // Otherwise, you'd need a more complex whereHas with sum.
     }
 }

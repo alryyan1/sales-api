@@ -34,13 +34,13 @@ class UserController extends Controller
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('email', 'like', "%{$search}%");
             });
         }
 
         // Filter by role (optional)
         if ($roleName = $request->input('role')) {
-            $query->whereHas('roles', function($q) use ($roleName) {
+            $query->whereHas('roles', function ($q) use ($roleName) {
                 $q->where('name', $roleName);
             });
         }
@@ -55,8 +55,8 @@ class UserController extends Controller
      */
     public function store(Request $request)
     {
-         // Check authorization using UserPolicy@create
-         $this->authorize('create', User::class);
+        // Check authorization using UserPolicy@create
+        $this->authorize('create', User::class);
 
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
@@ -68,23 +68,24 @@ class UserController extends Controller
 
         try {
             $user = DB::transaction(function () use ($validatedData) {
-                 // Create user
-                 $user = User::create([
+                // Create user
+                $user = User::create([
                     'name' => $validatedData['name'],
                     'email' => $validatedData['email'],
                     'password' => Hash::make($validatedData['password']),
                     'email_verified_at' => now(), // Optionally verify immediately
-                 ]);
+                ]);
 
-                 // Assign roles
-                 $user->assignRole($validatedData['roles']);
 
-                 return $user;
+
+                // Assign roles
+                $user->assignRole($validatedData['roles']);
+
+                return $user;
             });
 
-             $user->load('roles:id,name'); // Load roles for the response resource
-             return response()->json(['user' => new UserResource($user)], Response::HTTP_CREATED);
-
+            $user->load('roles:id,name'); // Load roles for the response resource
+            return response()->json(['user' => new UserResource($user)], Response::HTTP_CREATED);
         } catch (\Throwable $e) {
             Log::error("User creation failed: " . $e->getMessage());
             return response()->json(['message' => 'Failed to create user.'], Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -136,20 +137,22 @@ class UserController extends Controller
                 if ($emailChanged) {
                     $user->email_verified_at = null; // Mark as unverified if email changes
                 }
-
+                // Prevent assigning roles if 'admin' is missing, but only for user with ID 1
+                if ($user->id === 1 && !in_array('admin', $validatedData['roles'])) {
+                    throw new \Exception('The "admin" role cannot be removed for this user.');
+                }
                 // Update roles if provided
                 if ($request->has('roles')) {
-                     // syncRoles removes old roles and adds new ones
+                    // syncRoles removes old roles and adds new ones
                     $user->syncRoles($validatedData['roles']);
                 }
 
                 $user->save();
                 return $user;
-             });
+            });
 
-             $user->load('roles:id,name'); // Load roles for response
-             return response()->json(['user' => new UserResource($user->fresh())]);
-
+            $user->load('roles:id,name'); // Load roles for response
+            return response()->json(['user' => new UserResource($user->fresh())]);
         } catch (\Throwable $e) {
             Log::error("User update failed for ID {$user->id}: " . $e->getMessage());
             return response()->json(['message' => 'Failed to update user.'], Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -166,7 +169,7 @@ class UserController extends Controller
 
         // Prevent user from deleting themselves
         if ($request->user()->id === $user->id) {
-             return response()->json(['message' => 'You cannot delete your own account.'], Response::HTTP_FORBIDDEN);
+            return response()->json(['message' => 'You cannot delete your own account.'], Response::HTTP_FORBIDDEN);
         }
 
         try {

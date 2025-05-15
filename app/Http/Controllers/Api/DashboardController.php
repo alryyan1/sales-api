@@ -49,17 +49,17 @@ class DashboardController extends Controller
         // --- Inventory Stats ---
         $totalProducts = Product::count();
         $lowStockProductsCount = Product::whereNotNull('stock_alert_level') // Only consider products with an alert level set
-                                        ->whereColumn('stock_quantity', '<=', 'stock_alert_level') // Compare quantity to alert level column
-                                        ->count();
+            ->whereColumn('stock_quantity', '<=', 'stock_alert_level') // Compare quantity to alert level column
+            ->count();
         $outOfStockProductsCount = Product::where('stock_quantity', '<=', 0)->count();
 
         // Optional: Get names of a few low stock products
         $lowStockProductsSample = Product::whereNotNull('stock_alert_level')
-                                          ->whereColumn('stock_quantity', '<=', 'stock_alert_level')
-                                          ->orderBy('stock_quantity', 'asc') // Show lowest stock first
-                                          ->limit(5) // Limit sample size
-                                          ->pluck('name', 'stock_quantity') // Get name and quantity
-                                          ->toArray(); // Convert collection to array
+            ->whereColumn('stock_quantity', '<=', 'stock_alert_level')
+            ->orderBy('stock_quantity', 'asc') // Show lowest stock first
+            ->limit(5) // Limit sample size
+            ->pluck('name', 'stock_quantity') // Get name and quantity
+            ->toArray(); // Convert collection to array
 
 
         // --- Customer/Supplier Stats ---
@@ -80,9 +80,9 @@ class DashboardController extends Controller
                 'this_month_count' => $salesThisMonthCount,
             ],
             'purchases' => [
-                 'today_amount' => (float) $purchasesToday,
-                 'this_month_amount' => (float) $purchasesThisMonth,
-                 'this_month_count' => $purchasesThisMonthCount,
+                'today_amount' => (float) $purchasesToday,
+                'this_month_amount' => (float) $purchasesThisMonth,
+                'this_month_count' => $purchasesThisMonthCount,
             ],
             'inventory' => [
                 'total_products' => $totalProducts,
@@ -94,9 +94,9 @@ class DashboardController extends Controller
                 'total_clients' => $totalClients,
                 'total_suppliers' => $totalSuppliers,
             ],
-             // Add recent activities later if needed
-             // 'recent_sales' => SaleResource::collection(Sale::with('client:id,name')->latest()->limit(5)->get()),
-             // 'recent_purchases' => PurchaseResource::collection(Purchase::with('supplier:id,name')->latest()->limit(5)->get()),
+            // Add recent activities later if needed
+            // 'recent_sales' => SaleResource::collection(Sale::with('client:id,name')->latest()->limit(5)->get()),
+            // 'recent_purchases' => PurchaseResource::collection(Purchase::with('supplier:id,name')->latest()->limit(5)->get()),
         ];
 
         return response()->json(['data' => $summaryData]);

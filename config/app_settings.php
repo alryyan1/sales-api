@@ -16,4 +16,15 @@ return [
 
     // Add more settings as needed
     // 'timezone' => env('APP_TIMEZONE', 'UTC'),
+     'payment_methods_ar' => [
+        'cash' => 'نقدي',
+        'visa' => 'فيزا',
+        'mastercard' => 'ماستركارد',
+        'bank_transfer' => 'تحويل بنكي',
+        'mada' => 'مدى',
+        'store_credit' => 'رصيد متجر',
+        'other' => 'أخرى',
+    ],
+    'invoice_thermal_footer' => 'شكراً لزيارتكم!زورونا مرة أخرى!',
+
 ];

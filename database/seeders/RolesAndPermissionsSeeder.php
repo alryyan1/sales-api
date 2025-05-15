@@ -113,12 +113,15 @@ class RolesAndPermissionsSeeder extends Seeder
             'view-categories',
             'create-categories',
             'manage-categories',
+            'manage-settings',
+            'view-returns',
             'view-settings',
             'update-settings',
             'request-stock',
             'view-own-stock-requisitions',
             'view-all-stock-requisitions',
             'process-stock-requisitions',
+            'create-sale-returns'
         ];
         $adminRole->syncPermissions($adminPermissions);
         // Add 'adjust-stock' to relevant roles (e.g., admin, inventory_manager)

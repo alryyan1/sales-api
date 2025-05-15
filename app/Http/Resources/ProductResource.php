@@ -36,6 +36,7 @@ class ProductResource extends JsonResource
         'category_id'=> $this->category_id,
         'category' => new CategoryResource($this->whenLoaded('category')),
         'category_name' => $this->whenLoaded('category',fn()=> $this->category->name),
+        'total_stock' => $this->getCalculatedTotalStockAttribute(),
         ];
     }
 }
