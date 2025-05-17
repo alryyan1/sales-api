@@ -4,10 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProductResource;
+use App\Http\Resources\PurchaseItemResource;
 use Illuminate\Http\Request;
 use App\Models\Sale; // Import the Sale model
 use App\Http\Resources\SaleResource; // Reuse SaleResource for formatting
+use App\Models\Payment;
 use App\Models\Product;
+use App\Models\PurchaseItem;
 use App\Models\SaleItem;
 use App\Services\Pdf\MyCustomTCPDF;
 use Arr;
@@ -173,6 +176,205 @@ class ReportController extends Controller
         // We can reuse ProductResource. It should include stock_quantity and stock_alert_level.
         // If you added accessors like latest_purchase_cost to Product model and resource, they'll be included.
         return ProductResource::collection($products);
+    }
+    /**
+     * Fetch products/batches nearing their expiry date.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     */
+    public function nearExpiryReport(Request $request)
+    {
+        // --- Input Validation ---
+        $validated = $request->validate([
+            'days_threshold' => 'nullable|integer|min:1|max:730', // e.g., 1 to 730 days (2 years)
+            'product_id' => 'nullable|integer|exists:products,id',
+            // 'category_id' => 'nullable|integer|exists:categories,id', // If categories implemented
+            'per_page' => 'nullable|integer|min:5|max:100',
+            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'remaining_quantity', 'purchase_items.created_at'])], // Allowed sort fields
+            'sort_direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
+        ]);
+
+        // --- Authorization Check ---
+        // if ($request->user()->cannot('viewNearExpiryReport')) { // Define this permission
+        //     abort(403, 'Unauthorized action.');
+        // }
+
+        $daysThreshold = $validated['days_threshold'] ?? 30; // Default to 30 days
+        $today = Carbon::today()->toDateString(); // Get today's date as YYYY-MM-DD string
+        $expiryCutoffDate = Carbon::today()->addDays($daysThreshold)->toDateString(); // Get cutoff date as string
+
+        // --- Query Building ---
+        $query = PurchaseItem::query()
+            ->with(['product:id,name,sku,sellable_unit_name']) // Eager load necessary product details
+            ->whereNotNull('expiry_date')                 // Only items with an expiry date
+            ->where('remaining_quantity', '>', 0)       // Only items with stock remaining
+            ->whereBetween('expiry_date', [$today, $expiryCutoffDate]); // Expiring within the threshold (inclusive)
+
+        // --- Apply Filters ---
+        if (!empty($validated['product_id'])) {
+            $query->where('product_id', $validated['product_id']);
+        }
+        // if (!empty($validated['category_id'])) {
+        //     $query->whereHas('product.category', function ($q) use ($validated) {
+        //         $q->where('categories.id', $validated['category_id']); // Ensure table name for ambiguity
+        //     });
+        // }
+
+        // --- Sorting ---
+        $sortBy = $validated['sort_by'] ?? 'expiry_date'; // Default sort by expiry date (soonest first)
+        $sortDirection = $validated['sort_direction'] ?? 'asc';
+
+        if ($sortBy === 'products.name') {
+            // If sorting by product name, we need to join the products table
+            $query->join('products', 'purchase_items.product_id', '=', 'products.id')
+                ->orderBy('products.name', $sortDirection)
+                ->select('purchase_items.*'); // Select all columns from purchase_items to avoid ambiguity
+        } else {
+            $query->orderBy($sortBy, $sortDirection);
+        }
+        // Add a secondary sort for consistency if primary sort values are the same
+        if ($sortBy !== 'purchase_items.created_at' && $sortBy !== 'id') { // Avoid re-adding if already primary
+            $query->orderBy('purchase_items.created_at', 'asc')->orderBy('purchase_items.id', 'asc');
+        }
+
+
+        // --- Pagination ---
+        $perPage = $validated['per_page'] ?? 25;
+        $nearExpiryItems = $query->paginate($perPage);
+
+        // --- Return Paginated Resource Collection ---
+        // PurchaseItemResource should already format expiry_date and include product info (name, sku)
+        return PurchaseItemResource::collection($nearExpiryItems);
+    }
+    /**
+     * Generate a Monthly Revenue Report with daily breakdown and payment method summary.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function monthlyRevenueReport(Request $request)
+    {
+        // --- Input Validation ---
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+            // Optional filters for specific client, user, etc.
+            // 'client_id' => 'nullable|integer|exists:clients,id',
+            // 'user_id' => 'nullable|integer|exists:users,id',
+        ]);
+
+        // --- Authorization ---
+        // if ($request->user()->cannot('viewMonthlyRevenueReport')) { abort(403); }
+
+        $year = $validated['year'];
+        $month = $validated['month'];
+
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+
+        // --- 1. Get Daily Sales Totals ---
+        $dailySalesQuery = Sale::query()
+            ->select(
+                DB::raw('DATE(sale_date) as sale_day'),
+                DB::raw('SUM(total_amount) as daily_total_revenue'),
+                DB::raw('SUM(paid_amount) as daily_total_paid') // Sum of initial paid amounts on Sale record
+            )
+            ->whereBetween('sale_date', [$startDate, $endDate])
+            ->whereIn('status', ['completed', 'pending']); // Consider which statuses count as revenue
+
+        // if (!empty($validated['client_id'])) { $dailySalesQuery->where('client_id', $validated['client_id']); }
+        // if (!empty($validated['user_id'])) { $dailySalesQuery->where('user_id', $validated['user_id']); }
+
+        $dailySales = $dailySalesQuery->groupBy('sale_day')
+            ->orderBy('sale_day', 'asc')
+            ->get()
+            ->keyBy('sale_day'); // Key by date for easy merging
+
+        // --- 2. Get Daily Payments by Method ---
+        // This query sums payments made ON a specific day, regardless of when the sale was made,
+        // but linked to sales within the requested month for context OR sales made by a specific user.
+        // For a pure revenue report based on SALE DATE, it's better to sum payments linked to sales *made* in that period.
+        $dailyPaymentsQuery = Payment::query()
+            ->join('sales', 'payments.sale_id', '=', 'sales.id') // Join to filter sales if needed
+            ->select(
+                DB::raw('DATE(payments.payment_date) as payment_day'), // Could also group by sales.sale_date
+                'payments.method',
+                DB::raw('SUM(payments.amount) as total_amount_by_method')
+            )
+            // Option A: Payments made within the month for sales made within the month
+            ->whereBetween('sales.sale_date', [$startDate, $endDate])
+            ->whereBetween('payments.payment_date', [$startDate, $endDate]) // Payment also in this month
+            // Option B: All payments made within the month, regardless of sale date (cash flow focused)
+            // ->whereBetween('payments.payment_date', [$startDate, $endDate])
+            ->whereIn('sales.status', ['completed', 'pending']);
+
+
+        // if (!empty($validated['client_id'])) { $dailyPaymentsQuery->where('sales.client_id', $validated['client_id']); }
+        // if (!empty($validated['user_id'])) { $dailyPaymentsQuery->where('sales.user_id', $validated['user_id']); }
+        // Note: If using payments.user_id, filter by that directly: ->where('payments.user_id', ...)
+
+        $dailyPaymentsByMethod = $dailyPaymentsQuery->groupBy('payment_day', 'payments.method')
+            ->orderBy('payment_day', 'asc')
+            ->orderBy('payments.method', 'asc')
+            ->get()
+            ->groupBy('payment_day') // Group by day first
+            ->map(function ($paymentsOnDay) {
+                // Then map each day's payments to {method: amount}
+                return $paymentsOnDay->mapWithKeys(function ($paymentGroup) {
+                    return [$paymentGroup->method => (float) $paymentGroup->total_amount_by_method];
+                });
+            });
+
+
+        // --- 3. Combine Data for Each Day of the Month ---
+        $report = [];
+        $currentDay = $startDate->copy();
+        $monthSummary = [
+            'total_revenue' => 0,
+            'total_paid' => 0, // Sum of direct Sale.paid_amount
+            'total_payments_by_method' => [], // Sum of all payments by method for the month
+        ];
+
+        while ($currentDay->lte($endDate)) {
+            $dayStr = $currentDay->toDateString();
+            $saleDataForDay = $dailySales->get($dayStr);
+            $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]); // Ensure it's a collection or empty array
+
+            $dailyRevenue = $saleDataForDay ? (float) $saleDataForDay->daily_total_revenue : 0;
+            $dailyPaidOnSale = $saleDataForDay ? (float) $saleDataForDay->daily_total_paid : 0; // From Sale record
+
+            // Sum payments for this day from the payments query
+            $dailyTotalPaymentsFromPaymentsTable = $paymentsForDay->sum();
+
+            $report[$dayStr] = [
+                'date' => $dayStr,
+                'day_of_week' => $currentDay->isoFormat('dddd'), // Localized day name (e.g., الأحد)
+                'total_revenue' => $dailyRevenue,
+                'total_paid_at_sale_creation' => $dailyPaidOnSale, // Reflects initial payments from Sale.paid_amount
+                'total_payments_recorded_on_day' => $dailyTotalPaymentsFromPaymentsTable, // Reflects all payments *processed* on this day
+                'payments_by_method' => $paymentsForDay->toArray(),
+            ];
+
+            $monthSummary['total_revenue'] += $dailyRevenue;
+            $monthSummary['total_paid'] += $dailyPaidOnSale; // Or sum dailyTotalPaymentsFromPaymentsTable for a different metric
+
+            foreach ($paymentsForDay as $method => $amount) {
+                $monthSummary['total_payments_by_method'][$method] = ($monthSummary['total_payments_by_method'][$method] ?? 0) + $amount;
+            }
+
+            $currentDay->addDay();
+        }
+
+        return response()->json([
+            'data' => [
+                'year' => $year,
+                'month' => $month,
+                'month_name' => $startDate->isoFormat('MMMM YYYY'), // Localized month name
+                'daily_breakdown' => array_values($report), // Convert associative array to indexed for easier frontend map
+                'month_summary' => $monthSummary,
+            ]
+        ]);
     }
     /**
      * Generate a Profit and Loss summary for a given period.
