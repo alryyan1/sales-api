@@ -20,13 +20,14 @@ class PurchaseItemResource extends JsonResource
             'product_id' => $this->product_id,
             'product_name' => $this->whenLoaded('product', fn() => $this->product->name),
             'product_sku' => $this->whenLoaded('product', fn() => $this->product->sku),
-            'quantity' => $this->quantity,
-            'unit_cost' => $this->unit_cost, // This IS the cost price for this batch
+            'batch_number' => $this->batch_number,
+            'quantity' => $this->quantity, // e.g., number of boxes purchased
+            'remaining_quantity' => $this->remaining_quantity, // e.g., number of pieces remaining
+            'unit_cost' => $this->unit_cost, // e.g., cost per box
+            'cost_per_sellable_unit' => $this->cost_per_sellable_unit, // Accessor value
             'total_cost' => $this->total_cost,
-            'sale_price' => $this->sale_price,   // New
-            'batch_number' => $this->batch_number, // New
-            'expiry_date' => $this->expiry_date ? $this->expiry_date->format('Y-m-d') : null, // New
-            'remaining_quantity' => $this->remaining_quantity
+            'sale_price' => $this->sale_price, // Intended sale price per sellable unit for this batch
+            'expiry_date' => $this->expiry_date ? $this->expiry_date->format('Y-m-d') : null,
         ];
     }
 }

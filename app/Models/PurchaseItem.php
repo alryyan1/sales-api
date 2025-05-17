@@ -44,19 +44,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
 class PurchaseItem extends Model
 {
     use HasFactory;
-
     protected $fillable = [
         'purchase_id',
         'product_id',
-        'quantity',
-        'unit_cost',
-        'batch_number', // New
-        'remaining_quantity', // New
-        'total_cost', // Often calculated, but fillable if set directly
-        'sale_price',
-        'expiry_date', // Optional, can be set at point of sale
-        // 'batch_number', // Optional, can be set at point of sale
-        // 'unit', // Optional, can be set at point of sale
+        'batch_number',
+        'quantity',                 // Quantity of stocking_unit_name (e.g., boxes)
+        'remaining_quantity',       // Remaining quantity in sellable_unit_name (e.g., pieces)
+        'unit_cost',                // Cost per stocking_unit_name (e.g., cost per box)
+        'total_cost',               // quantity * unit_cost
+        'sale_price',               // Intended sale price PER SELLABLE UNIT for this batch
+        'expiry_date',
     ];
 
     protected $casts = [
@@ -64,6 +61,7 @@ class PurchaseItem extends Model
         'unit_cost' => 'decimal:2',
         'total_cost' => 'decimal:2',
         'sale_price' => 'decimal:2', // New
+        'cost_per_sellable_unit' => 'decimal:2', // New
         'expiry_date' => 'date',     // New
         'remaining_quantity' => 'integer'
     ];
@@ -81,5 +79,14 @@ class PurchaseItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+      // Accessor for cost per sellable unit from this batch
+    public function getCostPerSellableUnitAttribute(): ?float
+    {
+        if ($this->product && $this->product->units_per_stocking_unit > 0) {
+            return round((float) $this->unit_cost / $this->product->units_per_stocking_unit, 2);
+        }
+        // If units_per_stocking_unit is 1 or product not loaded (should not happen)
+        return (float) $this->unit_cost;
     }
 }

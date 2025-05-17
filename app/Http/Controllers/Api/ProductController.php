@@ -21,6 +21,7 @@ class ProductController extends Controller
     {
         $query = Product::query();
 
+        
         // Search by name, SKU, or description
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
@@ -61,6 +62,7 @@ class ProductController extends Controller
     {
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
+
             'sku' => 'nullable|string|max:100|unique:products,sku', // SKU unique in products table
             'description' => 'nullable|string|max:65535',
             // Prices are removed from product creation
@@ -68,6 +70,10 @@ class ProductController extends Controller
             'stock_alert_level' => 'nullable|integer|min:0',
             // 'unit' => 'nullable|string|max:50',
             'category_id' => 'nullable|exists:categories,id',
+            'sellable_unit_name' => 'nullable|string|max:50',
+            'units_per_stocking_unit' => 'nullable|integer|min:1',
+            'stocking_unit_name' => 'nullable|string|max:50',
+
         ]);
 
         $product = Product::create($validatedData);
@@ -170,7 +176,7 @@ class ProductController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $query = Product::select(['id', 'name', 'sku', 'stock_quantity']); // Include stock_quantity
+        $query = Product::select('*'); // Include stock_quantity
 
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
@@ -185,6 +191,8 @@ class ProductController extends Controller
 
 
         $products = $query->orderBy('name')->limit($limit)->get();
+        $products->each->append(['suggested_sale_price_per_sellable_unit', 'latest_cost_per_sellable_unit']);
+
 
         return response()->json(['data' => ProductResource::collection($products)]);
     }

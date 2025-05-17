@@ -37,8 +37,14 @@ class SaleController extends Controller
         }
         if ($status = $request->input('status')) {
             if (in_array($status, ['completed', 'pending', 'draft', 'cancelled'])) {
-            $query->where('status', $status);
+                $query->where('status', $status);
             }
+        }
+        if ($request->boolean('today_only')) {
+            $query->whereDate('sale_date', Carbon::today());
+        }
+        if ($request->boolean('for_current_user')) {
+            $query->where('user_id', $request->user()->id);
         }
 
         if ($clientId = $request->input('client_id')) {
@@ -89,8 +95,19 @@ class SaleController extends Controller
             $sale = DB::transaction(function () use ($validatedData, $request, $calculatedTotals) {
                 $saleHeader = $this->createSaleHeader($validatedData, $request, $calculatedTotals);
 
-                $this->processSaleItems($validatedData, $saleHeader);
-
+                // --- Calculate Total Sale Amount from items in THIS request ---
+                $newTotalSaleAmount = 0;
+                $this->processSaleItems($validatedData, $saleHeader, $newTotalSaleAmount);
+                // 3. Final Update/Verification of Sale Header Total
+                // The $saleHeader->total_amount was already set using $calculatedTotalSaleAmountFromItems.
+                // $newTotalSaleAmount (sum of created sale_items.total_price) should match this.
+                // If they don't match, it indicates a potential issue in calculation logic.
+                if (abs($saleHeader->total_amount - $newTotalSaleAmount) > 0.001) { // Check with a small tolerance for float comparisons
+                    Log::error("SaleController@store: Discrepancy between initial total calculation and sum of sale items. Initial: {$saleHeader->total_amount}, Sum of Items: {$newTotalSaleAmount}. Sale ID: {$saleHeader->id}");
+                    // Optionally, you could update $saleHeader->total_amount to $newTotalSaleAmount here if you trust the item sum more,
+                    // or throw an exception. For now, we'll trust the initial calculation based on request data.
+                    // $saleHeader->total_amount = $newTotalSaleAmount; // If choosing to update
+                }
                 $this->createPaymentRecords($validatedData, $saleHeader, $request);
 
                 return $saleHeader;
@@ -127,8 +144,8 @@ class SaleController extends Controller
             'notes' => 'nullable|string|max:65535',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
-            'items.*.unit_price' => 'required|numeric|min:0|max:99999999.99',
+            'items.*.quantity' => 'required|integer|min:1', // Quantity of sellable units
+            'items.*.unit_price' => 'required|numeric|min:0', // Sale price PER SELLABLE UNIT
             'payments' => 'present|array',
             'payments.*.method' => [
                 'required_with:payments.*.amount',
@@ -141,23 +158,43 @@ class SaleController extends Controller
         ]);
     }
 
+    /**
+     * Get the ID of the last completed sale for the authenticated user.
+     */
+    public function getLastCompletedSaleId(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated.'], Response::HTTP_UNAUTHORIZED);
+        }
+
+        // Find the latest sale by this user with a 'completed' status
+        // Order by 'created_at' or 'id' to get the most recent. 'updated_at' if sales can be completed later.
+        $lastSale = Sale::where('user_id', $user->id)
+                        ->where('status', 'completed')
+                        ->orderBy('updated_at', 'desc') // Or 'created_at' or 'id'
+                        ->select('id') // Only need the ID
+                        ->first();
+
+        if ($lastSale) {
+            return response()->json(['data' => ['last_sale_id' => $lastSale->id]]);
+        }
+
+        return response()->json(['data' => ['last_sale_id' => null], 'message' => 'No completed sales found for this user.'], Response::HTTP_OK);
+        // Or return 404 if no sale found:
+        // return response()->json(['message' => 'No completed sales found for this user.'], Response::HTTP_NOT_FOUND);
+    }
     private function performStockPreCheck(array $validatedData)
     {
         $stockErrors = [];
+        // Stock Pre-Check (now checks Product.stock_quantity which is total sellable units)
         foreach ($validatedData['items'] as $index => $itemData) {
             $product = Product::find($itemData['product_id']);
-            if ($product) {
-                $totalAvailableStock = $product->purchaseItems()->sum('remaining_quantity');
-                if ($totalAvailableStock < $itemData['quantity']) {
-                    $stockErrors["items.{$index}.quantity"] = ["الكمية الإجمالية المتوفرة للمنتج '{$product->name}' غير كافية. المتوفر: {$totalAvailableStock}، المطلوب: {$itemData['quantity']}."];
-                }
-            } else {
-                $stockErrors["items.{$index}.product_id"] = ["Product ID {$itemData['product_id']} not found."];
+            if ($product && $product->stock_quantity < $itemData['quantity']) { // stock_quantity is total sellable units
+                $stockErrors["items.{$index}.quantity"] = ["Insufficient stock for '{$product->name}'. Available: {$product->stock_quantity} {$product->sellable_unit_name_plural}, Requested: {$itemData['quantity']}."];
             }
         }
-        if (!empty($stockErrors)) {
-            throw ValidationException::withMessages($stockErrors);
-        }
+        if (!empty($stockErrors)) throw ValidationException::withMessages($stockErrors);
     }
 
     private function calculateTotals(array $validatedData)
@@ -203,65 +240,88 @@ class SaleController extends Controller
         ]);
     }
 
-    private function processSaleItems(array $validatedData, Sale $saleHeader)
+    private function processSaleItems(array $validatedData, Sale $saleHeader, $newTotalSaleAmount)
     {
+        // 2. Process Sale Items and Stock (FIFO logic, all quantities in SELLABLE UNITS)
         foreach ($validatedData['items'] as $itemData) {
-            $product = Product::findOrFail($itemData['product_id']);
-            // resolve(WhatsAppService::class)->sendLowStockAlert($product);
+            $product = Product::findOrFail($itemData['product_id']); // Ensure product exists
+            $requestedSellableUnits = (int) $itemData['quantity']; // Quantity customer wants, in sellable units
+            $unitSalePrice = (float) $itemData['unit_price']; // Price per sellable unit from request
+            $quantityFulfilledInSellableUnits = 0;
 
-            $quantityToSellForThisItem = $itemData['quantity'];
-            $unitPrice = $itemData['unit_price'];
-            $quantityFulfilled = 0;
-
+            // Fetch available batches for this product, ordered for FIFO
+            // (e.g., oldest expiry first, then oldest purchase_item created_at)
+            // and lock them for update to prevent race conditions during concurrent sales.
             $availableBatches = PurchaseItem::where('product_id', $product->id)
-                ->where('remaining_quantity', '>', 0)
-                ->orderBy('expiry_date', 'asc')
-                ->orderBy('created_at', 'asc')
-                ->lockForUpdate()
+                ->where('remaining_quantity', '>', 0) // remaining_quantity is in SELLABLE UNITS
+                ->orderBy('expiry_date', 'asc')        // Prioritize expiring soonest
+                ->orderBy('created_at', 'asc')         // Then oldest purchase batch
+                ->lockForUpdate()                      // CRITICAL for concurrent stock updates
                 ->get();
 
-            $currentTotalStockForItem = $availableBatches->sum('remaining_quantity');
-            if ($currentTotalStockForItem < $quantityToSellForThisItem) {
+            // --- Transactional Stock Check ---
+            // Sum of all available sellable units for this product across all batches
+            $currentTotalStockForItemInSellableUnits = $availableBatches->sum('remaining_quantity');
+
+            if ($currentTotalStockForItemInSellableUnits < $requestedSellableUnits) {
+                // This error will cause the transaction to rollback
                 throw ValidationException::withMessages([
-                    "items" => ["خطأ في المعاملة: الكمية المتوفرة من المنتج '{$product->name}' غير كافية. المتوفر: {$currentTotalStockForItem}، المطلوب: {$quantityToSellForThisItem}."]
+                    // Associate error with the 'items' array generally, or pinpoint the specific item if frontend can handle it
+                    // "items.{$index}.quantity" could be used if you have the $index from the original request array
+                    'items' => ["Insufficient stock for product '{$product->name}'. Available: {$currentTotalStockForItemInSellableUnits} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
                 ]);
             }
 
+            // --- Allocate from Batches (FIFO) ---
             foreach ($availableBatches as $batch) {
-                if ($quantityFulfilled >= $quantityToSellForThisItem) break;
+                // If we've fulfilled the requested quantity for this sale item, stop processing batches
+                if ($quantityFulfilledInSellableUnits >= $requestedSellableUnits) {
+                    break;
+                }
 
-                $canSellFromBatch = min($quantityToSellForThisItem - $quantityFulfilled, $batch->remaining_quantity);
+                // Determine how many units can be sold from this current batch
+                $canSellFromThisBatchInSellableUnits = min(
+                    $requestedSellableUnits - $quantityFulfilledInSellableUnits, // How many more we still need to fulfill
+                    $batch->remaining_quantity                               // How many are actually left in this batch
+                );
 
-                if ($canSellFromBatch > 0) {
+                if ($canSellFromThisBatchInSellableUnits > 0) {
+                    // Create the SaleItem record, linking it to the specific PurchaseItem (batch)
                     $saleHeader->items()->create([
-                        'product_id' => $product->id,
-                        'purchase_item_id' => $batch->id,
-                        'batch_number_sold' => $batch->batch_number,
-                        'quantity' => $canSellFromBatch,
-                        'unit_price' => $unitPrice,
-                        'total_price' => $canSellFromBatch * $unitPrice,
+                        'product_id'         => $product->id,
+                        'purchase_item_id'   => $batch->id, // Link to the specific batch
+                        'batch_number_sold'  => $batch->batch_number, // Store batch number for easy display
+                        'quantity'           => $canSellFromThisBatchInSellableUnits, // Quantity sold in SELLABLE units
+                        'unit_price'         => $unitSalePrice, // Sale price per sellable unit (from request)
+                        'cost_price_at_sale' => $batch->cost_per_sellable_unit, // COGS component from the batch
+                        'total_price'        => $canSellFromThisBatchInSellableUnits * $unitSalePrice,
                     ]);
 
-                    $batch->decrement('remaining_quantity', $canSellFromBatch);
-                    // Example in SaleController@store, inside the transaction, after batch->decrement()
-                    // (This assumes the Product model has been re-fetched or observer ran)
-                    $productModel = $batch->product()->first(); // Get the parent Product model
-                    if (
-                        $productModel->stock_alert_level !== null &&
-                        $productModel->calculated_total_stock <= $productModel->stock_alert_level 
-                    ) {
-                        resolve(WhatsAppService::class)->sendLowStockAlert($productModel);
-                    }
+                    // Decrement the remaining quantity of the batch (which is in sellable units)
+                    $batch->decrement('remaining_quantity', $canSellFromThisBatchInSellableUnits);
+                    // The PurchaseItemObserver is responsible for listening to this 'saved' event on PurchaseItem
+                    // and then recalculating and updating the total Product->stock_quantity (which is also in sellable units).
+
+                    // Update totals for the current sale
+                    $newTotalSaleAmount += $canSellFromThisBatchInSellableUnits * $unitSalePrice;
+                    $quantityFulfilledInSellableUnits += $canSellFromThisBatchInSellableUnits;
+
+                    Log::info("SaleItem created: Product ID {$product->id}, Batch ID {$batch->id}, Qty Sold: {$canSellFromThisBatchInSellableUnits}, Remaining in Batch: {$batch->fresh()->remaining_quantity}. Sale ID: {$saleHeader->id}");
                 }
-                $quantityFulfilled += $canSellFromBatch;
-            }
+            } // End loop through available batches
 
-            if ($quantityFulfilled < $quantityToSellForThisItem) {
-                throw new \Exception("حدث خطأ منطقي أثناء تخصيص المخزون بطريقة الوارد أولاً يصرف أولاً (FIFO) للمنتج '{$product->name}'.");
+            // Final check to ensure the requested quantity was fully met
+            // This should ideally not be reached if the initial $currentTotalStockForItemInSellableUnits check was correct
+            // and no external modifications happened between the sum and the loop (lockForUpdate helps here).
+            if ($quantityFulfilledInSellableUnits < $requestedSellableUnits) {
+                // This indicates a potential logic error or a very high concurrency issue not fully mitigated.
+                // Throwing an exception here will roll back the entire transaction.
+                Log::critical("FIFO stock allocation discrepancy for Product ID {$product->id} on Sale ID {$saleHeader->id}. Requested: {$requestedSellableUnits}, Fulfilled: {$quantityFulfilledInSellableUnits}.");
+                throw new \Exception("Could not fulfill requested quantity for product '{$product->name}' due to an unexpected stock allocation issue. Please try again.");
             }
-        }
+        } // End loop through $validatedData['items'] (main sale items from request)
+
     }
-
     private function createPaymentRecords(array $validatedData, Sale $saleHeader, Request $request)
     {
         if (!empty($validatedData['payments'])) {
@@ -478,7 +538,8 @@ class SaleController extends Controller
             $pdf->Cell($w_items[1], $lineHeight, number_format((float)$item->unit_price, 2), 'LRB', 0, 'R', $fill);
             $pdf->Cell($w_items[2], $lineHeight, $item->quantity, 'LRB', 0, 'C', $fill);
 
-            $x = $pdf->GetX(); $y = $pdf->GetY(); // Store current position
+            $x = $pdf->GetX();
+            $y = $pdf->GetY(); // Store current position
             $pdf->MultiCell($w_items[3], $lineHeight, $productDescription, 'LRB', 'R', $fill, 1, $x, $y, true, 0, false, true, $lineHeight, 'M');
             // $pdf->Ln($lineHeight); // MultiCell with ln=1 already adds line break
 
@@ -529,7 +590,7 @@ class SaleController extends Controller
                 $paymentText = "طريقة الدفع: " . config('app_settings.payment_methods.' . $payment->method, $payment->method); // Assuming payment_methods in config
                 $paymentText .= "  |  المبلغ: " . number_format((float)$payment->amount, 2);
                 $paymentText .= "  |  التاريخ: " . Carbon::parse($payment->payment_date)->format('Y-m-d');
-                if($payment->reference_number) $paymentText .= "  |  مرجع: " . $payment->reference_number;
+                if ($payment->reference_number) $paymentText .= "  |  مرجع: " . $payment->reference_number;
                 $pdf->MultiCell(0, 5, $paymentText, 0, 'R', 0, 1);
             }
         }
@@ -552,9 +613,9 @@ class SaleController extends Controller
         $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
 
         return response($pdfContent, 200)
-                     ->header('Content-Type', 'application/pdf')
-                     ->header('Content-Disposition', "inline; filename=\"{$pdfFileName}\""); // inline to display in browser
-                    //  ->header('Content-Disposition', "attachment; filename=\"{$pdfFileName}\""); // to force download
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', "inline; filename=\"{$pdfFileName}\""); // inline to display in browser
+        //  ->header('Content-Disposition', "attachment; filename=\"{$pdfFileName}\""); // to force download
     }
     public function downloadThermalInvoicePDF(Request $request, Sale $sale)
     {
@@ -597,13 +658,13 @@ class SaleController extends Controller
 
         // --- Invoice Info ---
         $pdf->SetFont('dejavusans', '', 7);
-        $pdf->Cell(0, 4, 'فاتورة رقم: ' . ($sale->invoice_number ?: 'S-'.$sale->id), 0, 1, 'R');
+        $pdf->Cell(0, 4, 'فاتورة رقم: ' . ($sale->invoice_number ?: 'S-' . $sale->id), 0, 1, 'R');
         $pdf->Cell(0, 4, 'التاريخ: ' . Carbon::parse($sale->sale_date)->format('Y/m/d') . ' ' . Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
         if ($sale->client) {
             $pdf->Cell(0, 4, 'العميل: ' . $sale->client->name, 0, 1, 'R');
         }
         if ($sale->user) {
-             $pdf->Cell(0, 4, 'البائع: ' . $sale->user->name, 0, 1, 'R');
+            $pdf->Cell(0, 4, 'البائع: ' . $sale->user->name, 0, 1, 'R');
         }
         $pdf->Ln(1);
         $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
@@ -673,7 +734,7 @@ class SaleController extends Controller
             $pdf->SetFont('dejavusans', 'B', 7);
             $pdf->Cell(0, 4, 'طرق الدفع:', 0, 1, 'R');
             $pdf->SetFont('dejavusans', '', 7);
-            foreach($sale->payments as $payment) {
+            foreach ($sale->payments as $payment) {
                 $pdf->Cell(46, 4, config('app_settings.payment_methods_ar.' . $payment->method, $payment->method) . ':', 0, 0, 'R'); // Translate method
                 $pdf->Cell(26, 4, number_format((float)$payment->amount, 2), 0, 1, 'R');
             }
@@ -705,9 +766,9 @@ class SaleController extends Controller
         $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
 
         return response($pdfContent, 200)
-                     ->header('Content-Type', 'application/pdf')
-                     // No 'Content-Disposition: attachment' - frontend will handle display
-                     ;
+            ->header('Content-Type', 'application/pdf')
+            // No 'Content-Disposition: attachment' - frontend will handle display
+        ;
     }
 }
 

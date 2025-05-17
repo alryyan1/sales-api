@@ -69,6 +69,9 @@ class RolesAndPermissionsSeeder extends Seeder
         // Settings
         Permission::firstOrCreate(['name' => 'view-settings', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'update-settings', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'view-returns', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'create-sale-returns', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'manage-settings', 'guard_name' => 'web']);
 
         $this->command->info('Permissions created.');
 

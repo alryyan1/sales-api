@@ -9,6 +9,7 @@ use App\Models\Sale;
 use App\Models\Purchase;
 use App\Models\Product;
 use App\Models\Client;
+use App\Models\Payment;
 use App\Models\Supplier;
 use Carbon\Carbon; // For date manipulation
 
@@ -100,6 +101,53 @@ class DashboardController extends Controller
         ];
 
         return response()->json(['data' => $summaryData]);
+    }
+
+    /**
+     * Provide a lightweight summary for the sales terminal (e.g., today's sales for current user).
+     */
+    public function salesTerminalSummary(Request $request)
+    {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        $today = Carbon::today();
+
+        // Sales for the current authenticated user for today
+        $salesQuery = Sale::where('user_id', $user->id)
+            ->whereDate('sale_date', $today) // Sales CREATED today
+            ->whereIn('status', ['completed', 'pending']);
+
+        $salesTodayAmount = $salesQuery->clone()->sum('total_amount');
+        $salesTodayCount = $salesQuery->clone()->count();
+
+        // --- New: Payments by Method for Today ---
+        // Fetches payments RECORDED today, associated with sales made by the current user
+        // (This assumes payment_date reflects when the payment was taken)
+        $paymentsTodayByMethod = Payment::where('user_id', $user->id) // Payment recorded by this user
+            ->whereDate('payment_date', $today) // Payment made today
+            // Optionally, further filter by sales that are also from today,
+            // or sales made by this user if sales can have payments recorded by different users
+            // For simplicity, let's assume payments are tied to the user who recorded them
+            // and we are interested in payments taken today by this user.
+            ->select('method', DB::raw('SUM(amount) as total_amount_by_method'))
+            ->groupBy('method')
+            ->orderBy('method') // Consistent ordering
+            ->get()
+            ->mapWithKeys(function ($paymentGroup) {
+                return [$paymentGroup->method => (float) $paymentGroup->total_amount_by_method];
+            }); // Converts to an associative array: ['cash' => 150.00, 'visa' => 200.50]
+
+
+        return response()->json([
+            'data' => [
+                'total_sales_amount_today' => (float) $salesTodayAmount,
+                'sales_count_today' => (int) $salesTodayCount,
+                'payments_today_by_method' => $paymentsTodayByMethod, // <-- Add new data
+            ]
+        ]);
     }
 
     // --- Potential Future Methods ---

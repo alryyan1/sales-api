@@ -28,7 +28,7 @@ class SaleItemResource extends JsonResource
             'product_sku' => $this->whenLoaded('product', function () {
                 return $this->product?->sku;
             }),
-             // Add your dynamic properties here
+            // Add your dynamic properties here
             'max_returnable_quantity' => $this->when(isset($this->max_returnable_quantity), function () {
                 return $this->max_returnable_quantity;
             }),
@@ -58,6 +58,11 @@ class SaleItemResource extends JsonResource
 
             'created_at' => $this->created_at?->toISOString(), // Optional: if needed by frontend
             'updated_at' => $this->updated_at?->toISOString(), // Optional: if needed by frontend
+            'purchase_item_id' => $this->purchase_item_id,
+            'batch_number_sold' => $this->batch_number_sold,
+            'quantity' => $this->quantity, // In sellable units
+            'unit_price' => $this->unit_price, // Sale price per sellable unit
+            'cost_price_at_sale' => $this->cost_price_at_sale, // Cost per sellable unit at sale time
         ];
     }
 }

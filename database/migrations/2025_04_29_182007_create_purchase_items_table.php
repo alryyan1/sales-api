@@ -29,6 +29,9 @@ return new class extends Migration
             // Total cost for this line item (quantity * unit_cost). Set precision/scale.
             $table->decimal('total_cost', 12, 2);
 
+            $table->decimal('cost_per_sellable_unit', 10, 2)->default(0.00);
+
+
             $table->timestamps(); // Optional for line items, but can be useful
 
             // Optional: Prevent adding the same product twice to the same purchase order

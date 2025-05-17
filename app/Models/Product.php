@@ -63,8 +63,12 @@ class Product extends Model
         'sku',
         'description',
         'stock_quantity',
+        
         'stock_alert_level',
         'category_id', // Add if using categories
+        'sellable_unit_name', // Add if using units
+        'units_per_stocking_unit', // Add if using units
+        'stocking_unit_name', // Add if using units
         // 'unit',        // Add if using units
     ];
 
@@ -77,6 +81,7 @@ class Product extends Model
     protected $casts = [
         'stock_quantity' => 'integer',   // Cast to integer
         'stock_alert_level' => 'integer', // Cast to integer
+        'units_per_stocking_unit' => 'integer', // Cast to integer
     ];
 
     /**
@@ -114,7 +119,7 @@ class Product extends Model
     }
 
     // Example: Suggest a sale price based on latest cost + markup
-   
+
     public function getSuggestedSalePriceAttribute(?float $markupPercentage = null): ?float
     {
         // Use a default markup if none is provided or if null is passed
@@ -142,7 +147,7 @@ class Product extends Model
     {
         return $this->hasMany(PurchaseItem::class)->where('remaining_quantity', '>', 0)->orderBy('expiry_date', 'asc');
     }
-    
+
     /**
      * If NOT using an Observer, this accessor calculates total stock on demand.
      * This is less efficient for querying/filtering than having a dedicated updated column.
@@ -175,8 +180,32 @@ class Product extends Model
     public function scopeLowStock($query)
     {
         return $query->whereNotNull('stock_alert_level')
-                     ->whereColumn('stock_quantity', '<=', 'stock_alert_level');
+            ->whereColumn('stock_quantity', '<=', 'stock_alert_level');
         // If stock_quantity is an aggregate, this whereColumn will work if it's updated.
         // Otherwise, you'd need a more complex whereHas with sum.
     }
+    // Accessor to get the latest cost PER SELLABLE UNIT
+    public function getLatestCostPerSellableUnitAttribute(): ?float
+    {
+        $latestBatch = $this->purchaseItems()
+                           ->orderBy('created_at', 'desc')
+                           ->first();
+        if ($latestBatch && $this->units_per_stocking_unit > 0) {
+            // Assuming latestBatch->unit_cost is the cost of the 'stocking_unit_name'
+            return round((float) $latestBatch->unit_cost / $this->units_per_stocking_unit, 2);
+        }
+        return null;
+    }
+    // Accessor for a suggested sale price PER SELLABLE UNIT
+    public function getSuggestedSalePricePerSellableUnitAttribute(?float $markupPercentage = null): ?float
+    {
+        $markupToUse = $markupPercentage ?? config('app_settings.default_markup_percentage', 25.0); // Example: get from config
+        $latestCostPerSellable = $this->latest_cost_per_sellable_unit;
+
+        if ($latestCostPerSellable !== null) {
+            return round((float) $latestCostPerSellable * (1 + ($markupToUse / 100)), 2);
+        }
+        return null;
+    }
+  
 }

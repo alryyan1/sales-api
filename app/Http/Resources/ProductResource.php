@@ -20,23 +20,18 @@ class ProductResource extends JsonResource
             'name' => $this->name,
             'sku' => $this->sku,
             'description' => $this->description,
-            // Prices are removed
-            'stock_quantity' => $this->stock_quantity,
-            'stock_alert_level' => $this->stock_alert_level,
-            // 'unit' => $this->unit,
-            'created_at' => $this->created_at?->toISOString(),
-            'updated_at' => $this->updated_at?->toISOString(),
-
-            // Optional: Expose calculated/latest costs/prices via accessors
-            'latest_purchase_cost' => $this->latest_purchase_cost,
-            'suggested_sale_price' =>  $this->suggested_sale_price,
-            // Conditionally include batches if loaded
-        // Use a different key like 'available_batches' to avoid confusion if 'purchaseItems' is used elsewhere
-        'available_batches' => PurchaseItemResource::collection($this->whenLoaded('purchaseItems')),
-        'category_id'=> $this->category_id,
-        'category' => new CategoryResource($this->whenLoaded('category')),
-        'category_name' => $this->whenLoaded('category',fn()=> $this->category->name),
-        'total_stock' => $this->getCalculatedTotalStockAttribute(),
+            'category_id' => $this->category_id,
+            'category_name' => $this->whenLoaded('category', fn() => $this->category?->name),
+            'stocking_unit_name' => $this->stocking_unit_name,
+            'sellable_unit_name' => $this->sellable_unit_name,
+            'units_per_stocking_unit' => (int) $this->units_per_stocking_unit,
+            'stock_quantity' => (int) $this->stock_quantity, // Total in sellable units
+            'stock_alert_level' => $this->stock_alert_level, // In sellable units
+            'created_at' => $this->created_at->toISOString(),
+            'updated_at' => $this->updated_at->toISOString(),
+            'latest_cost_per_sellable_unit' => $this->whenAppended('latest_cost_per_sellable_unit', $this->latest_cost_per_sellable_unit),
+            'suggested_sale_price_per_sellable_unit' => $this->whenAppended('suggested_sale_price_per_sellable_unit', $this->suggested_sale_price_per_sellable_unit),
+            'available_batches' => PurchaseItemResource::collection($this->whenLoaded('purchaseItemsWithStock')),
         ];
     }
 }

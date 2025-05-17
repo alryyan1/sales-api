@@ -25,7 +25,9 @@ return new class extends Migration
             // Use integer for quantities. Default to 0.
             $table->integer('stock_quantity')->default(0);
             $table->integer('stock_alert_level')->default(10)->nullable(); // Threshold for low stock alerts
-
+            $table->string('stocking_unit_name')->default('Unit'); // e.g., Box, Pack
+            $table->string('sellable_unit_name')->default('Piece'); // e.g., Piece, Item
+            $table->integer('units_per_stocking_unit')->default(1);
             // Optional: Foreign key for categories if you plan to add them later
             // $table->foreignId('category_id')->nullable()->constrained('categories')->onDelete('set null');
 

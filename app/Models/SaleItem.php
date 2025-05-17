@@ -45,17 +45,19 @@ class SaleItem extends Model
     protected $fillable = [
         'sale_id',
         'product_id',
-        'quantity',
-        'purchase_item_id', // New
-        'batch_number_sold', // New (optional, can get from purchase_item relation)
-        'unit_price',
-        'total_price', // Usually calculated, but make fillable
+        'purchase_item_id',
+        'batch_number_sold',
+        'quantity',           // Quantity in sellable_unit_name (e.g., pieces)
+        'unit_price',         // Sale price PER sellable_unit_name
+        'cost_price_at_sale', // Cost PER sellable_unit_name from batch
+        'total_price',
     ];
 
     protected $casts = [
         'quantity' => 'integer',
         'unit_price' => 'decimal:2',
         'total_price' => 'decimal:2',
+        'cost_price_at_sale' => 'decimal:2', // Optional, can be set at point of sale
     ];
 
     /**
@@ -73,9 +75,9 @@ class SaleItem extends Model
     {
         return $this->belongsTo(Product::class);
     }
-      // New relationship to the specific purchase item (batch)
-      public function purchaseItemBatch(): BelongsTo
-      {
-          return $this->belongsTo(PurchaseItem::class, 'purchase_item_id');
-      }
+    // New relationship to the specific purchase item (batch)
+    public function purchaseItemBatch(): BelongsTo
+    {
+        return $this->belongsTo(PurchaseItem::class, 'purchase_item_id');
+    }
 }

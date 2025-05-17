@@ -104,6 +104,7 @@ class ReportController extends Controller
         $request->merge([
             'low_stock_only' => filter_var($request->input('low_stock_only'), FILTER_VALIDATE_BOOLEAN),
             'out_of_stock_only' => filter_var($request->input('out_of_stock_only'), FILTER_VALIDATE_BOOLEAN),
+            'include_batches' => filter_var($request->input('include_batches'), FILTER_VALIDATE_BOOLEAN),
         ]);
         // --- Input Validation ---
         $validated = $request->validate([
@@ -164,7 +165,9 @@ class ReportController extends Controller
 
         // --- Pagination ---
         $perPage = $validated['per_page'] ?? 25;
-        $products = $query->with('purchaseItems')->paginate($perPage);
+        $products = $query->with('purchaseItemsWithStock')->paginate($perPage);
+        $products->getCollection()->each->append(['suggested_sale_price_per_sellable_unit', 'latest_cost_per_sellable_unit']);
+
 
         // --- Return Paginated Resource Collection ---
         // We can reuse ProductResource. It should include stock_quantity and stock_alert_level.
@@ -235,7 +238,7 @@ class ReportController extends Controller
 
         // Calculate COGS: Sum of (quantity sold * cost price from the specific batch)
         // Use purchase_items.unit_cost as the cost price for the batch
-        $totalCOGS = $cogsQuery->sum(DB::raw('sale_items.quantity * purchase_items.unit_cost'));
+        $totalCOGS = $cogsQuery->sum('sale_items.cost_price_at_sale'); // <-- SIMPLIFIED COGS
 
         // --- Calculate Gross Profit ---
         $grossProfit = $totalRevenue - $totalCOGS;

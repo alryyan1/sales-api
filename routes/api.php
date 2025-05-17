@@ -91,12 +91,16 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::apiResource('purchases', PurchaseController::class);
 
   // -- Sales Management --
-  Route::apiResource('sales', SaleController::class)->except(['update']);
+  Route::apiResource('sales', SaleController::class);
   Route::post('/sales/{sale}/payments', [SaleController::class, 'addPayment'])->name('api.sales.addPayment');
     Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf'); // <-- New Route
+        // ... existing Sale routes ...
+    Route::get('/sales-print/last-completed-id', [SaleController::class, 'getLastCompletedSaleId'])->name('api.sales.lastCompletedId'); // <-- New Route
+
 
   //reports/sales/pdf
   // -- Dashboard Data --
   Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
+    Route::get('/dashboard/sales-terminal-summary', [DashboardController::class, 'salesTerminalSummary'])->name('api.dashboard.salesTerminalSummary'); //
   Route::get('/reports/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('api.reports.inventory-log');
 });

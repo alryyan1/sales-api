@@ -25,11 +25,11 @@ class PurchaseController extends Controller
         $query = Purchase::with(['supplier:id,name', 'user:id,name']);
 
         if ($search = $request->input('search')) {
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('reference_number', 'like', "%{$search}%")
-                  ->orWhereHas('supplier', function ($supplierQuery) use ($search) {
-                      $supplierQuery->where('name', 'like', "%{$search}%");
-                  });
+                    ->orWhereHas('supplier', function ($supplierQuery) use ($search) {
+                        $supplierQuery->where('name', 'like', "%{$search}%");
+                    });
             });
         }
         if ($status = $request->input('status')) {
@@ -37,8 +37,12 @@ class PurchaseController extends Controller
                 $query->where('status', $status);
             }
         }
-        if ($startDate = $request->input('start_date')) { $query->whereDate('purchase_date', '>=', $startDate); }
-        if ($endDate = $request->input('end_date')) { $query->whereDate('purchase_date', '<=', $endDate); }
+        if ($startDate = $request->input('start_date')) {
+            $query->whereDate('purchase_date', '>=', $startDate);
+        }
+        if ($endDate = $request->input('end_date')) {
+            $query->whereDate('purchase_date', '<=', $endDate);
+        }
 
         $purchases = $query->latest('purchase_date')->latest('id')->paginate($request->input('per_page', 15));
         return PurchaseResource::collection($purchases);
@@ -59,9 +63,9 @@ class PurchaseController extends Controller
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.batch_number' => 'nullable|string|max:100', // Max length for batch number
-            'items.*.quantity' => 'required|integer|min:1',
-            'items.*.unit_cost' => 'required|numeric|min:0|max:99999999.99', // This is the cost price
-            'items.*.sale_price' => 'nullable|numeric|min:0|max:99999999.99', // Intended sale price for this batch
+            'items.*.quantity' => 'required|integer|min:1', // Quantity of stocking units (e.g., boxes)
+            'items.*.unit_cost' => 'required|numeric|min:0',   // Cost per stocking unit
+            'items.*.sale_price' => 'nullable|numeric|min:0', // Intended sale price PER SELLABLE UNIT
             'items.*.expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date', // Expiry date after purchase date
         ]);
 
@@ -83,29 +87,31 @@ class PurchaseController extends Controller
 
                 // 2. Loop through items, create PurchaseItem, and set remaining_quantity
                 foreach ($validatedData['items'] as $itemData) {
-                    $product = Product::find($itemData['product_id']); // No need to lock for purchase (adding stock)
-                    if (!$product) {
-                        throw new \Exception("Product with ID {$itemData['product_id']} not found during transaction.");
-                    }
+                    $product = Product::findOrFail($itemData['product_id']); // Load the product
+                    $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
 
-                    $quantity = $itemData['quantity'];
-                    $unitCost = $itemData['unit_cost'];
-                    $totalCost = $quantity * $unitCost;
-                    $calculatedTotalAmount += $totalCost;
+                    $quantityInStockingUnits = $itemData['quantity'];
+                    $unitCostPerStockingUnit = $itemData['unit_cost'];
+                    $totalCostForStockingUnits = $quantityInStockingUnits * $unitCostPerStockingUnit;
 
-                    // Create PurchaseItem
-                    // The PurchaseItemObserver will handle updating Product->stock_quantity
+                    // Calculate values in sellable units
+                    $totalSellableUnitsPurchased = $quantityInStockingUnits * $unitsPerStockingUnit;
+                    $costPerSellableUnit = ($unitsPerStockingUnit > 0) ? ($unitCostPerStockingUnit / $unitsPerStockingUnit) : 0;
+
+                    $calculatedTotalAmount += $totalCostForStockingUnits; // Overall purchase total
+
                     $purchase->items()->create([
                         'product_id' => $product->id,
-                        'batch_number' => $itemData['batch_number'] ?? null, // Generate if needed, or from input
-                        'quantity' => $quantity,                 // Original purchased quantity
-                        'remaining_quantity' => $quantity,      // Initially, remaining is the full quantity
-                        'unit_cost' => $unitCost,
-                        'total_cost' => $totalCost,
-                        'sale_price' => $itemData['sale_price'] ?? null,
+                        'batch_number' => $itemData['batch_number'] ?? null,
+                        'quantity' => $quantityInStockingUnits,          // Store original purchased qty in stocking units
+                        'remaining_quantity' => $totalSellableUnitsPurchased, // Store remaining in SELLABLE units
+                        'unit_cost' => $unitCostPerStockingUnit,        // Store cost per STOCKING unit
+                        'cost_per_sellable_unit' => $costPerSellableUnit, // Store cost per SELLABLE unit
+                        'total_cost' => $totalCostForStockingUnits,     // Total cost for this line
+                        'sale_price' => $itemData['sale_price'] ?? null, // Intended sale price PER SELLABLE UNIT
                         'expiry_date' => $itemData['expiry_date'] ?? null,
                     ]);
-                     Log::info("PurchaseItem created for Product ID: {$product->id}, Batch: {$itemData['batch_number']}, Quantity: {$quantity}. Purchase ID: {$purchase->id}");
+                    // Product.stock_quantity (total sellable units) is updated by PurchaseItemObserver
                 }
 
                 // 3. Update the total amount on the Purchase header
@@ -119,7 +125,6 @@ class PurchaseController extends Controller
             $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
 
             return response()->json(['purchase' => new PurchaseResource($purchase)], Response::HTTP_CREATED);
-
         } catch (ValidationException $e) {
             Log::warning("Purchase creation validation failed: " . json_encode($e->errors()));
             return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -139,7 +144,7 @@ class PurchaseController extends Controller
             'supplier:id,name,email,phone',
             'user:id,name',
             'items',
-            'items.product:id,name,sku' // Basic product info for each item
+            'items.product' // Basic product info for each item
         ]);
         return response()->json(['purchase' => new PurchaseResource($purchase)]);
     }
@@ -155,8 +160,8 @@ class PurchaseController extends Controller
         // Only allow updating certain fields for a purchase, e.g., notes, status (if it doesn't trigger stock changes)
         // Modifying items, supplier, or date after creation can be problematic.
         $validatedData = $request->validate([
-            'reference_number' => ['sometimes','nullable', 'string', 'max:255', Rule::unique('purchases')->ignore($purchase->id)],
-            'status' => ['sometimes','required', Rule::in(['received', 'pending', 'ordered'])],
+            'reference_number' => ['sometimes', 'nullable', 'string', 'max:255', Rule::unique('purchases')->ignore($purchase->id)],
+            'status' => ['sometimes', 'required', Rule::in(['received', 'pending', 'ordered'])],
             'notes' => 'sometimes|nullable|string|max:65535',
             // DO NOT allow updating 'items' array here without extremely complex logic
             // for stock reversal and re-application.
