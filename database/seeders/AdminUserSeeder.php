@@ -17,9 +17,9 @@ class AdminUserSeeder extends Seeder
     public function run(): void
     {
         // Define admin credentials (use environment variables for sensitive data in production)
-        $adminEmail = env('ADMIN_EMAIL', 'admin@example.com'); // Default email
-        $adminPassword = env('ADMIN_PASSWORD', 'password');    // Default password - CHANGE THIS!
-        $adminName = env('ADMIN_NAME', 'Administrator');       // Default name
+        $adminEmail = config('admin.admin_email');
+        $adminPassword = config('admin.admin_password');
+        $adminName = config('admin.admin_name');
 
         // Check if the admin user already exists
         if (User::where('email', $adminEmail)->doesntExist()) {
@@ -34,9 +34,8 @@ class AdminUserSeeder extends Seeder
             ]);
 
             // Optional: Log or output a message
-             $this->command->info("Admin user created: {$adminEmail}");
-             Log::info("Admin user created via seeder: {$adminEmail}");
-
+            $this->command->info("Admin user created: {$adminEmail}");
+            Log::info("Admin user created via seeder: {$adminEmail}");
         } else {
             // Optional: Log or output a message if admin already exists
             $this->command->warn("Admin user ({$adminEmail}) already exists. Seeder skipped creation.");
