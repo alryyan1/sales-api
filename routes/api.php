@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\{
   StockAdjustmentController,
   StockRequisitionController,
   SupplierController,
+  UnitController,
   UserController
 };
 
@@ -88,7 +89,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Products Management --
   Route::get('/product/by-ids', [ProductController::class, 'getByIds']);
+  Route::get('/products/export/pdf', [ProductController::class, 'exportPdf'])->name('api.products.exportPdf');
+  Route::get('/products/export/excel', [ProductController::class, 'exportExcel'])->name('api.products.exportExcel');
   Route::apiResource('products', ProductController::class);
+
+  // -- Units Management --
+  Route::get('/units/stocking', [UnitController::class, 'stocking'])->name('api.units.stocking');
+  Route::get('/units/sellable', [UnitController::class, 'sellable'])->name('api.units.sellable');
+  Route::apiResource('units', UnitController::class);
 
   // -- Purchases Management --
   Route::apiResource('purchases', PurchaseController::class);

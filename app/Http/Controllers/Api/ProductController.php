@@ -3,13 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\ProductResource; // Use the ProductResource
 use App\Models\Product; // Use the Product model
+use App\Models\PurchaseItem;
+use App\Services\ProductPdfService;
+use App\Services\ProductExcelService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use App\Http\Resources\ProductResource; // Use the ProductResource
-use App\Models\PurchaseItem;
-use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 
 class ProductController extends Controller
 {
@@ -21,20 +23,28 @@ class ProductController extends Controller
     {
         $query = Product::query();
 
+        // Load relationships needed for the ProductResource
+        $query->with(['category', 'stockingUnit', 'sellableUnit']);
         
         // Search by name, SKU, or description
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhere('sku', 'like', "%{$search}%")
+                    ->orWhere('scientific_name', 'like', "%{$search}%")
                     ->orWhere('description', 'like', "%{$search}%");
             });
         }
 
-        // Optional: Filter by category if implemented
-        // if ($categoryId = $request->input('category_id')) {
-        //     $query->where('category_id', $categoryId);
-        // }
+        // Filter by category
+        if ($categoryId = $request->input('category_id')) {
+            $query->where('category_id', $categoryId);
+        }
+
+        // Filter by stock availability
+        if ($request->boolean('in_stock_only')) {
+            $query->where('stock_quantity', '>', 0);
+        }
 
         // Sorting
         $sortBy = $request->input('sort_by', 'created_at'); // Default sort field
@@ -62,21 +72,21 @@ class ProductController extends Controller
     {
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
-
-            'sku' => 'nullable|string|max:100|unique:products,sku', // SKU unique in products table
+            'scientific_name' => 'nullable|string|max:255',
+            'sku' => 'nullable|string|max:100|unique:products,sku',
             'description' => 'nullable|string|max:65535',
-            // Prices are removed from product creation
-            'stock_quantity' => 'required|integer|min:0', // Initial stock (can be 0)
+            'stock_quantity' => 'required|integer|min:0',
             'stock_alert_level' => 'nullable|integer|min:0',
-            // 'unit' => 'nullable|string|max:50',
             'category_id' => 'nullable|exists:categories,id',
-            'sellable_unit_name' => 'nullable|string|max:50',
+            'stocking_unit_id' => 'nullable|exists:units,id',
+            'sellable_unit_id' => 'nullable|exists:units,id',
             'units_per_stocking_unit' => 'nullable|integer|min:1',
-            'stocking_unit_name' => 'nullable|string|max:50',
-
         ]);
 
         $product = Product::create($validatedData);
+
+        // Load relationships needed for the ProductResource
+        $product->load(['category', 'stockingUnit', 'sellableUnit']);
 
         // Return 201 Created with the new product resource
         return response()->json(['product' => new ProductResource($product)], Response::HTTP_CREATED);
@@ -87,8 +97,9 @@ class ProductController extends Controller
      */
     public function show(Product $product) // Route model binding
     {
-        // Optionally load relationships like category or available batches for display
-        // $product->load('category', 'purchaseItemsWithStock');
+        // Load relationships needed for the ProductResource
+        $product->load(['category', 'stockingUnit', 'sellableUnit']);
+        
         return response()->json(['product' => new ProductResource($product)]);
     }
 
@@ -101,18 +112,20 @@ class ProductController extends Controller
     {
         $validatedData = $request->validate([
             'name' => 'sometimes|required|string|max:255',
+            'scientific_name' => 'sometimes|nullable|string|max:255',
             'sku' => [
-                'sometimes', // Validate only if present
+                'sometimes',
                 'nullable',
                 'string',
                 'max:100',
-                Rule::unique('products')->ignore($product->id), // Ignore self for unique check
+                Rule::unique('products')->ignore($product->id),
             ],
             'description' => 'sometimes|nullable|string|max:65535',
-            // 'stock_quantity' => 'sometimes|required|integer|min:0', // BE VERY CAREFUL allowing direct stock edit
             'stock_alert_level' => 'sometimes|nullable|integer|min:0',
-            // 'unit' => 'sometimes|nullable|string|max:50',
             'category_id' => 'sometimes|nullable|exists:categories,id',
+            'stocking_unit_id' => 'sometimes|nullable|exists:units,id',
+            'sellable_unit_id' => 'sometimes|nullable|exists:units,id',
+            'units_per_stocking_unit' => 'sometimes|nullable|integer|min:1',
         ]);
 
         // Important Note on stock_quantity:
@@ -125,8 +138,11 @@ class ProductController extends Controller
 
         $product->update($validatedData);
 
+        // Load relationships needed for the ProductResource
+        $product->load(['category', 'stockingUnit', 'sellableUnit']);
+
         // Return the updated resource
-        return response()->json(['product' => new ProductResource($product->fresh())]);
+        return response()->json(['product' => new ProductResource($product)]);
     }
 
     /**
@@ -181,7 +197,8 @@ class ProductController extends Controller
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('sku', 'like', "%{$search}%");
+                    ->orWhere('sku', 'like', "%{$search}%")
+                    ->orWhere('scientific_name', 'like', "%{$search}%");
             });
         }
         // Optionally, always filter by stock > 0 for sale/purchase forms
@@ -226,6 +243,66 @@ class ProductController extends Controller
             ->select(['id', 'batch_number', 'remaining_quantity', 'expiry_date', 'sale_price', 'unit_cost']) // Select necessary fields
             ->get();
         return response()->json(['data' => $batches]);
+    }
+
+    /**
+     * Export products to PDF.
+     */
+    public function exportPdf(Request $request)
+    {
+        // Get filters from request
+        $filters = [
+            'search' => $request->input('search'),
+            'category_id' => $request->input('category_id'),
+            'in_stock_only' => $request->boolean('in_stock_only'),
+        ];
+
+        $pdfService = new ProductPdfService();
+        $pdfContent = $pdfService->generateProductsPdf($filters);
+
+        // For web routes, we want to display in browser, not download
+        $isWebRoute = $request->route()->getName() === 'products.exportPdf';
+        
+        if ($isWebRoute) {
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="products_report.pdf"');
+        } else {
+            // For API routes, download the file
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'attachment; filename="products_report.pdf"');
+        }
+    }
+
+    /**
+     * Export products to Excel.
+     */
+    public function exportExcel(Request $request)
+    {
+        // Get filters from request
+        $filters = [
+            'search' => $request->input('search'),
+            'category_id' => $request->input('category_id'),
+            'in_stock_only' => $request->boolean('in_stock_only'),
+        ];
+
+        $excelService = new ProductExcelService();
+        $excelContent = $excelService->generateProductsExcel($filters);
+
+        // For web routes, we want to display in browser, not download
+        $isWebRoute = $request->route()->getName() === 'products.exportExcel';
+        
+        if ($isWebRoute) {
+            return response($excelContent)
+                ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                ->header('Content-Disposition', 'inline; filename="products_report.xlsx"');
+        } else {
+            // For API routes, download the file
+            return response($excelContent)
+                ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                ->header('Content-Disposition', 'attachment; filename="products_report.xlsx"');
+        }
     }
 }
 

@@ -10,8 +10,9 @@
         "laravel/framework": "^10.10",
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
+        "phpoffice/phpspreadsheet": "^4.5",
         "spatie/laravel-permission": "^6.17",
-        "tecnickcom/tcpdf": "^6.9"
+        "tecnickcom/tcpdf": "^6.10"
     },
     "require-dev": {
         "barryvdh/laravel-ide-helper": "^3.1",

@@ -60,16 +60,15 @@ class Product extends Model
      */
     protected $fillable = [
         'name',
+        'scientific_name',
         'sku',
         'description',
         'stock_quantity',
-        
         'stock_alert_level',
-        'category_id', // Add if using categories
-        'sellable_unit_name', // Add if using units
-        'units_per_stocking_unit', // Add if using units
-        'stocking_unit_name', // Add if using units
-        // 'unit',        // Add if using units
+        'category_id',
+        'stocking_unit_id',
+        'sellable_unit_id',
+        'units_per_stocking_unit',
     ];
 
     /**
@@ -107,6 +106,18 @@ class Product extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    // Relationship to Stocking Unit
+    public function stockingUnit(): BelongsTo
+    {
+        return $this->belongsTo(Unit::class, 'stocking_unit_id');
+    }
+
+    // Relationship to Sellable Unit
+    public function sellableUnit(): BelongsTo
+    {
+        return $this->belongsTo(Unit::class, 'sellable_unit_id');
     }
 
     // Example: Get the latest purchase cost for this product
