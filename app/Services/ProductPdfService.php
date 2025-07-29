@@ -79,14 +79,14 @@ class ProductPdfService
         <style>
             body { font-family: arial; direction: rtl; text-align: right; }
             table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            th, td { border: 1px solid #ddd; padding: 6px; text-align: center; font-size: 8px; }
-            th { background-color: #f2f2f2; font-weight: bold; }
+            th, td { border: 1px solid #ddd; padding: 6px; text-align: center; font-size: 8px; font-family: arial; }
+            th { background-color: #f2f2f2; font-weight: bold; font-family: arial; }
             .summary { margin-bottom: 20px; }
-            .summary-item { margin: 5px 0; }
+            .summary-item { margin: 5px 0; font-family: arial; }
             .low-stock { background-color: #fff3cd; }
             .out-of-stock { background-color: #f8d7da; }
             .in-stock { background-color: #d1edff; }
-            h2 { text-align: center; margin-bottom: 15px; }
+            h2 { text-align: center; margin-bottom: 15px; font-family: arial; }
         </style>';
 
         // Summary section

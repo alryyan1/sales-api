@@ -31,8 +31,8 @@ class MigrateOldSuppliers extends Command
     {
         $this->info('Starting supplier data migration...');
 
-        // Use a progress bar for better user feedback
-        $totalOldSuppliers = DB::connection('wigdan')->table('suppliers')->count();
+        // Use raw SQL to access the one_care database
+        $totalOldSuppliers = DB::select('SELECT COUNT(*) as count FROM one_care.suppliers')[0]->count;
         if ($totalOldSuppliers === 0) {
             $this->warn('No suppliers found in the old database. Nothing to migrate.');
             return 0; // Command::SUCCESS equivalent for older Laravel versions
@@ -45,8 +45,12 @@ class MigrateOldSuppliers extends Command
         $skippedCount = 0;
 
         // Process in chunks to avoid memory issues with large datasets
-        DB::connection('wigdan')->table('suppliers')->orderBy('id')->chunkById($this->option('chunk'), function ($oldSuppliers) use ($bar, &$migratedCount, &$skippedCount) {
-
+        $offset = 0;
+        $chunkSize = $this->option('chunk');
+        
+        while ($offset < $totalOldSuppliers) {
+            $oldSuppliers = DB::select("SELECT * FROM one_care.suppliers ORDER BY id LIMIT {$chunkSize} OFFSET {$offset}");
+            
             foreach ($oldSuppliers as $oldSupplier) {
                 try {
                     // Check if a supplier with the same name or email already exists in the new system
@@ -74,7 +78,7 @@ class MigrateOldSuppliers extends Command
                         'name' => $oldSupplier->name,
                         'phone' => $oldSupplier->phone,
                         'address' => $oldSupplier->address,
-                        'email' => null,
+                        'email' => !empty($oldSupplier->email) ? $oldSupplier->email : null, // Handle empty email
                         'contact_person' => null, // Your new table has this, but old one doesn't. Set to null.
                         // Preserve original timestamps
                         'created_at' => Carbon::parse($oldSupplier->created_at),
@@ -90,7 +94,8 @@ class MigrateOldSuppliers extends Command
 
                 $bar->advance();
             }
-        });
+            $offset += $chunkSize; // Increment offset for the next chunk
+        }
 
         $bar->finish();
 

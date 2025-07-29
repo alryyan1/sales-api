@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Unit;
 use Illuminate\Support\Str;
 
+
 class MigrateOldItemsToProductsTable extends Migration
 {
     /**

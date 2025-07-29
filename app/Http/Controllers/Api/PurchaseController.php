@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use App\Services\PurchasePdfService;
 
 
 class PurchaseController extends Controller
@@ -24,6 +25,34 @@ class PurchaseController extends Controller
     {
         $query = Purchase::with(['supplier:id,name', 'user:id,name']);
 
+        // Filter by supplier
+        if ($supplierId = $request->input('supplier_id')) {
+            $query->where('supplier_id', $supplierId);
+        }
+
+        // Filter by reference number
+        if ($referenceNumber = $request->input('reference_number')) {
+            $query->where('reference_number', 'like', "%{$referenceNumber}%");
+        }
+
+        // Filter by status
+        if ($status = $request->input('status')) {
+            if (in_array($status, ['received', 'pending', 'ordered'])) {
+                $query->where('status', $status);
+            }
+        }
+
+        // Filter by purchase date (exact date)
+        if ($purchaseDate = $request->input('purchase_date')) {
+            $query->whereDate('purchase_date', $purchaseDate);
+        }
+
+        // Filter by created_at date (exact date)
+        if ($createdAt = $request->input('created_at')) {
+            $query->whereDate('created_at', $createdAt);
+        }
+
+        // Legacy search filter (keep for backward compatibility)
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('reference_number', 'like', "%{$search}%")
@@ -31,17 +60,6 @@ class PurchaseController extends Controller
                         $supplierQuery->where('name', 'like', "%{$search}%");
                     });
             });
-        }
-        if ($status = $request->input('status')) {
-            if (in_array($status, ['received', 'pending', 'ordered'])) {
-                $query->where('status', $status);
-            }
-        }
-        if ($startDate = $request->input('start_date')) {
-            $query->whereDate('purchase_date', '>=', $startDate);
-        }
-        if ($endDate = $request->input('end_date')) {
-            $query->whereDate('purchase_date', '<=', $endDate);
         }
 
         $purchases = $query->latest('purchase_date')->latest('id')->paginate($request->input('per_page', 15));
@@ -213,6 +231,29 @@ class PurchaseController extends Controller
             return response()->json(['message' => 'Failed to delete purchase. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
         */
+    }
+
+    /**
+     * Export purchase details to PDF.
+     */
+    public function exportPdf(Purchase $purchase)
+    {
+        $pdfService = new PurchasePdfService();
+        $pdfContent = $pdfService->generatePurchasePdf($purchase);
+
+        // For web routes, we want to display in browser, not download
+        $isWebRoute = request()->route()->getName() === 'purchases.exportPdf';
+        
+        if ($isWebRoute) {
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="purchase_' . $purchase->id . '.pdf"');
+        } else {
+            // For API routes, download the file
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'attachment; filename="purchase_' . $purchase->id . '.pdf"');
+        }
     }
 }
 

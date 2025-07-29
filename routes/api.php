@@ -100,6 +100,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Purchases Management --
   Route::apiResource('purchases', PurchaseController::class);
+  Route::get('/purchases/{purchase}/export/pdf', [PurchaseController::class, 'exportPdf'])->name('purchases.exportPdf');
 
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class);

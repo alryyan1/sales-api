@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\PurchaseController;
 use Illuminate\Support\Facades\Route;
 use App\Services\WhatsAppService;
 
@@ -21,15 +22,21 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-Route::get('reports/sales/pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('api.sales.pdf');
-Route::get('/sales/{sale}/invoice-pdf', [SaleController::class, 'downloadInvoicePDF'])->name('api.sales.invoice.pdf');
-Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf');
+// Web routes without authentication - using guest.access middleware to allow both authenticated and unauthenticated users
+Route::middleware('guest.access')->group(function () {
+    Route::get('reports/sales/pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('api.sales.pdf');
+    Route::get('/sales/{sale}/invoice-pdf', [SaleController::class, 'downloadInvoicePDF'])->name('api.sales.invoice.pdf');
+    Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf');
 
-// Products PDF Export Route
-Route::get('/products/export/pdf', [ProductController::class, 'exportPdf'])->name('products.exportPdf');
+    // Products PDF Export Route
+    Route::get('/products/export/pdf', [ProductController::class, 'exportPdf'])->name('products.exportPdf');
 
-// Products Excel Export Route
-Route::get('/products/export/excel', [ProductController::class, 'exportExcel'])->name('products.exportExcel');
+    // Products Excel Export Route
+    Route::get('/products/export/excel', [ProductController::class, 'exportExcel'])->name('products.exportExcel');
+
+    // Purchase PDF Export Route
+    Route::get('/purchases/{purchase}/export/pdf', [PurchaseController::class, 'exportPdf'])->name('purchases.exportPdf');
+});
 
 Route::get('/test-whatsapp', function () {
     $whatsAppService = new WhatsAppService();
