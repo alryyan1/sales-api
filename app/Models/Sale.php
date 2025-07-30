@@ -59,12 +59,18 @@ class Sale extends Model
         'paid_amount',
         'status',
         'notes',
+        'subtotal',
+        'discount_amount',
+        'discount_type',
+        'sale_order_number',
     ];
 
     protected $casts = [
         'sale_date' => 'date',
         'total_amount' => 'decimal:2',
         'paid_amount' => 'decimal:2',
+        'subtotal' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
     ];
 
     /**
@@ -92,6 +98,24 @@ class Sale extends Model
     }
     
     public function payments(): HasMany { return $this->hasMany(Payment::class); }
+
+    /**
+     * Boot method to auto-generate sale_order_number
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::creating(function ($sale) {
+            if (empty($sale->sale_order_number)) {
+                // Get the next order number for today's date
+                $today = $sale->sale_date ?? now()->toDateString();
+                $maxOrderNumber = static::whereDate('sale_date', $today)
+                    ->max('sale_order_number') ?? 0;
+                $sale->sale_order_number = $maxOrderNumber + 1;
+            }
+        });
+    }
 
     // Accessor to always get the up-to-date paid amount
     public function getCalculatedPaidAmountAttribute(): float

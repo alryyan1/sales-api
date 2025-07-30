@@ -33,9 +33,14 @@ class ProductResource extends JsonResource
             'created_at' => $this->created_at->toISOString(),
             'updated_at' => $this->updated_at->toISOString(),
             
-            'latest_cost_per_sellable_unit' => $this->whenAppended('latest_cost_per_sellable_unit', $this->latest_cost_per_sellable_unit),
-            'suggested_sale_price_per_sellable_unit' => $this->whenAppended('suggested_sale_price_per_sellable_unit', $this->suggested_sale_price_per_sellable_unit),
-            'available_batches' => PurchaseItemResource::collection($this->whenLoaded('purchaseItemsWithStock')),
+            'latest_cost_per_sellable_unit' => $this->latest_cost_per_sellable_unit ?? null,
+            'suggested_sale_price_per_sellable_unit' => $this->suggested_sale_price_per_sellable_unit ?? null,
+            'last_sale_price_per_sellable_unit' => $this->last_sale_price_per_sellable_unit ?? null,
+            'earliest_expiry_date' => $this->earliest_expiry_date ?? null,
+            'current_stock_quantity' => $this->current_stock_quantity ?? 0,
+            'available_batches' => $this->whenLoaded('purchaseItemsWithStock', function() {
+                return PurchaseItemResource::collection($this->purchaseItemsWithStock);
+            }),
         ];
     }
 }

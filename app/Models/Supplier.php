@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany; // Import HasMany
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 /**
  * 
@@ -61,5 +62,23 @@ class Supplier extends Model
     {
         // Make sure the Purchase model exists and has a 'supplier_id' foreign key
         return $this->hasMany(Purchase::class);
+    }
+
+    /**
+     * Get the payments made to this supplier.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(SupplierPayment::class);
+    }
+
+    /**
+     * Calculate the total amount owed to this supplier.
+     */
+    public function getTotalOwedAttribute(): float
+    {
+        $totalPurchases = $this->purchases()->sum('total_amount');
+        $totalPayments = $this->payments()->sum('amount');
+        return $totalPurchases - $totalPayments;
     }
 }

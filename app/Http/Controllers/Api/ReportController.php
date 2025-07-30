@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\PurchaseItem;
 use App\Models\SaleItem;
 use App\Services\Pdf\MyCustomTCPDF;
+use App\Services\DailySalesPdfService;
 use Arr;
 use DB;
 use Carbon\Carbon; // Ensure correct Carbon namespace is used
@@ -579,6 +580,37 @@ class ReportController extends Controller
         $pdf->Cell(25, 7, number_format($totals['paid'], 2), 1, 0, 'R', true);
         $pdf->Cell(30, 7, number_format($totals['grandTotal'], 2), 1, 0, 'R', true);
         $pdf->Cell(110, 7, 'Totals:', 1, 1, 'R', true);
+    }
+
+    /**
+     * Generate daily sales PDF report
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function dailySalesPdf(Request $request)
+    {
+        if ($request->user()->cannot('view-reports')) {
+            abort(403, 'You do not have permission to view reports.');
+        }
+
+        // Validate date parameter
+        $validated = $request->validate([
+            'date' => 'nullable|date_format:Y-m-d',
+        ]);
+
+        $date = $validated['date'] ?? null;
+
+        // Generate PDF using the service
+        $pdfService = new DailySalesPdfService();
+        $pdfContent = $pdfService->generateDailySalesPdf($date);
+
+        // Return PDF response
+        $filename = 'daily_sales_report_' . ($date ?? now()->format('Y-m-d')) . '.pdf';
+        
+        return response($pdfContent, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', "inline; filename=\"{$filename}\"");
     }
 
     // --- Placeholder for other report methods ---

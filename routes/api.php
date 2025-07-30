@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\{
   StockAdjustmentController,
   StockRequisitionController,
   SupplierController,
+  SupplierPaymentController,
   UnitController,
   UserController
 };
@@ -66,7 +67,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/inventory', [ReportController::class, 'inventoryReport'])->name('inventory');
     Route::get('/profit-loss', [ReportController::class, 'profitLossReport'])->name('profit-loss');
     Route::get('/near-expiry', [ReportController::class, 'nearExpiryReport'])->name('near-expiry'); // <-- Add this line
-    Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue'); // <-- Add
+    Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue');
+    Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
 
 
   });
@@ -82,13 +84,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Suppliers Management --
   Route::apiResource('suppliers', SupplierController::class);
+  
+  // -- Supplier Payments & Ledger --
+  Route::prefix('suppliers/{supplier}')->group(function () {
+    Route::get('/ledger', [SupplierPaymentController::class, 'getLedger']);
+    Route::post('/payments', [SupplierPaymentController::class, 'store']);
+  });
+  Route::apiResource('supplier-payments', SupplierPaymentController::class)->except(['index', 'show']);
+  Route::get('/payment-methods', [SupplierPaymentController::class, 'getPaymentMethods']);
+  Route::get('/payment-types', [SupplierPaymentController::class, 'getPaymentTypes']);
 
   // -- Sale Returns --
   Route::apiResource('sale-returns', SaleReturnController::class)->except(['update', 'destroy']);
   Route::get('/sales/{sale}/returnable-items', [SaleController::class, 'getReturnableItems'])->name('api.sales.returnableItems');
 
   // -- Products Management --
-  Route::get('/product/by-ids', [ProductController::class, 'getByIds']);
+  Route::post('/product/by-ids', [ProductController::class, 'getByIds']);
   Route::get('/products/export/pdf', [ProductController::class, 'exportPdf'])->name('api.products.exportPdf');
   Route::get('/products/export/excel', [ProductController::class, 'exportExcel'])->name('api.products.exportExcel');
   Route::apiResource('products', ProductController::class);
@@ -101,11 +112,12 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Purchases Management --
   Route::apiResource('purchases', PurchaseController::class);
   Route::get('/purchases/{purchase}/export/pdf', [PurchaseController::class, 'exportPdf'])->name('purchases.exportPdf');
-
+  Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class);
   Route::post('/sales/{sale}/payments', [SaleController::class, 'addPayment'])->name('api.sales.addPayment');
   Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf'); // <-- New Route
+
   // ... existing Sale routes ...
   Route::get('/sales-print/last-completed-id', [SaleController::class, 'getLastCompletedSaleId'])->name('api.sales.lastCompletedId'); // <-- New Route
 

@@ -171,8 +171,23 @@ public function index(Request $request)
                 }
 
                 $saleReturnHeader->total_returned_amount = $calculatedTotalReturnedAmount;
-                // Adjust paid_amount on original sale if credit_action implies it? (e.g., refund reduces effective paid amount)
-                // This part needs careful thought based on accounting practices.
+                
+                // Create refund payment if credit_action is 'refund'
+                if ($validatedData['credit_action'] === 'refund' && $validatedData['refunded_amount'] > 0) {
+                    // Create a negative payment record for the refund
+                    $originalSale->payments()->create([
+                        'user_id' => $request->user()->id,
+                        'method' => 'refund', // Add 'refund' to payment methods if needed
+                        'amount' => -$validatedData['refunded_amount'], // Negative amount for refund
+                        'payment_date' => $validatedData['return_date'],
+                        'reference_number' => 'REFUND-' . $saleReturnHeader->id,
+                        'notes' => "Refund for sale return #{$saleReturnHeader->id}",
+                    ]);
+                    
+                    // Update the original sale's paid_amount
+                    $originalSale->increment('paid_amount', -$validatedData['refunded_amount']);
+                }
+                
                 $saleReturnHeader->save();
                 return $saleReturnHeader;
             });

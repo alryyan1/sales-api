@@ -218,5 +218,38 @@ class Product extends Model
         }
         return null;
     }
+
+    // Accessor to get the last sale price from the most recent purchase item
+    public function getLastSalePricePerSellableUnitAttribute(): ?float
+    {
+        $latestPurchaseItem = $this->purchaseItems()
+            ->whereNotNull('sale_price')
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        if ($latestPurchaseItem && $latestPurchaseItem->sale_price !== null) {
+            return (float) $latestPurchaseItem->sale_price;
+        }
+
+        return null;
+    }
+
+    // Accessor to get the earliest expiry date from available stock
+    public function getEarliestExpiryDateAttribute(): ?string
+    {
+        $earliestExpiry = $this->purchaseItems()
+            ->where('remaining_quantity', '>', 0)
+            ->whereNotNull('expiry_date')
+            ->orderBy('expiry_date', 'asc')
+            ->value('expiry_date');
+
+        return $earliestExpiry ? $earliestExpiry->format('Y-m-d') : null;
+    }
+
+    // Accessor to get current stock quantity (already exists as stock_quantity)
+    public function getCurrentStockQuantityAttribute(): int
+    {
+        return (int) $this->stock_quantity;
+    }
   
 }

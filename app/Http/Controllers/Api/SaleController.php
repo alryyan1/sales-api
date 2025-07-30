@@ -42,6 +42,15 @@ class SaleController extends Controller
         }
         if ($request->boolean('today_only')) {
             $query->whereDate('sale_date', Carbon::today());
+            // For today's sales, load items and payments and return all without pagination
+            $query->with([
+                'items.product' => function($query) {
+                    $query->with(['category', 'stockingUnit', 'sellableUnit']);
+                },
+                'payments' // Load payments for today's sales
+            ]);
+            $sales = $query->latest('sale_date')->latest('id')->get();
+            return SaleResource::collection($sales);
         }
         if ($request->boolean('for_current_user')) {
             $query->where('user_id', $request->user()->id);
@@ -57,7 +66,7 @@ class SaleController extends Controller
             $query->whereDate('sale_date', '<=', $endDate);
         }
 
-        $sales = $query->latest('sale_date')->latest('id')->paginate($request->input('per_page', 15));
+        $sales = $query->latest('id')->paginate($request->input('per_page', 15));
         return SaleResource::collection($sales);
     }
     public function getReturnableItems(Sale $sale)
@@ -137,7 +146,7 @@ class SaleController extends Controller
     private function validateSaleRequest(Request $request)
     {
         return $request->validate([
-            'client_id' => 'required|exists:clients,id',
+            'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
             'sale_date' => 'required|date_format:Y-m-d',
             'invoice_number' => 'nullable|string|max:255|unique:sales,invoice_number',
             'status' => ['required', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
@@ -146,6 +155,9 @@ class SaleController extends Controller
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1', // Quantity of sellable units
             'items.*.unit_price' => 'required|numeric|min:0', // Sale price PER SELLABLE UNIT
+            'discount_amount' => 'nullable|numeric|min:0', // Discount amount
+            'discount_type' => 'nullable|in:percentage,fixed', // Discount type
+
             'payments' => 'present|array',
             'payments.*.method' => [
                 'required_with:payments.*.amount',
@@ -199,11 +211,29 @@ class SaleController extends Controller
 
     private function calculateTotals(array $validatedData)
     {
-        $calculatedTotalSaleAmount = 0;
+        // Calculate subtotal from items
+        $subtotal = 0;
         foreach ($validatedData['items'] as $itemData) {
-            $calculatedTotalSaleAmount += ($itemData['quantity'] * $itemData['unit_price']);
+            $subtotal += ($itemData['quantity'] * $itemData['unit_price']);
         }
 
+        // Calculate discount
+        $discountAmount = 0;
+        if (isset($validatedData['discount_amount']) && $validatedData['discount_amount'] > 0) {
+            if (isset($validatedData['discount_type']) && $validatedData['discount_type'] === 'percentage') {
+                $discountAmount = $subtotal * ($validatedData['discount_amount'] / 100);
+            } else {
+                $discountAmount = min($validatedData['discount_amount'], $subtotal); // Ensure discount doesn't exceed subtotal
+            }
+        }
+
+        // Calculate amount after discount
+        $amountAfterDiscount = $subtotal - $discountAmount;
+
+        // Calculate final total (no tax)
+        $calculatedTotalSaleAmount = $amountAfterDiscount;
+
+        // Calculate total paid amount
         $calculatedTotalPaidAmount = 0;
         if (!empty($validatedData['payments'])) {
             foreach ($validatedData['payments'] as $paymentData) {
@@ -214,6 +244,9 @@ class SaleController extends Controller
         }
 
         return [
+            'subtotal' => $subtotal,
+            'discountAmount' => $discountAmount,
+            'amountAfterDiscount' => $amountAfterDiscount,
             'totalSaleAmount' => $calculatedTotalSaleAmount,
             'totalPaidAmount' => $calculatedTotalPaidAmount,
         ];
@@ -229,12 +262,16 @@ class SaleController extends Controller
     private function createSaleHeader(array $validatedData, Request $request, array $calculatedTotals)
     {
         return Sale::create([
-            'client_id' => $validatedData['client_id'],
+            'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
             'sale_date' => $validatedData['sale_date'],
             'invoice_number' => $validatedData['invoice_number'] ?? null,
             'status' => $validatedData['status'],
             'notes' => $validatedData['notes'] ?? null,
+            'subtotal' => $calculatedTotals['subtotal'],
+            'discount_amount' => $calculatedTotals['discountAmount'],
+            'discount_type' => $validatedData['discount_type'] ?? null,
+
             'total_amount' => $calculatedTotals['totalSaleAmount'],
             'paid_amount' => $calculatedTotals['totalPaidAmount'],
         ]);
@@ -409,6 +446,64 @@ class SaleController extends Controller
         // If deletion with stock reversal is implemented, it would be similar to PurchaseController::destroy
         // but incrementing stock on PurchaseItem batches.
     }
+
+    /**
+     * Add a payment to an existing sale.
+     */
+    public function addPayment(Request $request, Sale $sale)
+    {
+        $validatedData = $request->validate([
+            'payments' => 'required|array|min:1',
+            'payments.*.method' => 'required|string|in:cash,visa,mastercard,bank_transfer,mada,store_credit,other,refund',
+            'payments.*.amount' => 'required|numeric|min:0.01',
+            'payments.*.payment_date' => 'required|date_format:Y-m-d',
+            'payments.*.reference_number' => 'nullable|string|max:255',
+            'payments.*.notes' => 'nullable|string|max:65535',
+        ]);
+
+        try {
+            DB::transaction(function () use ($validatedData, $sale, $request) {
+                // Delete existing payments for this sale (to replace them all)
+                $sale->payments()->delete();
+                
+                // Create new payment records
+                foreach ($validatedData['payments'] as $paymentData) {
+                    $sale->payments()->create([
+                        'user_id' => $request->user()->id,
+                        'method' => $paymentData['method'],
+                        'amount' => $paymentData['amount'],
+                        'payment_date' => $paymentData['payment_date'],
+                        'reference_number' => $paymentData['reference_number'] ?? null,
+                        'notes' => $paymentData['notes'] ?? null,
+                    ]);
+                }
+
+                // Update the sale's paid_amount
+                $totalPaid = $sale->payments()->sum('amount');
+                $sale->update(['paid_amount' => $totalPaid]);
+            });
+
+            // Reload the sale with payments
+            $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'payments']);
+            
+            return response()->json([
+                'message' => 'Payment(s) added successfully',
+                'sale' => new SaleResource($sale->fresh())
+            ], Response::HTTP_OK);
+
+        } catch (\Exception $e) {
+            Log::error('Error adding payment to sale: ' . $e->getMessage(), [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to add payment. Please try again.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
     /**
      * Generate and download a PDF invoice for a specific sale.
      *
@@ -454,7 +549,7 @@ class SaleController extends Controller
 
         // --- Invoice Header ---
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
-        $pdf->Cell(0, 12, 'فاتورة ضريبية مبسطة', 0, 1, 'C'); // Simplified Tax Invoice
+        $pdf->Cell(0, 12, 'فاتورة مبيعات', 0, 1, 'C'); // Sales Invoice
         $pdf->Ln(5);
 
         // Company Details (Right Side in RTL)
@@ -561,9 +656,7 @@ class SaleController extends Controller
         // $pdf->Cell($col1Width, 6, 'الخصم:', 'LR', 0, 'L', false);
         // $pdf->Cell($col2Width, 6, number_format(0, 2), 'R', 1, 'R', false);
 
-        // Example: VAT/Tax (if you have it)
-        // $pdf->Cell($col1Width, 6, 'ضريبة القيمة المضافة (15%):', 'LR', 0, 'L', false);
-        // $pdf->Cell($col2Width, 6, number_format($sale->total_amount * 0.15, 2), 'R', 1, 'R', false);
+
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
         $pdf->SetFillColor(220, 220, 220);
@@ -713,7 +806,7 @@ class SaleController extends Controller
         $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R'); // Total Amount Label (spans 2 cols)
         $pdf->Cell(26, 5, number_format((float)$sale->total_amount, 2), 0, 1, 'R'); // Total Amount
 
-        // Add Discount, Tax if applicable
+
 
         $pdf->SetFont('dejavusans', 'B', 9);
         $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
@@ -769,6 +862,64 @@ class SaleController extends Controller
             ->header('Content-Type', 'application/pdf')
             // No 'Content-Disposition: attachment' - frontend will handle display
         ;
+    }
+
+    /**
+     * Get financial calculator data for a specific date
+     */
+    public function calculator(Request $request)
+    {
+        $request->validate([
+            'date' => 'required|date',
+            'user_id' => 'nullable|integer|exists:users,id',
+        ]);
+
+        $date = $request->input('date');
+        $userId = $request->input('user_id');
+
+        $query = Sale::whereDate('sale_date', $date)
+            ->where('status', 'completed')
+            ->with(['payments', 'user:id,name']);
+
+        if ($userId) {
+            $query->where('user_id', $userId);
+        }
+
+        $sales = $query->get();
+
+        // Calculate total income
+        $totalIncome = $sales->sum('total_amount');
+        $totalSales = $sales->count();
+
+        // Payment breakdown
+        $paymentBreakdown = [];
+        $paymentMethods = $sales->flatMap->payments->groupBy('method');
+        
+        foreach ($paymentMethods as $method => $payments) {
+            $paymentBreakdown[] = [
+                'method' => $method,
+                'amount' => (float) $payments->sum('amount'),
+                'count' => $payments->count(),
+            ];
+        }
+
+        // User breakdown
+        $userPayments = $sales->groupBy('user_id')->map(function ($userSales, $userId) {
+            $user = $userSales->first()->user;
+            return [
+                'user_id' => (int) $userId,
+                'user_name' => $user ? $user->name : 'Unknown User',
+                'total_amount' => (float) $userSales->sum('total_amount'),
+                'payment_count' => $userSales->count(),
+            ];
+        })->values();
+
+        return response()->json([
+            'total_income' => (float) $totalIncome,
+            'total_sales' => $totalSales,
+            'payment_breakdown' => $paymentBreakdown,
+            'user_payments' => $userPayments,
+        ]);
     }
 }
 

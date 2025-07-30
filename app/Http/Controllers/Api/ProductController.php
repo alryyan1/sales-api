@@ -218,6 +218,7 @@ class ProductController extends Controller
     /**
      * Fetch multiple products by their IDs.
      * Useful for populating form selects/displays when editing related records.
+     * Accepts POST request with 'ids' array in request body.
      */
     public function getByIds(Request $request)
     {
@@ -226,11 +227,11 @@ class ProductController extends Controller
             'ids.*' => 'integer|exists:products,id',
         ]);
 
-        $products = Product::select(['id', 'name', 'sku', 'stock_quantity']) // Select necessary fields
-            ->whereIn('id', $validated['ids'])
+        $products = Product::whereIn('id', $validated['ids'])
+            ->with(['category', 'stockingUnit', 'sellableUnit'])
             ->get();
 
-        return response()->json(['data' => $products]);
+        return ProductResource::collection($products);
     }
 
     // In ProductController.php (or a new BatchController)

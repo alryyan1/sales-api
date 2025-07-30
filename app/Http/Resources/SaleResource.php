@@ -16,6 +16,7 @@ class SaleResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'sale_order_number' => $this->sale_order_number,
             // Client Info
             'client_id' => $this->client_id,
             'client_name' => $this->whenLoaded('client', fn() => $this->client?->name), // Use optional chaining

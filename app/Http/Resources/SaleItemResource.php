@@ -48,21 +48,28 @@ class SaleItemResource extends JsonResource
             'batch_expiry_date' => $this->whenLoaded('purchaseItemBatch', function () {
                 return $this->purchaseItemBatch?->expiry_date?->format('Y-m-d');
             }),
-            // If you want to include the full PurchaseItemResource when 'purchaseItemBatch' is loaded:
-            // 'batch_details' => new PurchaseItemResource($this->whenLoaded('purchaseItemBatch')),
-
+            
+            // Current stock information from the product
+            'current_stock_quantity' => $this->whenLoaded('product', function () {
+                return $this->product?->stock_quantity ?? 0;
+            }),
+            'stock_alert_level' => $this->whenLoaded('product', function () {
+                return $this->product?->stock_alert_level;
+            }),
+            'earliest_expiry_date' => $this->whenLoaded('product', function () {
+                return $this->product?->earliest_expiry_date;
+            }),
+            'sellable_unit_name' => $this->whenLoaded('product', function () {
+                return $this->product?->sellableUnit?->name ?? 'Piece';
+            }),
 
             'quantity' => $this->quantity, // Quantity sold in this line item
             'unit_price' => $this->unit_price, // Price at which this item was sold (already cast to decimal:2 in model)
             'total_price' => $this->total_price, // quantity * unit_price (already cast in model)
+            'cost_price_at_sale' => $this->cost_price_at_sale, // Cost per sellable unit at sale time
 
             'created_at' => $this->created_at?->toISOString(), // Optional: if needed by frontend
             'updated_at' => $this->updated_at?->toISOString(), // Optional: if needed by frontend
-            'purchase_item_id' => $this->purchase_item_id,
-            'batch_number_sold' => $this->batch_number_sold,
-            'quantity' => $this->quantity, // In sellable units
-            'unit_price' => $this->unit_price, // Sale price per sellable unit
-            'cost_price_at_sale' => $this->cost_price_at_sale, // Cost per sellable unit at sale time
         ];
     }
 }

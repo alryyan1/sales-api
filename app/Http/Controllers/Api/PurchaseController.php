@@ -62,7 +62,7 @@ class PurchaseController extends Controller
             });
         }
 
-        $purchases = $query->latest('purchase_date')->latest('id')->paginate($request->input('per_page', 15));
+        $purchases = $query->latest('id')->paginate($request->input('per_page', 15));
         return PurchaseResource::collection($purchases);
     }
 
