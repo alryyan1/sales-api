@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use App\Services\PurchasePdfService;
+use App\Services\PurchaseExcelService;
 
 
 class PurchaseController extends Controller
@@ -52,6 +53,13 @@ class PurchaseController extends Controller
             $query->whereDate('created_at', $createdAt);
         }
 
+        // Filter by product (purchases that contain this product in their items)
+        if ($productId = $request->input('product_id')) {
+            $query->whereHas('items', function ($itemQuery) use ($productId) {
+                $itemQuery->where('product_id', $productId);
+            });
+        }
+
         // Legacy search filter (keep for backward compatibility)
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
@@ -60,6 +68,11 @@ class PurchaseController extends Controller
                         $supplierQuery->where('name', 'like', "%{$search}%");
                     });
             });
+        }
+
+        // Check if items should be included
+        if ($request->boolean('include_items')) {
+            $query->with(['items', 'items.product:id,name,sku,stocking_unit_name,sellable_unit_name']);
         }
 
         $purchases = $query->latest('id')->paginate($request->input('per_page', 15));
@@ -253,6 +266,72 @@ class PurchaseController extends Controller
             return response($pdfContent)
                 ->header('Content-Type', 'application/pdf')
                 ->header('Content-Disposition', 'attachment; filename="purchase_' . $purchase->id . '.pdf"');
+        }
+    }
+
+    /**
+     * Export purchases to Excel.
+     */
+    public function exportExcel(Request $request)
+    {
+        // Validate filters
+        $validated = $request->validate([
+            'supplier_id' => 'sometimes|integer|exists:suppliers,id',
+            'reference_number' => 'sometimes|string|max:255',
+            'purchase_date' => 'sometimes|date|date_format:Y-m-d',
+            'created_at' => 'sometimes|date|date_format:Y-m-d',
+            'status' => 'sometimes|string|in:pending,ordered,received',
+            'product_id' => 'sometimes|integer|exists:products,id',
+        ]);
+
+        // Build query with filters
+        $query = Purchase::with(['supplier:id,name', 'user:id,name', 'items.product:id,name,sku']);
+
+        if (isset($validated['supplier_id'])) {
+            $query->where('supplier_id', $validated['supplier_id']);
+        }
+
+        if (isset($validated['reference_number'])) {
+            $query->where('reference_number', 'like', '%' . $validated['reference_number'] . '%');
+        }
+
+        if (isset($validated['purchase_date'])) {
+            $query->whereDate('purchase_date', $validated['purchase_date']);
+        }
+
+        if (isset($validated['created_at'])) {
+            $query->whereDate('created_at', $validated['created_at']);
+        }
+
+        if (isset($validated['status'])) {
+            $query->where('status', $validated['status']);
+        }
+
+        if (isset($validated['product_id'])) {
+            $query->whereHas('items', function ($q) use ($validated) {
+                $q->where('product_id', $validated['product_id']);
+            });
+        }
+
+        // Get all purchases (no pagination for Excel)
+        $purchases = $query->orderBy('created_at', 'desc')->get();
+
+        // Generate Excel content
+        $excelService = new PurchaseExcelService();
+        $excelContent = $excelService->generatePurchasesExcel($purchases);
+
+        // For web routes, we want to display in browser, not download
+        $isWebRoute = $request->route()->getName() === 'purchases.exportExcel';
+        
+        if ($isWebRoute) {
+            return response($excelContent)
+                ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                ->header('Content-Disposition', 'inline; filename="purchases_' . date('Y-m-d') . '.xlsx"');
+        } else {
+            // For API routes, download the file
+            return response($excelContent)
+                ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                ->header('Content-Disposition', 'attachment; filename="purchases_' . date('Y-m-d') . '.xlsx"');
         }
     }
 }

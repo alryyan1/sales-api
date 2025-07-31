@@ -453,10 +453,10 @@ class SaleController extends Controller
     public function addPayment(Request $request, Sale $sale)
     {
         $validatedData = $request->validate([
-            'payments' => 'required|array|min:1',
-            'payments.*.method' => 'required|string|in:cash,visa,mastercard,bank_transfer,mada,store_credit,other,refund',
-            'payments.*.amount' => 'required|numeric|min:0.01',
-            'payments.*.payment_date' => 'required|date_format:Y-m-d',
+            'payments' => 'required|array',
+            'payments.*.method' => 'nullable|string|in:cash,visa,mastercard,bank_transfer,mada,store_credit,other,refund',
+            'payments.*.amount' => 'nullable|numeric|min:0.01',
+            'payments.*.payment_date' => 'nullable|date_format:Y-m-d',
             'payments.*.reference_number' => 'nullable|string|max:255',
             'payments.*.notes' => 'nullable|string|max:65535',
         ]);
@@ -466,16 +466,21 @@ class SaleController extends Controller
                 // Delete existing payments for this sale (to replace them all)
                 $sale->payments()->delete();
                 
-                // Create new payment records
-                foreach ($validatedData['payments'] as $paymentData) {
-                    $sale->payments()->create([
-                        'user_id' => $request->user()->id,
-                        'method' => $paymentData['method'],
-                        'amount' => $paymentData['amount'],
-                        'payment_date' => $paymentData['payment_date'],
-                        'reference_number' => $paymentData['reference_number'] ?? null,
-                        'notes' => $paymentData['notes'] ?? null,
-                    ]);
+                // Create new payment records only if payments array is not empty
+                if (!empty($validatedData['payments'])) {
+                    foreach ($validatedData['payments'] as $paymentData) {
+                        // Only create payment if all required fields are present
+                        if (isset($paymentData['method']) && isset($paymentData['amount']) && isset($paymentData['payment_date'])) {
+                            $sale->payments()->create([
+                                'user_id' => $request->user()->id,
+                                'method' => $paymentData['method'],
+                                'amount' => $paymentData['amount'],
+                                'payment_date' => $paymentData['payment_date'],
+                                'reference_number' => $paymentData['reference_number'] ?? null,
+                                'notes' => $paymentData['notes'] ?? null,
+                            ]);
+                        }
+                    }
                 }
 
                 // Update the sale's paid_amount
@@ -486,8 +491,10 @@ class SaleController extends Controller
             // Reload the sale with payments
             $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'payments']);
             
+            $message = empty($validatedData['payments']) ? 'All payments cleared successfully' : 'Payment(s) added successfully';
+            
             return response()->json([
-                'message' => 'Payment(s) added successfully',
+                'message' => $message,
                 'sale' => new SaleResource($sale->fresh())
             ], Response::HTTP_OK);
 
@@ -500,6 +507,42 @@ class SaleController extends Controller
 
             return response()->json([
                 'message' => 'Failed to add payment. Please try again.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Delete all payments from an existing sale.
+     */
+    public function deletePayments(Request $request, Sale $sale)
+    {
+        try {
+            DB::transaction(function () use ($sale) {
+                // Delete all existing payments for this sale
+                $sale->payments()->delete();
+                
+                // Update the sale's paid_amount to 0
+                $sale->update(['paid_amount' => 0]);
+            });
+
+            // Reload the sale with payments
+            $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'payments']);
+            
+            return response()->json([
+                'message' => 'All payments deleted successfully',
+                'sale' => new SaleResource($sale->fresh())
+            ], Response::HTTP_OK);
+
+        } catch (\Exception $e) {
+            Log::error('Error deleting payments from sale: ' . $e->getMessage(), [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to delete payments. Please try again.',
                 'error' => $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }

@@ -36,6 +36,9 @@ Route::middleware('guest.access')->group(function () {
 
     // Purchase PDF Export Route
     Route::get('/purchases/{purchase}/export/pdf', [PurchaseController::class, 'exportPdf'])->name('purchases.exportPdf');
+
+    // Purchase Excel Export Route
+    Route::get('/purchases/export/excel', [PurchaseController::class, 'exportExcel'])->name('purchases.exportExcel');
 });
 
 Route::get('/test-whatsapp', function () {
