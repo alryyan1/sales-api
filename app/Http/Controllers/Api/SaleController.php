@@ -279,14 +279,23 @@ class SaleController extends Controller
 
     private function processSaleItems(array $validatedData, Sale $saleHeader, $newTotalSaleAmount)
     {
-        // 2. Process Sale Items and Stock (FIFO logic, all quantities in SELLABLE UNITS)
+        // 2. Process Sale Items and Stock (Total stock check, FIFO allocation)
         foreach ($validatedData['items'] as $itemData) {
             $product = Product::findOrFail($itemData['product_id']); // Ensure product exists
             $requestedSellableUnits = (int) $itemData['quantity']; // Quantity customer wants, in sellable units
             $unitSalePrice = (float) $itemData['unit_price']; // Price per sellable unit from request
             $quantityFulfilledInSellableUnits = 0;
 
-            // Fetch available batches for this product, ordered for FIFO
+            // --- Total Stock Check (already done in performStockPreCheck, but double-check here) ---
+            // Refresh product to get latest stock_quantity
+            $product->refresh();
+            if ($product->stock_quantity < $requestedSellableUnits) {
+                throw ValidationException::withMessages([
+                    'items' => ["Insufficient stock for product '{$product->name}'. Available: {$product->stock_quantity} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
+                ]);
+            }
+
+            // Fetch available batches for this product, ordered for FIFO allocation
             // (e.g., oldest expiry first, then oldest purchase_item created_at)
             // and lock them for update to prevent race conditions during concurrent sales.
             $availableBatches = PurchaseItem::where('product_id', $product->id)
@@ -295,19 +304,6 @@ class SaleController extends Controller
                 ->orderBy('created_at', 'asc')         // Then oldest purchase batch
                 ->lockForUpdate()                      // CRITICAL for concurrent stock updates
                 ->get();
-
-            // --- Transactional Stock Check ---
-            // Sum of all available sellable units for this product across all batches
-            $currentTotalStockForItemInSellableUnits = $availableBatches->sum('remaining_quantity');
-
-            if ($currentTotalStockForItemInSellableUnits < $requestedSellableUnits) {
-                // This error will cause the transaction to rollback
-                throw ValidationException::withMessages([
-                    // Associate error with the 'items' array generally, or pinpoint the specific item if frontend can handle it
-                    // "items.{$index}.quantity" could be used if you have the $index from the original request array
-                    'items' => ["Insufficient stock for product '{$product->name}'. Available: {$currentTotalStockForItemInSellableUnits} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
-                ]);
-            }
 
             // --- Allocate from Batches (FIFO) ---
             foreach ($availableBatches as $batch) {
@@ -348,12 +344,9 @@ class SaleController extends Controller
             } // End loop through available batches
 
             // Final check to ensure the requested quantity was fully met
-            // This should ideally not be reached if the initial $currentTotalStockForItemInSellableUnits check was correct
-            // and no external modifications happened between the sum and the loop (lockForUpdate helps here).
+            // This should not be reached if the total stock check was correct
             if ($quantityFulfilledInSellableUnits < $requestedSellableUnits) {
-                // This indicates a potential logic error or a very high concurrency issue not fully mitigated.
-                // Throwing an exception here will roll back the entire transaction.
-                Log::critical("FIFO stock allocation discrepancy for Product ID {$product->id} on Sale ID {$saleHeader->id}. Requested: {$requestedSellableUnits}, Fulfilled: {$quantityFulfilledInSellableUnits}.");
+                Log::critical("Stock allocation discrepancy for Product ID {$product->id} on Sale ID {$saleHeader->id}. Requested: {$requestedSellableUnits}, Fulfilled: {$quantityFulfilledInSellableUnits}.");
                 throw new \Exception("Could not fulfill requested quantity for product '{$product->name}' due to an unexpected stock allocation issue. Please try again.");
             }
         } // End loop through $validatedData['items'] (main sale items from request)
