@@ -261,8 +261,8 @@ class ProductController extends Controller
         $pdfService = new ProductPdfService();
         $pdfContent = $pdfService->generateProductsPdf($filters);
 
-        // For web routes, we want to display in browser, not download
-        $isWebRoute = $request->route()->getName() === 'products.exportPdf';
+        // Check if this is a web route by checking the URL path
+        $isWebRoute = str_contains($request->path(), 'products/export/pdf');
         
         if ($isWebRoute) {
             return response($pdfContent)
@@ -291,8 +291,8 @@ class ProductController extends Controller
         $excelService = new ProductExcelService();
         $excelContent = $excelService->generateProductsExcel($filters);
 
-        // For web routes, we want to display in browser, not download
-        $isWebRoute = $request->route()->getName() === 'products.exportExcel';
+        // Check if this is a web route by checking the URL path
+        $isWebRoute = str_contains($request->path(), 'products/export/excel');
         
         if ($isWebRoute) {
             return response($excelContent)
@@ -303,6 +303,141 @@ class ProductController extends Controller
             return response($excelContent)
                 ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                 ->header('Content-Disposition', 'attachment; filename="products_report.xlsx"');
+        }
+    }
+
+    /**
+     * Import products from Excel file.
+     */
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240', // 10MB max
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $excelService = new ProductExcelService();
+            
+            // Read the Excel file and get column headers
+            $headers = $excelService->getExcelHeaders($file);
+            
+            return response()->json([
+                'success' => true,
+                'headers' => $headers,
+                'message' => 'Excel file uploaded successfully. Please map the columns.'
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error reading Excel file: ' . $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
+     * Preview the imported Excel data with column mapping.
+     */
+    public function previewImport(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+            'columnMapping' => 'required|array',
+            'columnMapping.*' => 'required|string',
+            'skipHeader' => 'nullable',
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $columnMapping = $request->input('columnMapping');
+            $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
+            
+            $excelService = new ProductExcelService();
+            $previewData = $excelService->previewProducts($file, $columnMapping, $skipHeader);
+            
+            return response()->json([
+                'success' => true,
+                'preview' => $previewData
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Product preview failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error previewing import: ' . $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
+     * Process the imported Excel data with column mapping.
+     */
+    public function processImport(Request $request)
+    {
+        // Set timeout and memory limits for large imports
+        set_time_limit(300); // 5 minutes
+        ini_set('memory_limit', '512M');
+        
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+            'columnMapping' => 'required|array',
+            'columnMapping.*' => 'required|string',
+            'skipHeader' => 'nullable',
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $columnMapping = $request->input('columnMapping');
+            $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
+            
+            // Log import start
+            \Log::info('Starting product import', [
+                'file_size' => $file->getSize(),
+                'file_name' => $file->getClientOriginalName(),
+                'mapping' => $columnMapping
+            ]);
+            
+            $excelService = new ProductExcelService();
+            $result = $excelService->importProducts($file, $columnMapping, $skipHeader);
+            
+            // Log import completion
+            \Log::info('Product import completed', [
+                'imported' => $result['imported'],
+                'errors' => $result['errors']
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => "Import completed successfully. {$result['imported']} products imported, {$result['errors']} errors.",
+                'imported' => $result['imported'],
+                'errors' => $result['errors'],
+                'errorDetails' => $result['errorDetails'] ?? []
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Product import failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            $errorMessage = 'Error processing import: ' . $e->getMessage();
+            
+            // Provide more specific error messages
+            if (str_contains($e->getMessage(), 'memory')) {
+                $errorMessage = 'Import failed due to memory limitations. Please try with a smaller file.';
+            } elseif (str_contains($e->getMessage(), 'timeout')) {
+                $errorMessage = 'Import timed out. Please try with a smaller file.';
+            }
+            
+            return response()->json([
+                'success' => false,
+                'message' => $errorMessage
+            ], 400);
         }
     }
 }

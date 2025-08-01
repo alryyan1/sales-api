@@ -10,6 +10,11 @@ use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Font;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use App\Models\Product;
+use App\Models\PurchaseItem;
 
 class PurchaseExcelService
 {
@@ -174,6 +179,340 @@ class PurchaseExcelService
         $excelContent = ob_get_clean();
 
         return $excelContent;
+    }
+
+    /**
+     * Get Excel headers from uploaded file
+     *
+     * @param \Illuminate\Http\UploadedFile $file
+     * @return array
+     */
+    public function getExcelHeaders($file): array
+    {
+        $spreadsheet = IOFactory::load($file->getPathname());
+        $worksheet = $spreadsheet->getActiveSheet();
+        $highestColumn = $worksheet->getHighestColumn();
+        $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
+        
+        $headers = [];
+        for ($col = 1; $col <= $highestColumnIndex; $col++) {
+            $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col) . '1')->getValue();
+            if ($cellValue !== null && $cellValue !== '') {
+                $headers[] = (string) $cellValue;
+            }
+        }
+        
+        // Clear memory
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+        gc_collect_cycles();
+        
+        return $headers;
+    }
+
+    /**
+     * Preview purchase items from Excel file
+     *
+     * @param \Illuminate\Http\UploadedFile $file
+     * @param array $columnMapping
+     * @param bool $skipHeader
+     * @return array
+     */
+    public function previewPurchaseItems($file, array $columnMapping, bool $skipHeader = true): array
+    {
+        $spreadsheet = IOFactory::load($file->getPathname());
+        $worksheet = $spreadsheet->getActiveSheet();
+        $highestRow = $worksheet->getHighestRow();
+        
+        $previewData = [];
+        $startRow = $skipHeader ? 2 : 1;
+        
+        // Cache headers to avoid repeated calls
+        $headers = $this->getExcelHeaders($file);
+        
+        // Create column index mapping for better performance
+        $columnIndexMapping = [];
+        foreach ($columnMapping as $purchaseItemField => $excelColumn) {
+            if ($excelColumn && $excelColumn !== 'skip') {
+                $columnIndex = array_search($excelColumn, $headers);
+                if ($columnIndex !== false) {
+                    $columnIndexMapping[$purchaseItemField] = $columnIndex + 1;
+                }
+            }
+        }
+        
+        // Log the mapping for debugging
+        Log::info("Purchase items preview mapping:", [
+            'headers' => $headers,
+            'columnMapping' => $columnMapping,
+            'columnIndexMapping' => $columnIndexMapping
+        ]);
+        
+        // Process first 50 rows for preview
+        $previewRows = min(50, $highestRow - $startRow + 1);
+        
+        for ($row = $startRow; $row < $startRow + $previewRows; $row++) {
+            $rowData = [];
+            
+            // Read row data based on column mapping
+            foreach ($columnIndexMapping as $purchaseItemField => $columnIndex) {
+                $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
+                if ($cellValue !== null && $cellValue !== '') {
+                    // Convert data types appropriately
+                    if (in_array($purchaseItemField, ['quantity', 'unit_cost', 'sale_price'])) {
+                        $rowData[$purchaseItemField] = is_numeric($cellValue) ? (float) $cellValue : 0;
+                    } else {
+                        $rowData[$purchaseItemField] = $cellValue;
+                    }
+                }
+            }
+            
+            // Apply default values for unmapped or skipped columns
+            $rowData = $this->applyDefaultValues($rowData, $columnMapping);
+            
+            // Only add rows that have at least product name or SKU
+            if (!empty($rowData['product_name']) || !empty($rowData['product_sku'])) {
+                $previewData[] = $rowData;
+            }
+        }
+        
+        // Clear memory
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+        gc_collect_cycles();
+        
+        return $previewData;
+    }
+
+    /**
+     * Import purchase items from Excel file
+     *
+     * @param \Illuminate\Http\UploadedFile $file
+     * @param array $columnMapping
+     * @param bool $skipHeader
+     * @param int $purchaseId
+     * @return array
+     */
+    public function importPurchaseItems($file, array $columnMapping, bool $skipHeader = true, int $purchaseId): array
+    {
+        $spreadsheet = IOFactory::load($file->getPathname());
+        $worksheet = $spreadsheet->getActiveSheet();
+        $highestRow = $worksheet->getHighestRow();
+        
+        $imported = 0;
+        $errors = 0;
+        $errorDetails = [];
+        $startRow = $skipHeader ? 2 : 1;
+        
+        // Cache headers to avoid repeated calls
+        $headers = $this->getExcelHeaders($file);
+        
+        // Create column index mapping for better performance
+        $columnIndexMapping = [];
+        foreach ($columnMapping as $purchaseItemField => $excelColumn) {
+            if ($excelColumn && $excelColumn !== 'skip') {
+                $columnIndex = array_search($excelColumn, $headers);
+                if ($columnIndex !== false) {
+                    $columnIndexMapping[$purchaseItemField] = $columnIndex + 1;
+                }
+            }
+        }
+        
+        // Log the mapping for debugging
+        Log::info("Purchase items import mapping:", [
+            'headers' => $headers,
+            'columnMapping' => $columnMapping,
+            'columnIndexMapping' => $columnIndexMapping,
+            'purchaseId' => $purchaseId
+        ]);
+        
+        // Start database transaction
+        DB::beginTransaction();
+        
+        try {
+            for ($row = $startRow; $row <= $highestRow; $row++) {
+                $rowData = [];
+                
+                // Read row data based on column mapping
+                foreach ($columnIndexMapping as $purchaseItemField => $columnIndex) {
+                    $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
+                    if ($cellValue !== null && $cellValue !== '') {
+                        // Convert data types appropriately
+                        if (in_array($purchaseItemField, ['quantity', 'unit_cost', 'sale_price'])) {
+                            $rowData[$purchaseItemField] = is_numeric($cellValue) ? (float) $cellValue : 0;
+                        } else {
+                            $rowData[$purchaseItemField] = $cellValue;
+                        }
+                    }
+                }
+                
+                // Apply default values for unmapped or skipped columns
+                $rowData = $this->applyDefaultValues($rowData, $columnMapping);
+                
+                // Skip empty rows (after applying defaults)
+                if (empty($rowData['product_name']) && empty($rowData['product_sku'])) {
+                    continue;
+                }
+                
+                // Validate and create purchase item
+                $validationResult = $this->validatePurchaseItemData($rowData);
+                if (!$validationResult['valid']) {
+                    $errors++;
+                    $errorDetails[] = [
+                        'row' => $row,
+                        'errors' => $validationResult['errors']
+                    ];
+                    continue;
+                }
+                
+                // Create purchase item
+                $this->createPurchaseItem($rowData, $purchaseId);
+                $imported++;
+                
+                // Log first few rows for debugging
+                if ($row <= $startRow + 5) {
+                    Log::info("Processing row {$row}:", $rowData);
+                }
+            }
+            
+            DB::commit();
+            
+            // Clear memory
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet);
+            gc_collect_cycles();
+            
+            return [
+                'imported' => $imported,
+                'errors' => $errors,
+                'message' => "Import completed successfully. {$imported} items imported, {$errors} errors.",
+                'errorDetails' => $errorDetails
+            ];
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            // Clear memory
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet);
+            gc_collect_cycles();
+            
+            Log::error('Purchase items import failed:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            throw $e;
+        }
+    }
+
+    /**
+     * Apply default values for unmapped or skipped columns
+     *
+     * @param array $data
+     * @param array $columnMapping
+     * @return array
+     */
+    private function applyDefaultValues(array $data, array $columnMapping): array
+    {
+        // Define default values for each field
+        $defaultValues = [
+            'product_name' => null,
+            'product_sku' => null,
+            'batch_number' => null,
+            'quantity' => 1, // Default to 1 instead of 0 for quantity
+            'unit_cost' => 0,
+            'sale_price' => null,
+            'expiry_date' => null,
+        ];
+        
+        // Apply defaults for any field that is not in the data or was skipped
+        foreach ($defaultValues as $field => $defaultValue) {
+            if (!isset($data[$field])) {
+                $data[$field] = $defaultValue;
+            }
+        }
+        
+        return $data;
+    }
+
+    /**
+     * Validate purchase item data
+     *
+     * @param array $data
+     * @return array
+     */
+    private function validatePurchaseItemData(array $data): array
+    {
+        // Check required fields
+        if (empty($data['product_name']) && empty($data['product_sku'])) {
+            return ['valid' => false, 'errors' => ['product' => ['Either product name or SKU is required.']]];
+        }
+        
+        if (!isset($data['quantity']) || !is_numeric($data['quantity']) || $data['quantity'] <= 0) {
+            return ['valid' => false, 'errors' => ['quantity' => ['Quantity must be a positive number.']]];
+        }
+        
+        if (!isset($data['unit_cost']) || !is_numeric($data['unit_cost']) || $data['unit_cost'] < 0) {
+            return ['valid' => false, 'errors' => ['unit_cost' => ['Unit cost must be a non-negative number.']]];
+        }
+        
+        // Find product by name or SKU
+        $product = null;
+        if (!empty($data['product_sku'])) {
+            $product = Product::where('sku', $data['product_sku'])->first();
+        }
+        
+        if (!$product && !empty($data['product_name'])) {
+            $product = Product::where('name', 'like', '%' . $data['product_name'] . '%')->first();
+        }
+        
+        if (!$product) {
+            return ['valid' => false, 'errors' => ['product' => ['Product not found. Please check the product name or SKU.']]];
+        }
+        
+        return ['valid' => true, 'errors' => []];
+    }
+
+    /**
+     * Create purchase item
+     *
+     * @param array $data
+     * @param int $purchaseId
+     * @return void
+     */
+    private function createPurchaseItem(array $data, int $purchaseId): void
+    {
+        // Find product by name or SKU
+        $product = null;
+        if (!empty($data['product_sku'])) {
+            $product = Product::where('sku', $data['product_sku'])->first();
+        }
+        
+        if (!$product && !empty($data['product_name'])) {
+            $product = Product::where('name', 'like', '%' . $data['product_name'] . '%')->first();
+        }
+        
+        if (!$product) {
+            throw new \Exception('Product not found');
+        }
+        
+        // Calculate total cost
+        $quantity = (int) ($data['quantity'] ?? 0);
+        $unitCost = (float) ($data['unit_cost'] ?? 0);
+        $totalCost = $quantity * $unitCost;
+        
+        // Create purchase item
+        PurchaseItem::create([
+            'purchase_id' => $purchaseId,
+            'product_id' => $product->id,
+            'batch_number' => $data['batch_number'] ?? null,
+            'quantity' => $quantity,
+            'unit_cost' => $unitCost,
+            'total_cost' => $totalCost,
+            'sale_price' => isset($data['sale_price']) && $data['sale_price'] > 0 ? (float) $data['sale_price'] : null,
+            'expiry_date' => !empty($data['expiry_date']) ? $data['expiry_date'] : null,
+        ]);
     }
 
     /**

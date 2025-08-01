@@ -39,7 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/products/autocomplete', [ProductController::class, 'autocomplete'])->name('api.products.autocomplete');
   Route::get('/clients/autocomplete', [ClientController::class, 'autocomplete'])->name('api.clients.autocomplete');
   Route::apiResource('stock-requisitions', StockRequisitionController::class)->except(['update']);
-  Route::post('/stock-requisitions/{stock_requisition}/process', [StockRequisitionController::class, 'processRequisition'])->name('process');
+  Route::post('/stock-requisitions/{stock_requisition}/process', [StockRequisitionController::class, 'processRequisition'])->name('api.stock-requisitions.process');
   // -- Clients Management --
   Route::apiResource('clients', ClientController::class);
   Route::get('products/{product}/available-batches', [ProductController::class, 'getAvailableBatches']);
@@ -69,6 +69,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/near-expiry', [ReportController::class, 'nearExpiryReport'])->name('near-expiry'); // <-- Add this line
     Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue');
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
+    Route::get('/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('inventory-log');
 
 
   });
@@ -100,8 +101,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Products Management --
   Route::post('/product/by-ids', [ProductController::class, 'getByIds']);
-  Route::get('/products/export/pdf', [ProductController::class, 'exportPdf'])->name('api.products.exportPdf');
-  Route::get('/products/export/excel', [ProductController::class, 'exportExcel'])->name('api.products.exportExcel');
+  Route::post('/products/import', [ProductController::class, 'importExcel']);
+  Route::post('/products/preview-import', [ProductController::class, 'previewImport']);
+Route::post('/products/process-import', [ProductController::class, 'processImport']);
   Route::apiResource('products', ProductController::class);
 
   // -- Units Management --
@@ -110,9 +112,10 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::apiResource('units', UnitController::class);
 
   // -- Purchases Management --
-  Route::apiResource('purchases', PurchaseController::class);
-  Route::get('/purchases/{purchase}/export/pdf', [PurchaseController::class, 'exportPdf'])->name('purchases.exportPdf');
-  Route::get('/purchases/export/excel', [PurchaseController::class, 'exportExcel'])->name('api.purchases.exportExcel');
+Route::apiResource('purchases', PurchaseController::class);
+Route::post('/purchases/import-items', [PurchaseController::class, 'importPurchaseItems']);
+Route::post('/purchases/preview-import-items', [PurchaseController::class, 'previewImportPurchaseItems']);
+Route::post('/purchases/process-import-items', [PurchaseController::class, 'processImportPurchaseItems']);
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class);
@@ -129,5 +132,4 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Dashboard Data --
   Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
   Route::get('/dashboard/sales-terminal-summary', [DashboardController::class, 'salesTerminalSummary'])->name('api.dashboard.salesTerminalSummary'); //
-  Route::get('/reports/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('api.reports.inventory-log');
 });

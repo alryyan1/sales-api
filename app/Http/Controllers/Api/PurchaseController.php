@@ -270,6 +270,120 @@ class PurchaseController extends Controller
     }
 
     /**
+     * Import purchase items from Excel file - Step 1: Upload file and get headers
+     */
+    public function importPurchaseItems(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $excelService = new PurchaseExcelService();
+            $headers = $excelService->getExcelHeaders($file);
+            
+            return response()->json([
+                'success' => true,
+                'headers' => $headers,
+                'message' => 'File uploaded successfully. Headers extracted.'
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Purchase items import failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error uploading file: ' . $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
+     * Preview purchase items from Excel file
+     */
+    public function previewImportPurchaseItems(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+            'columnMapping' => 'required|array',
+            'columnMapping.*' => 'required|string',
+            'skipHeader' => 'nullable',
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $columnMapping = $request->input('columnMapping');
+            $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
+            
+            $excelService = new PurchaseExcelService();
+            $previewData = $excelService->previewPurchaseItems($file, $columnMapping, $skipHeader);
+            
+            return response()->json([
+                'success' => true,
+                'preview' => $previewData
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Purchase items preview failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error previewing import: ' . $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
+     * Process purchase items import from Excel file
+     */
+    public function processImportPurchaseItems(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+            'columnMapping' => 'required|array',
+            'columnMapping.*' => 'required|string',
+            'skipHeader' => 'nullable',
+            'purchase_id' => 'required|integer|exists:purchases,id',
+        ]);
+
+        try {
+            $file = $request->file('file');
+            $columnMapping = $request->input('columnMapping');
+            $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
+            $purchaseId = $request->input('purchase_id');
+            
+            $excelService = new PurchaseExcelService();
+            $result = $excelService->importPurchaseItems($file, $columnMapping, $skipHeader, $purchaseId);
+            
+            return response()->json([
+                'success' => true,
+                'imported' => $result['imported'],
+                'errors' => $result['errors'],
+                'message' => $result['message'],
+                'errorDetails' => $result['errorDetails'] ?? []
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Purchase items import failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error processing import: ' . $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
      * Export purchases to Excel.
      */
     public function exportExcel(Request $request)
