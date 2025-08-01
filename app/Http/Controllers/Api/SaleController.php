@@ -199,18 +199,11 @@ class SaleController extends Controller
     private function performStockPreCheck(array $validatedData)
     {
         $stockErrors = [];
-        // Stock Pre-Check (now checks actual available stock from batches)
+        // Stock Pre-Check (checks Product.stock_quantity which is total sellable units)
         foreach ($validatedData['items'] as $index => $itemData) {
             $product = Product::find($itemData['product_id']);
-            if ($product) {
-                // Check actual available stock from batches instead of product.stock_quantity
-                $availableStock = $product->purchaseItems()
-                    ->where('remaining_quantity', '>', 0)
-                    ->sum('remaining_quantity');
-                
-                if ($availableStock < $itemData['quantity']) {
-                    $stockErrors["items.{$index}.quantity"] = ["Insufficient stock for '{$product->name}'. Available: {$availableStock} {$product->sellable_unit_name_plural}, Requested: {$itemData['quantity']}."];
-                }
+            if ($product && $product->stock_quantity < $itemData['quantity']) { // stock_quantity is total sellable units
+                $stockErrors["items.{$index}.quantity"] = ["Insufficient stock for '{$product->name}'. Available: {$product->stock_quantity} {$product->sellable_unit_name_plural}, Requested: {$itemData['quantity']}."];
             }
         }
         if (!empty($stockErrors)) throw ValidationException::withMessages($stockErrors);
@@ -294,14 +287,11 @@ class SaleController extends Controller
             $quantityFulfilledInSellableUnits = 0;
 
             // --- Total Stock Check (already done in performStockPreCheck, but double-check here) ---
-            // Check actual available stock from batches within the transaction
-            $availableStockInTransaction = $product->purchaseItems()
-                ->where('remaining_quantity', '>', 0)
-                ->sum('remaining_quantity');
-            
-            if ($availableStockInTransaction < $requestedSellableUnits) {
+            // Refresh product to get latest stock_quantity
+            $product->refresh();
+            if ($product->stock_quantity < $requestedSellableUnits) {
                 throw ValidationException::withMessages([
-                    'items' => ["Insufficient stock for product '{$product->name}'. Available: {$availableStockInTransaction} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
+                    'items' => ["Insufficient stock for product '{$product->name}'. Available: {$product->stock_quantity} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
                 ]);
             }
 
