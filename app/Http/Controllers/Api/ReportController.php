@@ -14,6 +14,7 @@ use App\Models\PurchaseItem;
 use App\Models\SaleItem;
 use App\Services\Pdf\MyCustomTCPDF;
 use App\Services\DailySalesPdfService;
+use App\Services\InventoryPdfService;
 use Arr;
 use DB;
 use Carbon\Carbon; // Ensure correct Carbon namespace is used
@@ -580,6 +581,41 @@ class ReportController extends Controller
         $pdf->Cell(25, 7, number_format($totals['paid'], 2), 1, 0, 'R', true);
         $pdf->Cell(30, 7, number_format($totals['grandTotal'], 2), 1, 0, 'R', true);
         $pdf->Cell(110, 7, 'Totals:', 1, 1, 'R', true);
+    }
+
+    /**
+     * Generate inventory PDF report
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function inventoryPdf(Request $request)
+    {
+        if ($request->user()->cannot('view-reports')) {
+            abort(403, 'You do not have permission to view reports.');
+        }
+
+        // Validate request
+        $validated = $request->validate([
+            'search' => 'nullable|string|max:255',
+            'low_stock_only' => 'nullable|boolean',
+            'out_of_stock_only' => 'nullable|boolean',
+        ]);
+
+        // Convert string values to boolean
+        $validated['low_stock_only'] = filter_var($validated['low_stock_only'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $validated['out_of_stock_only'] = filter_var($validated['out_of_stock_only'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        try {
+            $inventoryPdfService = new InventoryPdfService();
+            $pdfContent = $inventoryPdfService->generateInventoryPdf($validated);
+
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="inventory_report_' . now()->format('Y-m-d_H-i-s') . '.pdf"');
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to generate PDF: ' . $e->getMessage()], 500);
+        }
     }
 
     /**

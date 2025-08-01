@@ -38,6 +38,8 @@ class ProductResource extends JsonResource
             'last_sale_price_per_sellable_unit' => $this->last_sale_price_per_sellable_unit ?? null,
             'earliest_expiry_date' => $this->earliest_expiry_date ?? null,
             'current_stock_quantity' => $this->current_stock_quantity ?? 0,
+            'total_items_purchased' => $this->total_items_purchased ?? 0,
+            'total_items_sold' => $this->total_items_sold ?? 0,
             'available_batches' => $this->whenLoaded('purchaseItemsWithStock', function() {
                 return PurchaseItemResource::collection($this->purchaseItemsWithStock);
             }),

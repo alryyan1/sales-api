@@ -251,5 +251,20 @@ class Product extends Model
     {
         return (int) $this->stock_quantity;
     }
-  
+
+    /**
+     * Get the total quantity of items purchased for this product.
+     */
+    public function getTotalItemsPurchasedAttribute(): int
+    {
+        return (int) $this->purchaseItems()->sum('quantity');
+    }
+
+    /**
+     * Get the total quantity of items sold for this product.
+     */
+    public function getTotalItemsSoldAttribute(): int
+    {
+        return (int) $this->saleItems()->sum('quantity');
+    }
 }
