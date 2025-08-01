@@ -279,7 +279,7 @@ class SaleController extends Controller
 
     private function processSaleItems(array $validatedData, Sale $saleHeader, $newTotalSaleAmount)
     {
-        // 2. Process Sale Items and Stock (Total stock check, FIFO allocation)
+        // 2. Process Sale Items and Stock (Total stock check, FIFO allocation or direct stock decrement)
         foreach ($validatedData['items'] as $itemData) {
             $product = Product::findOrFail($itemData['product_id']); // Ensure product exists
             $requestedSellableUnits = (int) $itemData['quantity']; // Quantity customer wants, in sellable units
@@ -305,46 +305,93 @@ class SaleController extends Controller
                 ->lockForUpdate()                      // CRITICAL for concurrent stock updates
                 ->get();
 
-            // --- Allocate from Batches (FIFO) ---
-            foreach ($availableBatches as $batch) {
-                // If we've fulfilled the requested quantity for this sale item, stop processing batches
-                if ($quantityFulfilledInSellableUnits >= $requestedSellableUnits) {
-                    break;
-                }
+            // Check if we have any batches available
+            if ($availableBatches->count() > 0) {
+                // --- Allocate from Batches (FIFO) ---
+                foreach ($availableBatches as $batch) {
+                    // If we've fulfilled the requested quantity for this sale item, stop processing batches
+                    if ($quantityFulfilledInSellableUnits >= $requestedSellableUnits) {
+                        break;
+                    }
 
-                // Determine how many units can be sold from this current batch
-                $canSellFromThisBatchInSellableUnits = min(
-                    $requestedSellableUnits - $quantityFulfilledInSellableUnits, // How many more we still need to fulfill
-                    $batch->remaining_quantity                               // How many are actually left in this batch
-                );
+                    // Determine how many units can be sold from this current batch
+                    $canSellFromThisBatchInSellableUnits = min(
+                        $requestedSellableUnits - $quantityFulfilledInSellableUnits, // How many more we still need to fulfill
+                        $batch->remaining_quantity                               // How many are actually left in this batch
+                    );
 
-                if ($canSellFromThisBatchInSellableUnits > 0) {
-                    // Create the SaleItem record, linking it to the specific PurchaseItem (batch)
+                    if ($canSellFromThisBatchInSellableUnits > 0) {
+                        // Create the SaleItem record, linking it to the specific PurchaseItem (batch)
+                        $saleHeader->items()->create([
+                            'product_id'         => $product->id,
+                            'purchase_item_id'   => $batch->id, // Link to the specific batch
+                            'batch_number_sold'  => $batch->batch_number, // Store batch number for easy display
+                            'quantity'           => $canSellFromThisBatchInSellableUnits, // Quantity sold in SELLABLE units
+                            'unit_price'         => $unitSalePrice, // Sale price per sellable unit (from request)
+                            'cost_price_at_sale' => $batch->cost_per_sellable_unit, // COGS component from the batch
+                            'total_price'        => $canSellFromThisBatchInSellableUnits * $unitSalePrice,
+                        ]);
+
+                        // Decrement the remaining quantity of the batch (which is in sellable units)
+                        $batch->decrement('remaining_quantity', $canSellFromThisBatchInSellableUnits);
+                        // The PurchaseItemObserver is responsible for listening to this 'saved' event on PurchaseItem
+                        // and then recalculating and updating the total Product->stock_quantity (which is also in sellable units).
+
+                        // Update totals for the current sale
+                        $newTotalSaleAmount += $canSellFromThisBatchInSellableUnits * $unitSalePrice;
+                        $quantityFulfilledInSellableUnits += $canSellFromThisBatchInSellableUnits;
+
+                        Log::info("SaleItem created: Product ID {$product->id}, Batch ID {$batch->id}, Qty Sold: {$canSellFromThisBatchInSellableUnits}, Remaining in Batch: {$batch->fresh()->remaining_quantity}. Sale ID: {$saleHeader->id}");
+                    }
+                } // End loop through available batches
+
+                // Check if we still need to fulfill more quantity (batch allocation was insufficient)
+                if ($quantityFulfilledInSellableUnits < $requestedSellableUnits) {
+                    $remainingQuantity = $requestedSellableUnits - $quantityFulfilledInSellableUnits;
+                    
+                    // Create a sale item for the remaining quantity without batch tracking
                     $saleHeader->items()->create([
                         'product_id'         => $product->id,
-                        'purchase_item_id'   => $batch->id, // Link to the specific batch
-                        'batch_number_sold'  => $batch->batch_number, // Store batch number for easy display
-                        'quantity'           => $canSellFromThisBatchInSellableUnits, // Quantity sold in SELLABLE units
+                        'purchase_item_id'   => null, // No batch tracking for this portion
+                        'batch_number_sold'  => null, // No batch number
+                        'quantity'           => $remainingQuantity, // Quantity sold in SELLABLE units
                         'unit_price'         => $unitSalePrice, // Sale price per sellable unit (from request)
-                        'cost_price_at_sale' => $batch->cost_per_sellable_unit, // COGS component from the batch
-                        'total_price'        => $canSellFromThisBatchInSellableUnits * $unitSalePrice,
+                        'cost_price_at_sale' => 0, // No cost tracking for non-batch items
+                        'total_price'        => $remainingQuantity * $unitSalePrice,
                     ]);
 
-                    // Decrement the remaining quantity of the batch (which is in sellable units)
-                    $batch->decrement('remaining_quantity', $canSellFromThisBatchInSellableUnits);
-                    // The PurchaseItemObserver is responsible for listening to this 'saved' event on PurchaseItem
-                    // and then recalculating and updating the total Product->stock_quantity (which is also in sellable units).
-
+                    // Decrement directly from product stock
+                    $product->decrement('stock_quantity', $remainingQuantity);
+                    
                     // Update totals for the current sale
-                    $newTotalSaleAmount += $canSellFromThisBatchInSellableUnits * $unitSalePrice;
-                    $quantityFulfilledInSellableUnits += $canSellFromThisBatchInSellableUnits;
+                    $newTotalSaleAmount += $remainingQuantity * $unitSalePrice;
+                    $quantityFulfilledInSellableUnits += $remainingQuantity;
 
-                    Log::info("SaleItem created: Product ID {$product->id}, Batch ID {$batch->id}, Qty Sold: {$canSellFromThisBatchInSellableUnits}, Remaining in Batch: {$batch->fresh()->remaining_quantity}. Sale ID: {$saleHeader->id}");
+                    Log::info("SaleItem created (no batch): Product ID {$product->id}, Qty Sold: {$remainingQuantity}, Direct stock decrement. Sale ID: {$saleHeader->id}");
                 }
-            } // End loop through available batches
+            } else {
+                // --- No batches available, decrement directly from product stock ---
+                $saleHeader->items()->create([
+                    'product_id'         => $product->id,
+                    'purchase_item_id'   => null, // No batch tracking
+                    'batch_number_sold'  => null, // No batch number
+                    'quantity'           => $requestedSellableUnits, // Quantity sold in SELLABLE units
+                    'unit_price'         => $unitSalePrice, // Sale price per sellable unit (from request)
+                    'cost_price_at_sale' => 0, // No cost tracking for non-batch items
+                    'total_price'        => $requestedSellableUnits * $unitSalePrice,
+                ]);
 
-            // Final check to ensure the requested quantity was fully met
-            // This should not be reached if the total stock check was correct
+                // Decrement directly from product stock
+                $product->decrement('stock_quantity', $requestedSellableUnits);
+                
+                // Update totals for the current sale
+                $newTotalSaleAmount += $requestedSellableUnits * $unitSalePrice;
+                $quantityFulfilledInSellableUnits = $requestedSellableUnits;
+
+                Log::info("SaleItem created (no batch): Product ID {$product->id}, Qty Sold: {$requestedSellableUnits}, Direct stock decrement. Sale ID: {$saleHeader->id}");
+            }
+
+            // Final verification that the requested quantity was fully met
             if ($quantityFulfilledInSellableUnits < $requestedSellableUnits) {
                 Log::critical("Stock allocation discrepancy for Product ID {$product->id} on Sale ID {$saleHeader->id}. Requested: {$requestedSellableUnits}, Fulfilled: {$quantityFulfilledInSellableUnits}.");
                 throw new \Exception("Could not fulfill requested quantity for product '{$product->name}' due to an unexpected stock allocation issue. Please try again.");

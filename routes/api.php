@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{
   AuthController,
+  BackupController,
   CategoryController,
   ClientController,
   DashboardController,
@@ -60,6 +61,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
   Route::get('admin/settings', [SettingController::class, 'index'])->name('settings.index');
   Route::put('admin/settings', [SettingController::class, 'update'])->name('settings.update');
+
+  // -- Database Backup Management --
+  Route::middleware(['role:admin'])->prefix('admin')->name('api.admin.')->group(function () {
+    Route::get('/backups', [BackupController::class, 'index'])->name('backups.index');
+    Route::post('/backups', [BackupController::class, 'store'])->name('backups.store');
+    Route::get('/backups/statistics', [BackupController::class, 'statistics'])->name('backups.statistics');
+    Route::get('/backups/{filename}/download', [BackupController::class, 'download'])->name('backups.download');
+    Route::delete('/backups/{filename}', [BackupController::class, 'destroy'])->name('backups.destroy');
+  });
   // -- Reporting Routes --
   Route::prefix('reports')->name('api.reports.')->group(function () {
     Route::get('/sales', [ReportController::class, 'salesReport'])->name('sales');
