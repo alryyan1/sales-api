@@ -587,6 +587,114 @@ class SaleController extends Controller
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
+
+    /**
+     * Delete a specific sale item and return inventory quantity.
+     *
+     * @param Request $request
+     * @param Sale $sale
+     * @param int $saleItemId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function deleteSaleItem(Request $request, Sale $sale, $saleItemId)
+    {
+        try {
+            // Find the sale item
+            $saleItem = $sale->items()->findOrFail($saleItemId);
+            
+            // Check if sale is completed (can only delete from completed sales)
+            if ($sale->status !== 'completed') {
+                return response()->json([
+                    'message' => 'Cannot delete items from non-completed sales.',
+                    'error' => 'Sale status is not completed'
+                ], Response::HTTP_BAD_REQUEST);
+            }
+
+            // Start transaction
+            DB::beginTransaction();
+
+            try {
+                // Get the product and purchase item batch
+                $product = $saleItem->product;
+                $purchaseItem = $saleItem->purchaseItemBatch;
+
+                // Return quantity to inventory
+                if ($purchaseItem) {
+                    // Return to the specific batch
+                    $purchaseItem->remaining_quantity += $saleItem->quantity;
+                    $purchaseItem->save();
+                    
+                    Log::info("Returned {$saleItem->quantity} units to batch {$purchaseItem->batch_number} for product " . ($product ? $product->name : 'Unknown'));
+                } else {
+                    // If no specific batch, we need to handle this case
+                    // For now, we'll log a warning
+                    Log::warning("Sale item {$saleItem->id} has no associated purchase item batch");
+                }
+
+                // Update product stock quantity (this will be handled by the observer)
+                // The PurchaseItemObserver will automatically update product.stock_quantity
+
+                // Delete the sale item first
+                $deletedQuantity = $saleItem->quantity;
+                $productName = $product ? $product->name : 'Unknown Product';
+                $saleItem->delete();
+
+                // Recalculate sale totals after deletion
+                $sale->refresh(); // Refresh to get updated items
+                $remainingItems = $sale->items;
+                $newSubtotal = $remainingItems->sum('total_price');
+                $newTotalAmount = $newSubtotal; // No tax calculation for now
+                
+                // Update sale totals
+                $sale->total_amount = $newTotalAmount;
+                $sale->paid_amount = $sale->payments->sum('amount');
+                // due_amount is calculated, not stored in database
+                $sale->save();
+
+                // If no items left, consider cancelling the sale
+                if ($remainingItems->count() === 0) {
+                    $sale->status = 'cancelled';
+                    $sale->save();
+                    Log::info("Sale {$sale->id} cancelled due to all items being deleted");
+                }
+
+                DB::commit();
+
+                return response()->json([
+                    'message' => "Sale item deleted successfully. {$deletedQuantity} units of {$productName} returned to inventory.",
+                    'deleted_quantity' => $deletedQuantity,
+                    'product_name' => $productName,
+                    'returned_to_batch' => $purchaseItem ? $purchaseItem->batch_number : null,
+                    'new_sale_total' => $newTotalAmount,
+                    'remaining_items_count' => $remainingItems->count(),
+                    'sale_status' => $sale->status
+                ], Response::HTTP_OK);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'message' => 'Sale item not found.',
+                'error' => 'Sale item does not exist'
+            ], Response::HTTP_NOT_FOUND);
+        } catch (\Exception $e) {
+            Log::error('Failed to delete sale item', [
+                'sale_id' => $sale->id,
+                'sale_item_id' => $saleItemId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to delete sale item. Please try again.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
     /**
      * Generate and download a PDF invoice for a specific sale.
      *

@@ -132,6 +132,7 @@ Route::post('/purchases/process-import-items', [PurchaseController::class, 'proc
   Route::apiResource('sales', SaleController::class);
   Route::post('/sales/{sale}/payments', [SaleController::class, 'addPayment'])->name('api.sales.addPayment');
   Route::delete('/sales/{sale}/payments', [SaleController::class, 'deletePayments'])->name('api.sales.deletePayments');
+  Route::delete('/sales/{sale}/items/{saleItem}', [SaleController::class, 'deleteSaleItem'])->name('api.sales.deleteSaleItem');
   Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf'); // <-- New Route
   Route::get('/sales/{sale}/invoice-pdf', [SaleController::class, 'downloadInvoicePDF'])->name('api.sales.invoice.pdf'); // <-- Invoice PDF Route
 
