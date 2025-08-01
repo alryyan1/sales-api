@@ -285,8 +285,7 @@ class PurchaseExcelService
     }
 
     /**
-     * Import purchase items from Excel file
-     *
+     * Import purchase items from Excel file with batch processing for large datasets
      * @param \Illuminate\Http\UploadedFile $file
      * @param array $columnMapping
      * @param bool $skipHeader
@@ -295,6 +294,9 @@ class PurchaseExcelService
      */
     public function importPurchaseItems($file, array $columnMapping, bool $skipHeader = true, int $purchaseId): array
     {
+        // Set memory limit for large files
+        ini_set('memory_limit', '512M');
+        
         $spreadsheet = IOFactory::load($file->getPathname());
         $worksheet = $spreadsheet->getActiveSheet();
         $highestRow = $worksheet->getHighestRow();
@@ -323,87 +325,109 @@ class PurchaseExcelService
             'headers' => $headers,
             'columnMapping' => $columnMapping,
             'columnIndexMapping' => $columnIndexMapping,
-            'purchaseId' => $purchaseId
+            'purchaseId' => $purchaseId,
+            'totalRows' => $highestRow - $startRow + 1
         ]);
         
-        // Start database transaction
-        DB::beginTransaction();
+        // Batch size for processing
+        $batchSize = 100;
+        $totalBatches = ceil(($highestRow - $startRow + 1) / $batchSize);
         
-        try {
-            for ($row = $startRow; $row <= $highestRow; $row++) {
-                $rowData = [];
-                
-                // Read row data based on column mapping
-                foreach ($columnIndexMapping as $purchaseItemField => $columnIndex) {
-                    $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
-                    if ($cellValue !== null && $cellValue !== '') {
-                        // Convert data types appropriately
-                        if (in_array($purchaseItemField, ['quantity', 'unit_cost', 'sale_price'])) {
-                            $rowData[$purchaseItemField] = is_numeric($cellValue) ? (float) $cellValue : 0;
-                        } else {
-                            $rowData[$purchaseItemField] = $cellValue;
+        // Process in batches for better memory management
+        for ($batch = 0; $batch < $totalBatches; $batch++) {
+            $batchStartRow = $startRow + ($batch * $batchSize);
+            $batchEndRow = min($batchStartRow + $batchSize - 1, $highestRow);
+            
+            // Start database transaction for this batch
+            DB::beginTransaction();
+            
+            try {
+                for ($row = $batchStartRow; $row <= $batchEndRow; $row++) {
+                    $rowData = [];
+                    
+                    // Read row data based on column mapping
+                    foreach ($columnIndexMapping as $purchaseItemField => $columnIndex) {
+                        $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
+                        if ($cellValue !== null && $cellValue !== '') {
+                            // Convert data types appropriately
+                            if (in_array($purchaseItemField, ['quantity', 'unit_cost', 'sale_price'])) {
+                                $rowData[$purchaseItemField] = is_numeric($cellValue) ? (float) $cellValue : 0;
+                            } else {
+                                $rowData[$purchaseItemField] = $cellValue;
+                            }
                         }
+                    }
+                    
+                    // Apply default values for unmapped or skipped columns
+                    $rowData = $this->applyDefaultValues($rowData, $columnMapping);
+                    
+                    // Skip empty rows (after applying defaults)
+                    if (empty($rowData['product_name']) && empty($rowData['product_sku'])) {
+                        continue;
+                    }
+                    
+                    // Validate and create purchase item
+                    $validationResult = $this->validatePurchaseItemData($rowData);
+                    if (!$validationResult['valid']) {
+                        $errors++;
+                        $errorDetails[] = [
+                            'row' => $row,
+                            'errors' => $validationResult['errors']
+                        ];
+                        continue;
+                    }
+                    
+                    // Create purchase item
+                    $this->createPurchaseItem($rowData, $purchaseId);
+                    $imported++;
+                    
+                    // Log progress for large imports
+                    if ($imported % 50 === 0) {
+                        Log::info("Import progress: {$imported} items imported, {$errors} errors");
                     }
                 }
                 
-                // Apply default values for unmapped or skipped columns
-                $rowData = $this->applyDefaultValues($rowData, $columnMapping);
+                DB::commit();
                 
-                // Skip empty rows (after applying defaults)
-                if (empty($rowData['product_name']) && empty($rowData['product_sku'])) {
-                    continue;
-                }
+                // Log batch completion
+                Log::info("Batch " . ($batch + 1) . "/{$totalBatches} completed: rows {$batchStartRow}-{$batchEndRow}");
                 
-                // Validate and create purchase item
-                $validationResult = $this->validatePurchaseItemData($rowData);
-                if (!$validationResult['valid']) {
-                    $errors++;
-                    $errorDetails[] = [
-                        'row' => $row,
-                        'errors' => $validationResult['errors']
-                    ];
-                    continue;
-                }
+                // Clear memory after each batch
+                gc_collect_cycles();
                 
-                // Create purchase item
-                $this->createPurchaseItem($rowData, $purchaseId);
-                $imported++;
+            } catch (\Exception $e) {
+                DB::rollBack();
                 
-                // Log first few rows for debugging
-                if ($row <= $startRow + 5) {
-                    Log::info("Processing row {$row}:", $rowData);
-                }
+                Log::error('Purchase items import batch failed:', [
+                    'batch' => $batch + 1,
+                    'rows' => "{$batchStartRow}-{$batchEndRow}",
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                
+                // Add batch error to error details
+                $errorDetails[] = [
+                    'row' => "Batch " . ($batch + 1),
+                    'errors' => ['batch_error' => $e->getMessage()]
+                ];
+                $errors++;
+                
+                // Continue with next batch instead of failing completely
+                continue;
             }
-            
-            DB::commit();
-            
-            // Clear memory
-            $spreadsheet->disconnectWorksheets();
-            unset($spreadsheet);
-            gc_collect_cycles();
-            
-            return [
-                'imported' => $imported,
-                'errors' => $errors,
-                'message' => "Import completed successfully. {$imported} items imported, {$errors} errors.",
-                'errorDetails' => $errorDetails
-            ];
-            
-        } catch (\Exception $e) {
-            DB::rollBack();
-            
-            // Clear memory
-            $spreadsheet->disconnectWorksheets();
-            unset($spreadsheet);
-            gc_collect_cycles();
-            
-            Log::error('Purchase items import failed:', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            
-            throw $e;
         }
+        
+        // Clear memory
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+        gc_collect_cycles();
+        
+        return [
+            'imported' => $imported,
+            'errors' => $errors,
+            'message' => "Import completed successfully. {$imported} items imported, {$errors} errors.",
+            'errorDetails' => $errorDetails
+        ];
     }
 
     /**
@@ -513,6 +537,9 @@ class PurchaseExcelService
             'sale_price' => isset($data['sale_price']) && $data['sale_price'] > 0 ? (float) $data['sale_price'] : null,
             'expiry_date' => !empty($data['expiry_date']) ? $data['expiry_date'] : null,
         ]);
+        
+        // Update product stock quantity
+        $product->increment('stock_quantity', $quantity);
     }
 
     /**
