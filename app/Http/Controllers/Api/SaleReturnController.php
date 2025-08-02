@@ -226,4 +226,19 @@ public function index(Request $request)
         // return new SaleReturnResource($saleReturn);
         return response()->json($saleReturn); // Simplified
     }
+
+    // Get total returned amount for a specific date
+    public function getTotalReturnedAmount(Request $request)
+    {
+        $date = $request->input('date', now()->format('Y-m-d'));
+        
+        $totalReturnedAmount = SaleReturn::where('return_date', $date)
+            ->where('status', 'completed')
+            ->sum('total_returned_amount');
+        
+        return response()->json([
+            'date' => $date,
+            'total_returned_amount' => $totalReturnedAmount
+        ]);
+    }
 }

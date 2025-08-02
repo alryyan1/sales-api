@@ -22,7 +22,8 @@ use App\Http\Controllers\Api\{
   SupplierController,
   SupplierPaymentController,
   UnitController,
-  UserController
+  UserController,
+  WhatsAppController
 };
 
 // --- Public Routes ---
@@ -92,6 +93,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('roles', RoleController::class);
 
     Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
+    
+    // -- WhatsApp Scheduler Routes --
+    Route::get('/whatsapp-schedulers', [WhatsAppController::class, 'getSchedulers'])->name('whatsapp-schedulers.index');
+    Route::post('/whatsapp-schedulers', [WhatsAppController::class, 'createScheduler'])->name('whatsapp-schedulers.store');
+    Route::put('/whatsapp-schedulers/{id}', [WhatsAppController::class, 'updateScheduler'])->name('whatsapp-schedulers.update');
+    Route::delete('/whatsapp-schedulers/{id}', [WhatsAppController::class, 'deleteScheduler'])->name('whatsapp-schedulers.destroy');
+    Route::patch('/whatsapp-schedulers/{id}/toggle', [WhatsAppController::class, 'toggleScheduler'])->name('whatsapp-schedulers.toggle');
+    Route::post('/whatsapp-schedulers/test', [WhatsAppController::class, 'testScheduler'])->name('whatsapp-schedulers.test');
   });
 
   // -- Suppliers Management --
@@ -107,6 +116,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/payment-types', [SupplierPaymentController::class, 'getPaymentTypes']);
 
   // -- Sale Returns --
+  Route::get('/sale-returns/total-amount', [SaleReturnController::class, 'getTotalReturnedAmount'])->name('api.sale-returns.total-amount');
   Route::apiResource('sale-returns', SaleReturnController::class)->except(['update', 'destroy']);
   Route::get('/sales/{sale}/returnable-items', [SaleController::class, 'getReturnableItems'])->name('api.sales.returnableItems');
 
@@ -128,6 +138,7 @@ Route::post('/purchases/import-items', [PurchaseController::class, 'importPurcha
 Route::post('/purchases/preview-import-items', [PurchaseController::class, 'previewImportPurchaseItems']);
 Route::post('/purchases/process-import-items', [PurchaseController::class, 'processImportPurchaseItems']);
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
+  Route::get('/sales/today-by-created-at', [SaleController::class, 'getTodaySalesByCreatedAt'])->name('api.sales.todayByCreatedAt');
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class);
   Route::post('/sales/create-empty', [SaleController::class, 'createEmptySale'])->name('api.sales.createEmpty');

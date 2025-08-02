@@ -11,7 +11,7 @@ return new class extends Migration {
             $table->foreignId('user_id')->nullable()->constrained('users')->onDelete('set null'); // User who recorded payment
 
             // Option A: Enum for payment method
-            $table->enum('method', ['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'other'])->default('cash');
+            $table->enum('method', ['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'refund', 'other'])->default('cash');
             // Option B: Foreign key to payment_methods table
             // $table->foreignId('payment_method_id')->constrained('payment_methods');
 

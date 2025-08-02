@@ -67,8 +67,37 @@ class SaleController extends Controller
         }
 
         $sales = $query->latest('id')->paginate($request->input('per_page', 15));
+        
+        // Add return information to each sale
+        if ($sales instanceof \Illuminate\Pagination\LengthAwarePaginator) {
+            $sales->getCollection()->transform(function ($sale) {
+                $sale->has_returns = $sale->hasReturns();
+                return $sale;
+            });
+        }
+        
         return SaleResource::collection($sales);
     }
+
+    /**
+     * Get today's sales by created_at (for POS TodaySalesColumn)
+     */
+    public function getTodaySalesByCreatedAt(Request $request)
+    {
+        $query = Sale::with([
+            'client:id,name',
+            'user:id,name',
+            'items.product' => function($query) {
+                $query->with(['category', 'stockingUnit', 'sellableUnit']);
+            },
+            'payments'
+        ])
+        ->whereDate('created_at', Carbon::today());
+
+        $sales = $query->latest('created_at')->latest('id')->get();
+        return response()->json(['data' => SaleResource::collection($sales)]);
+    }
+
     public function getReturnableItems(Sale $sale)
     {
         // $this->authorize('createReturn', $sale); // Policy check if user can create return for this sale
@@ -542,9 +571,62 @@ class SaleController extends Controller
      */
     public function destroy(Sale $sale)
     {
-        return response()->json(['message' => 'Deleting sales records is generally not allowed due to inventory and accounting implications. Consider cancelling the sale instead.'], Response::HTTP_FORBIDDEN);
-        // If deletion with stock reversal is implemented, it would be similar to PurchaseController::destroy
-        // but incrementing stock on PurchaseItem batches.
+        try {
+            // Check if sale can be deleted (only draft or pending sales)
+            if ($sale->status === 'completed') {
+                return response()->json([
+                    'message' => 'Cannot delete completed sales. Consider creating a return instead.'
+                ], Response::HTTP_FORBIDDEN);
+            }
+
+            DB::transaction(function () use ($sale) {
+                // Return stock to inventory for each sale item
+                foreach ($sale->items as $saleItem) {
+                    $product = $saleItem->product;
+                    $quantity = $saleItem->quantity;
+                    
+                    // If the sale item has a specific batch, return to that batch
+                    if ($saleItem->purchase_item_id) {
+                        $purchaseItem = PurchaseItem::find($saleItem->purchase_item_id);
+                        if ($purchaseItem) {
+                            $purchaseItem->increment('remaining_quantity', $quantity);
+                            // PurchaseItemObserver will update Product->stock_quantity
+                        } else {
+                            // Fallback: increment total product stock
+                            $product->increment('stock_quantity', $quantity);
+                        }
+                    } else {
+                        // No specific batch, increment total product stock
+                        $product->increment('stock_quantity', $quantity);
+                    }
+                }
+
+                // Delete all payments for this sale
+                $sale->payments()->delete();
+                
+                // Delete all sale items
+                $sale->items()->delete();
+                
+                // Delete the sale header
+                $sale->delete();
+            });
+
+            return response()->json([
+                'message' => 'Sale deleted successfully. Stock has been returned to inventory.'
+            ], Response::HTTP_OK);
+
+        } catch (\Exception $e) {
+            Log::error('Error deleting sale: ' . $e->getMessage(), [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to delete sale. Please try again.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**
