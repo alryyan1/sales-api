@@ -270,6 +270,128 @@ class PurchaseController extends Controller
     }
 
     /**
+     * Add a new item to a purchase.
+     */
+    public function addPurchaseItem(Request $request, Purchase $purchase)
+    {
+        $validatedData = $request->validate([
+            'product_id' => 'required|exists:products,id',
+            'batch_number' => 'nullable|string|max:100',
+            'quantity' => 'required|integer|min:1',
+            'unit_cost' => 'required|numeric|min:0',
+            'sale_price' => 'nullable|numeric|min:0',
+            'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',
+        ]);
+
+        try {
+            DB::transaction(function () use ($purchase, $validatedData) {
+                // Create the purchase item
+                $purchaseItem = $purchase->items()->create([
+                    'product_id' => $validatedData['product_id'],
+                    'batch_number' => $validatedData['batch_number'] ?? null,
+                    'quantity' => $validatedData['quantity'],
+                    'unit_cost' => $validatedData['unit_cost'],
+                    'sale_price' => $validatedData['sale_price'] ?? null,
+                    'expiry_date' => $validatedData['expiry_date'] ?? null,
+                    'remaining_quantity' => $validatedData['quantity'], // Initially, remaining = total quantity
+                ]);
+
+                // Update purchase total amount
+                $this->updatePurchaseTotal($purchase);
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
+        } catch (\Exception $e) {
+            Log::error('Failed to add purchase item: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to add purchase item: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Update a specific purchase item.
+     */
+    public function updatePurchaseItem(Request $request, Purchase $purchase, PurchaseItem $purchaseItem)
+    {
+        // Ensure the purchase item belongs to the purchase
+        if ($purchaseItem->purchase_id !== $purchase->id) {
+            return response()->json(['message' => 'Purchase item does not belong to this purchase'], 404);
+        }
+
+        $validatedData = $request->validate([
+            'product_id' => 'required|exists:products,id',
+            'batch_number' => 'nullable|string|max:100',
+            'quantity' => 'required|integer|min:1',
+            'unit_cost' => 'required|numeric|min:0',
+            'sale_price' => 'nullable|numeric|min:0',
+            'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',
+        ]);
+
+        try {
+            DB::transaction(function () use ($purchase, $purchaseItem, $validatedData) {
+                // Calculate the difference in quantity for stock adjustment
+                $quantityDifference = $validatedData['quantity'] - $purchaseItem->quantity;
+                
+                // Update the purchase item
+                $purchaseItem->update([
+                    'product_id' => $validatedData['product_id'],
+                    'batch_number' => $validatedData['batch_number'] ?? null,
+                    'quantity' => $validatedData['quantity'],
+                    'unit_cost' => $validatedData['unit_cost'],
+                    'sale_price' => $validatedData['sale_price'] ?? null,
+                    'expiry_date' => $validatedData['expiry_date'] ?? null,
+                    'remaining_quantity' => $purchaseItem->remaining_quantity + $quantityDifference, // Adjust remaining quantity
+                ]);
+
+                // Update purchase total amount
+                $this->updatePurchaseTotal($purchase);
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
+        } catch (\Exception $e) {
+            Log::error('Failed to update purchase item: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to update purchase item: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Delete a specific purchase item.
+     */
+    public function deletePurchaseItem(Purchase $purchase, PurchaseItem $purchaseItem)
+    {
+        // Ensure the purchase item belongs to the purchase
+        if ($purchaseItem->purchase_id !== $purchase->id) {
+            return response()->json(['message' => 'Purchase item does not belong to this purchase'], 404);
+        }
+
+        try {
+            DB::transaction(function () use ($purchase, $purchaseItem) {
+                // Delete the purchase item
+                $purchaseItem->delete();
+
+                // Update purchase total amount
+                $this->updatePurchaseTotal($purchase);
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
+        } catch (\Exception $e) {
+            Log::error('Failed to delete purchase item: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to delete purchase item: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Update the total amount of a purchase based on its items.
+     */
+    private function updatePurchaseTotal(Purchase $purchase): void
+    {
+        $totalAmount = $purchase->items()->sum(DB::raw('quantity * unit_cost'));
+        $purchase->update(['total_amount' => $totalAmount]);
+    }
+
+    /**
      * Import purchase items from Excel file - Step 1: Upload file and get headers
      */
     public function importPurchaseItems(Request $request)
