@@ -270,6 +270,124 @@ class PurchaseController extends Controller
     }
 
     /**
+     * Add a new purchase item to an existing purchase.
+     */
+    public function addPurchaseItem(Request $request, Purchase $purchase)
+    {
+        // Check if purchase is received - prevent modifications
+        if ($purchase->status === 'received') {
+            return response()->json(['message' => 'Cannot modify items for received purchases.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $validatedData = $request->validate([
+            'product_id' => 'required|exists:products,id',
+            'batch_number' => 'nullable|string|max:100',
+            'quantity' => 'required|integer|min:1',
+            'unit_cost' => 'required|numeric|min:0',
+            'sale_price' => 'nullable|numeric|min:0',
+            'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',
+        ]);
+
+        try {
+            DB::transaction(function () use ($purchase, $validatedData) {
+                $purchaseItem = $purchase->items()->create($validatedData);
+                
+                // Update purchase total
+                $purchase->updateTotalAmount();
+                
+                Log::info("Purchase item added to purchase {$purchase->id}: Item ID {$purchaseItem->id}");
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json(['purchase' => new PurchaseResource($purchase->fresh())], Response::HTTP_CREATED);
+        } catch (\Exception $e) {
+            Log::error("Failed to add purchase item to purchase {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to add purchase item: ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Update an existing purchase item.
+     */
+    public function updatePurchaseItem(Request $request, Purchase $purchase, PurchaseItem $purchaseItem)
+    {
+        // Check if purchase is received - prevent modifications
+        if ($purchase->status === 'received') {
+            return response()->json(['message' => 'Cannot modify items for received purchases.'], Response::HTTP_FORBIDDEN);
+        }
+
+        // Ensure the purchase item belongs to the purchase
+        if ($purchaseItem->purchase_id !== $purchase->id) {
+            return response()->json(['message' => 'Purchase item does not belong to this purchase.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $validatedData = $request->validate([
+            'product_id' => 'sometimes|required|exists:products,id',
+            'batch_number' => 'sometimes|nullable|string|max:100',
+            'quantity' => 'sometimes|required|integer|min:1',
+            'unit_cost' => 'sometimes|required|numeric|min:0',
+            'sale_price' => 'sometimes|nullable|numeric|min:0',
+            'expiry_date' => 'sometimes|nullable|date_format:Y-m-d|after_or_equal:purchase_date',
+        ]);
+
+        try {
+            DB::transaction(function () use ($purchase, $purchaseItem, $validatedData) {
+                $purchaseItem->update($validatedData);
+                
+                // Update purchase total
+                $purchase->updateTotalAmount();
+                
+                Log::info("Purchase item updated in purchase {$purchase->id}: Item ID {$purchaseItem->id}");
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
+        } catch (\Exception $e) {
+            Log::error("Failed to update purchase item {$purchaseItem->id} in purchase {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to update purchase item: ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Delete a purchase item from a purchase.
+     */
+    public function deletePurchaseItem(Purchase $purchase, PurchaseItem $purchaseItem)
+    {
+        // Check if purchase is received - prevent modifications
+        if ($purchase->status === 'received') {
+            return response()->json(['message' => 'Cannot modify items for received purchases.'], Response::HTTP_FORBIDDEN);
+        }
+
+        // Ensure the purchase item belongs to the purchase
+        if ($purchaseItem->purchase_id !== $purchase->id) {
+            return response()->json(['message' => 'Purchase item does not belong to this purchase.'], Response::HTTP_FORBIDDEN);
+        }
+
+        // Check if the item has been used in sales (remaining_quantity < quantity)
+        if ($purchaseItem->remaining_quantity < $purchaseItem->quantity) {
+            return response()->json(['message' => 'Cannot delete purchase item that has been partially sold.'], Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            DB::transaction(function () use ($purchase, $purchaseItem) {
+                $itemId = $purchaseItem->id;
+                $purchaseItem->delete();
+                
+                // Update purchase total
+                $purchase->updateTotalAmount();
+                
+                Log::info("Purchase item deleted from purchase {$purchase->id}: Item ID {$itemId}");
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
+        } catch (\Exception $e) {
+            Log::error("Failed to delete purchase item {$purchaseItem->id} from purchase {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to delete purchase item: ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * Import purchase items from Excel file - Step 1: Upload file and get headers
      */
     public function importPurchaseItems(Request $request)

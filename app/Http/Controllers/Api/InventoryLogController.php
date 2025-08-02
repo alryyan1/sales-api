@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 use App\Http\Resources\InventoryLogEntryResource; // Create this
+use App\Services\InventoryLogPdfService;
 
 class InventoryLogController extends Controller
 {
@@ -171,5 +172,29 @@ class InventoryLogController extends Controller
         // Format with a resource if desired (InventoryLogEntryResource would be simple)
         // return InventoryLogEntryResource::collection($paginatedResults);
         return response()->json($paginatedResults); // Return paginated data directly
+    }
+
+    public function generatePdf(Request $request)
+    {
+        // $this->authorize('view-inventory-log'); // Permission check
+
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+            'product_id' => 'nullable|integer|exists:products,id',
+            'type' => 'nullable|string|in:purchase,sale,adjustment,requisition_issue',
+            'search' => 'nullable|string|max:255'
+        ]);
+
+        try {
+            $pdfService = new InventoryLogPdfService();
+            $pdf = $pdfService->generatePdf($validated);
+
+            return response($pdf)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'attachment; filename="inventory-log-' . date('Y-m-d') . '.pdf"');
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to generate PDF: ' . $e->getMessage()], 500);
+        }
     }
 }
