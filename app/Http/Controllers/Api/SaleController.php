@@ -1384,7 +1384,7 @@ class SaleController extends Controller
         $userId = $request->input('user_id');
 
         $query = Sale::whereDate('sale_date', $date)
-            ->where('status', 'completed')
+            ->whereIn('status', ['completed', 'pending', 'draft']) // Include all relevant statuses
             ->with(['payments', 'user:id,name']);
 
         if ($userId) {
@@ -1392,9 +1392,30 @@ class SaleController extends Controller
         }
 
         $sales = $query->get();
+        
+        // Debug logging
+        \Log::info('Calculator API Debug', [
+            'date' => $date,
+            'user_id' => $userId,
+            'total_sales_found' => $sales->count(),
+            'sales_by_status' => $sales->groupBy('status')->map->count(),
+            'sales_details' => $sales->map(function($sale) {
+                return [
+                    'id' => $sale->id,
+                    'status' => $sale->status,
+                    'total_amount' => $sale->total_amount,
+                    'user_id' => $sale->user_id,
+                    'user_name' => $sale->user?->name,
+                    'payments_count' => $sale->payments->count(),
+                    'payments_sum' => $sale->payments->sum('amount')
+                ];
+            })
+        ]);
 
-        // Calculate total income
-        $totalIncome = $sales->sum('total_amount');
+        // Calculate total income based on actual payments received
+        $totalIncome = $sales->sum(function($sale) {
+            return $sale->payments->sum('amount');
+        });
         $totalSales = $sales->count();
 
         // Payment breakdown
@@ -1415,7 +1436,9 @@ class SaleController extends Controller
             return [
                 'user_id' => (int) $userId,
                 'user_name' => $user ? $user->name : 'Unknown User',
-                'total_amount' => (float) $userSales->sum('total_amount'),
+                'total_amount' => (float) $userSales->sum(function($sale) {
+                    return $sale->payments->sum('amount');
+                }),
                 'payment_count' => $userSales->count(),
             ];
         })->values();
