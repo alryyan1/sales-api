@@ -82,13 +82,4 @@ class Purchase extends Model
     {
         return $this->hasMany(PurchaseItem::class);
     }
-
-    /**
-     * Update the total amount based on the sum of all items.
-     */
-    public function updateTotalAmount(): void
-    {
-        $totalAmount = $this->items()->sum(DB::raw('quantity * unit_cost'));
-        $this->update(['total_amount' => $totalAmount]);
-    }
 }

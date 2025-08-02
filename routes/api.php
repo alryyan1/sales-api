@@ -138,10 +138,6 @@ Route::apiResource('purchases', PurchaseController::class);
 Route::post('/purchases/import-items', [PurchaseController::class, 'importPurchaseItems']);
 Route::post('/purchases/preview-import-items', [PurchaseController::class, 'previewImportPurchaseItems']);
 Route::post('/purchases/process-import-items', [PurchaseController::class, 'processImportPurchaseItems']);
-// Purchase Items Management
-Route::post('/purchases/{purchase}/items', [PurchaseController::class, 'addPurchaseItem'])->name('api.purchases.addItem');
-Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updateItem');
-Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'deletePurchaseItem'])->name('api.purchases.deleteItem');
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
   Route::get('/sales/today-by-created-at', [SaleController::class, 'getTodaySalesByCreatedAt'])->name('api.sales.todayByCreatedAt');
   // -- Sales Management --
