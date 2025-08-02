@@ -291,6 +291,7 @@ class PurchaseController extends Controller
                     'batch_number' => $validatedData['batch_number'] ?? null,
                     'quantity' => $validatedData['quantity'],
                     'unit_cost' => $validatedData['unit_cost'],
+                    'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'], // Calculate total cost
                     'sale_price' => $validatedData['sale_price'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
                     'remaining_quantity' => $validatedData['quantity'], // Initially, remaining = total quantity
@@ -338,6 +339,7 @@ class PurchaseController extends Controller
                     'batch_number' => $validatedData['batch_number'] ?? null,
                     'quantity' => $validatedData['quantity'],
                     'unit_cost' => $validatedData['unit_cost'],
+                    'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'], // Recalculate total cost
                     'sale_price' => $validatedData['sale_price'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
                     'remaining_quantity' => $purchaseItem->remaining_quantity + $quantityDifference, // Adjust remaining quantity
