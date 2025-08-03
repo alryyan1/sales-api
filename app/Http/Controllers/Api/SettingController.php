@@ -57,7 +57,7 @@ class SettingController extends Controller
             } elseif ($key === 'company_email') {
                 $rule = ['nullable', 'email', 'max:255'];
             } elseif ($key === 'currency_symbol') {
-                $rule = ['required', 'string', 'max:5']; // Currency symbol is usually required
+                $rule = ['nullable', 'string', 'max:5']; // Currency symbol is now optional
             }
             $rules[$key] = $rule;
         }
