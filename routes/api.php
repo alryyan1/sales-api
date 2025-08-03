@@ -25,6 +25,11 @@ use App\Http\Controllers\Api\{
   UserController,
   WhatsAppController
 };
+use App\Http\Controllers\UpdateController;
+
+// --- Update System Routes (Public) ---
+Route::get('/updates/check', [UpdateController::class, 'checkForUpdates']);
+Route::post('/updates/perform', [UpdateController::class, 'performUpdate']);
 
 // --- Public Routes ---
 Route::post('/register', [AuthController::class, 'register'])->name('api.register');
