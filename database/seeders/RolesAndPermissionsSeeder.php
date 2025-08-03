@@ -74,6 +74,11 @@ class RolesAndPermissionsSeeder extends Seeder
         Permission::firstOrCreate(['name' => 'manage-settings', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'view-near-expiry-report', 'guard_name' => 'web']);
         
+        // WhatsApp Management
+        Permission::firstOrCreate(['name' => 'send-whatsapp-messages', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'view-whatsapp-status', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'manage-whatsapp-schedulers', 'guard_name' => 'web']);
+        
         // System Management
         Permission::firstOrCreate(['name' => 'view-system', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'update-system', 'guard_name' => 'web']);
@@ -131,6 +136,9 @@ class RolesAndPermissionsSeeder extends Seeder
             'process-stock-requisitions',
             'create-sale-returns',
             'view-near-expiry-report',
+            'send-whatsapp-messages',
+            'view-whatsapp-status',
+            'manage-whatsapp-schedulers',
             'view-system',
             'update-system',
         ];
