@@ -615,7 +615,7 @@ class ReportController extends Controller
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
         $pdf->Cell(0, 6, 'Generated on: ' . now()->format('F j, Y \a\t g:i A'), 0, 1, 'C');
 
-        // Applied Filters
+        // Applied Filters - Enhanced and more prominent
         $appliedFilters = [];
         if (!empty($filters['client_id'])) {
             $client = \App\Models\Client::find($filters['client_id']);
@@ -629,10 +629,21 @@ class ReportController extends Controller
             $appliedFilters[] = 'Status: ' . ucfirst($filters['status']);
         }
 
+        // Enhanced filters display
         if (!empty($appliedFilters)) {
-            $pdf->Ln(3);
-            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
-            $pdf->Cell(0, 6, 'Applied Filters: ' . implode(' | ', $appliedFilters), 0, 1, 'L');
+            $pdf->Ln(5);
+            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
+            $pdf->SetFillColor(240, 240, 240);
+            $pdf->Cell(0, 8, 'APPLIED FILTERS', 1, 1, 'C', true);
+            
+            $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
+            $pdf->SetFillColor(255, 255, 255);
+            $pdf->Cell(0, 6, implode(' | ', $appliedFilters), 1, 1, 'C', true);
+        } else {
+            $pdf->Ln(5);
+            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
+            $pdf->SetFillColor(240, 240, 240);
+            $pdf->Cell(0, 8, 'FILTERS: No specific filters applied - showing all data', 1, 1, 'C', true);
         }
 
         $pdf->Ln(8);
@@ -710,9 +721,9 @@ class ReportController extends Controller
             return;
         }
 
-        // Table Headers
-        $headers = ['Date', 'Invoice #', 'Client', 'Status', 'Items', 'Total', 'Paid', 'Due'];
-        $columnWidths = [25, 30, 45, 20, 15, 25, 25, 25];
+        // Table Headers - Updated to match requested format
+        $headers = ['Sale ID', 'Total Amount', 'Paid', 'Discount', 'Date & Time', 'User', 'Sale Items Names'];
+        $columnWidths = [20, 25, 20, 20, 35, 25, 45];
         
         $pdf->addTableHeader($headers, $columnWidths);
 
@@ -720,21 +731,33 @@ class ReportController extends Controller
         $fill = false;
 
         foreach ($sales as $sale) {
-            $due = (float)$sale->total_amount - (float)$sale->paid_amount;
-            $itemsCount = $sale->items->count();
+            // Calculate discount (if any)
+            $discount = 0;
+            if (isset($sale->discount_amount) && $sale->discount_amount > 0) {
+                $discount = $sale->discount_amount;
+            }
+            
+            // Get sale items names
+            $itemNames = $sale->items->map(function($item) {
+                return $item->product?->name ?? 'Unknown Product';
+            })->implode(', ');
+            
+            // Truncate item names if too long
+            if (strlen($itemNames) > 40) {
+                $itemNames = substr($itemNames, 0, 37) . '...';
+            }
             
             // Status color coding
             $statusColor = $this->getStatusColor($sale->status);
 
             $rowData = [
-                Carbon::parse($sale->sale_date)->format('Y-m-d'),
-                $sale->invoice_number ?? 'N/A',
-                $sale->client?->name ?? 'Not Specified',
-                ucfirst($sale->status),
-                $itemsCount,
+                $sale->id,
                 number_format($sale->total_amount, 2),
                 number_format($sale->paid_amount, 2),
-                number_format($due, 2)
+                number_format($discount, 2),
+                Carbon::parse($sale->sale_date)->format('Y-m-d H:i'),
+                $sale->user?->name ?? 'Unknown',
+                $itemNames
             ];
 
             $pdf->addTableRow($rowData, $columnWidths, 8, $fill, $statusColor);
@@ -745,20 +768,18 @@ class ReportController extends Controller
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
         $pdf->SetFillColor(200, 200, 200);
         
-        $totalItems = $sales->sum(function($sale) { return $sale->items->count(); });
         $totalAmount = $sales->sum('total_amount');
         $totalPaid = $sales->sum('paid_amount');
-        $totalDue = $totalAmount - $totalPaid;
+        $totalDiscount = $sales->sum('discount_amount');
 
         $summaryData = [
             'TOTAL',
-            $sales->count() . ' sales',
-            '',
-            '',
-            $totalItems,
             number_format($totalAmount, 2),
             number_format($totalPaid, 2),
-            number_format($totalDue, 2)
+            number_format($totalDiscount, 2),
+            $sales->count() . ' sales',
+            '',
+            ''
         ];
 
         foreach ($summaryData as $i => $cellData) {
