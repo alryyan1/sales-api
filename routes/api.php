@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\{
   StockRequisitionController,
   SupplierController,
   SupplierPaymentController,
+  SystemController,
   UnitController,
   UserController,
   WhatsAppController
@@ -99,6 +100,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('roles', RoleController::class);
 
     Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
+    
+    // -- System Management Routes --
+    Route::prefix('system')->name('system.')->group(function () {
+      Route::get('/version', [SystemController::class, 'getVersion'])->name('version');
+      Route::get('/check-updates', [SystemController::class, 'checkForUpdates'])->name('check-updates');
+      Route::post('/update-backend', [SystemController::class, 'updateBackend'])->name('update-backend');
+      Route::get('/frontend-instructions', [SystemController::class, 'getFrontendUpdateInstructions'])->name('frontend-instructions');
+    });
     
     // -- WhatsApp Scheduler Routes --
     Route::get('/whatsapp-schedulers', [WhatsAppController::class, 'getSchedulers'])->name('whatsapp-schedulers.index');

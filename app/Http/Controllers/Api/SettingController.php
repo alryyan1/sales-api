@@ -61,7 +61,16 @@ class SettingController extends Controller
             }
             $rules[$key] = $rule;
         }
+        
+        // Ensure whatsapp_enabled is properly validated as boolean
+        if (isset($rules['whatsapp_enabled'])) {
+            $rules['whatsapp_enabled'] = ['nullable', 'boolean'];
+        }
 
+        // Debug: Log the incoming data
+        Log::info('Settings update request data:', $request->all());
+        Log::info('Validation rules:', $rules);
+        
         $validatedData = $request->validate($rules);
 
         // --- Updating .env file ---
@@ -73,8 +82,14 @@ class SettingController extends Controller
             if (!in_array($key, $validKeys)) continue; // Skip if key not in our defined settings
 
             $envKey = 'APP_SETTINGS_' . strtoupper($key); // Match .env variable naming convention
-            $escapedValue = is_string($value) && (str_contains($value, ' ') || str_contains($value, '#')) ? "\"{$value}\"" : $value;
-            $escapedValue = is_null($value) ? '' : $escapedValue; // Handle null to empty string for .env
+            
+            // Handle boolean values properly for .env file
+            if ($key === 'whatsapp_enabled') {
+                $escapedValue = $value ? 'true' : 'false';
+            } else {
+                $escapedValue = is_string($value) && (str_contains($value, ' ') || str_contains($value, '#')) ? "\"{$value}\"" : $value;
+                $escapedValue = is_null($value) ? '' : $escapedValue; // Handle null to empty string for .env
+            }
 
             // Replace or add the line in .env
             if (str_contains($envFileContent, "{$envKey}=")) {

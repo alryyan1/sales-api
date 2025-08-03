@@ -73,6 +73,10 @@ class RolesAndPermissionsSeeder extends Seeder
         Permission::firstOrCreate(['name' => 'create-sale-returns', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'manage-settings', 'guard_name' => 'web']);
         Permission::firstOrCreate(['name' => 'view-near-expiry-report', 'guard_name' => 'web']);
+        
+        // System Management
+        Permission::firstOrCreate(['name' => 'view-system', 'guard_name' => 'web']);
+        Permission::firstOrCreate(['name' => 'update-system', 'guard_name' => 'web']);
 
         $this->command->info('Permissions created.');
 
@@ -127,6 +131,8 @@ class RolesAndPermissionsSeeder extends Seeder
             'process-stock-requisitions',
             'create-sale-returns',
             'view-near-expiry-report',
+            'view-system',
+            'update-system',
         ];
         $adminRole->syncPermissions($adminPermissions);
         // Add 'adjust-stock' to relevant roles (e.g., admin, inventory_manager)
