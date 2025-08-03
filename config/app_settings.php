@@ -14,6 +14,13 @@ return [
     'invoice_prefix' => env('APP_SETTINGS_INVOICE_PREFIX', 'INV-'),
     'purchase_order_prefix' => env('APP_SETTINGS_PO_PREFIX', 'PO-'),
 
+    // WhatsApp API Configuration
+    'whatsapp_enabled' => env('APP_SETTINGS_WHATSAPP_ENABLED', false),
+    'whatsapp_api_url' => env('APP_SETTINGS_WHATSAPP_API_URL', 'https://waapi.app/api/v1'),
+    'whatsapp_api_token' => env('APP_SETTINGS_WHATSAPP_API_TOKEN', ''),
+    'whatsapp_instance_id' => env('APP_SETTINGS_WHATSAPP_INSTANCE_ID', ''),
+    'whatsapp_default_phone' => env('APP_SETTINGS_WHATSAPP_DEFAULT_PHONE', ''),
+
     // Add more settings as needed
     // 'timezone' => env('APP_TIMEZONE', 'UTC'),
      'payment_methods_ar' => [

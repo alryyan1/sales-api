@@ -107,6 +107,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/whatsapp-schedulers/{id}', [WhatsAppController::class, 'deleteScheduler'])->name('whatsapp-schedulers.destroy');
     Route::patch('/whatsapp-schedulers/{id}/toggle', [WhatsAppController::class, 'toggleScheduler'])->name('whatsapp-schedulers.toggle');
     Route::post('/whatsapp-schedulers/test', [WhatsAppController::class, 'testScheduler'])->name('whatsapp-schedulers.test');
+    
+    // -- WhatsApp API Routes --
+    Route::prefix('whatsapp')->group(function () {
+        Route::post('/send-message', [WhatsAppController::class, 'sendMessage']);
+        Route::post('/test', [WhatsAppController::class, 'test']);
+        Route::get('/status', [WhatsAppController::class, 'getStatus']);
+        Route::post('/send-sale-notification', [WhatsAppController::class, 'sendSaleNotification']);
+    });
   });
 
   // -- Suppliers Management --
