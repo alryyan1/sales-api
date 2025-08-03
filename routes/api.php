@@ -164,6 +164,7 @@ Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController:
   Route::post('/sales/{sale}/payments/single', [SaleController::class, 'addSinglePayment'])->name('api.sales.addSinglePayment');
   Route::delete('/sales/{sale}/payments/{payment}', [SaleController::class, 'deleteSinglePayment'])->name('api.sales.deleteSinglePayment');
   Route::post('/sales/{sale}/items', [SaleController::class, 'addSaleItem'])->name('api.sales.addSaleItem');
+  Route::post('/sales/{sale}/items/multiple', [SaleController::class, 'addMultipleSaleItems'])->name('api.sales.addMultipleSaleItems');
   Route::put('/sales/{sale}/items/{saleItem}', [SaleController::class, 'updateSaleItem'])->name('api.sales.updateSaleItem');
   Route::delete('/sales/{sale}/items/{saleItem}', [SaleController::class, 'deleteSaleItem'])->name('api.sales.deleteSaleItem');
   Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf'); // <-- New Route

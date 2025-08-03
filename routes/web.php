@@ -22,11 +22,6 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-// Catch all routes for React Router
-Route::get('/{any}', function () {
-    return view('welcome');
-})->where('any', '.*');
-
 // Web routes without authentication - using guest.access middleware to allow both authenticated and unauthenticated users
 Route::middleware('guest.access')->group(function () {
     Route::get('reports/sales/pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('api.sales.pdf');

@@ -1081,14 +1081,7 @@ class SaleController extends Controller
             // Find the sale item
             $saleItem = $sale->items()->findOrFail($saleItemId);
             
-            // Check if sale allows item deletion (draft, pending, and completed sales allow deletion)
-            if (!in_array($sale->status, ['draft', 'pending', 'completed'])) {
-                return response()->json([
-                    'message' => 'Cannot delete items from this sale status.',
-                    'error' => 'Sale status does not allow item deletion'
-                ], Response::HTTP_BAD_REQUEST);
-            }
-
+         
             // Start transaction
             DB::beginTransaction();
 
@@ -1116,11 +1109,17 @@ class SaleController extends Controller
                 // Delete the sale item first
                 $deletedQuantity = $saleItem->quantity;
                 $productName = $product ? $product->name : 'Unknown Product';
+                
+
+                
                 $saleItem->delete();
 
                 // Recalculate sale totals after deletion
                 $sale->refresh(); // Refresh to get updated items
-                $remainingItems = $sale->items;
+                $remainingItems = $sale->items()->get(); // Always fresh from DB
+                
+
+                
                 $newSubtotal = $remainingItems->sum('total_price');
                 $newTotalAmount = $newSubtotal; // No tax calculation for now
                 
@@ -1130,14 +1129,13 @@ class SaleController extends Controller
                 // due_amount is calculated, not stored in database
                 $sale->save();
 
-                // If no items left, consider cancelling the sale
-                if ($remainingItems->count() === 0) {
-                    $sale->status = 'cancelled';
-                    $sale->save();
-                    Log::info("Sale {$sale->id} cancelled due to all items being deleted");
-                }
+                // Note: Sale status is not automatically changed when items are deleted
+                // The sale will maintain its current status regardless of item count
+                Log::info("Sale {$sale->id} has {$remainingItems->count()} items remaining - status unchanged");
 
                 DB::commit();
+
+
 
                 return response()->json([
                     'message' => "Sale item deleted successfully. {$deletedQuantity} units of {$productName} returned to inventory.",
@@ -1613,6 +1611,173 @@ class SaleController extends Controller
             'payment_breakdown' => $paymentBreakdown,
             'user_payments' => $userPayments,
         ]);
+    }
+
+    /**
+     * Add multiple items to an existing sale.
+     * 
+     * @param Request $request
+     * @param Sale $sale
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function addMultipleSaleItems(Request $request, Sale $sale)
+    {
+        $validatedData = $request->validate([
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_price' => 'required|numeric|min:0',
+        ]);
+
+        try {
+            $result = DB::transaction(function () use ($validatedData, $sale) {
+                $addedItems = [];
+                $errors = [];
+                $totalAdded = 0;
+
+                foreach ($validatedData['items'] as $index => $itemData) {
+                    try {
+                        $product = Product::findOrFail($itemData['product_id']);
+                        
+                        // Check if product already exists in the sale
+                        $existingSaleItem = $sale->items()
+                            ->where('product_id', $itemData['product_id'])
+                            ->first();
+                        
+                        if ($existingSaleItem) {
+                            $errors[] = "Product '{$product->name}' already exists in sale";
+                            continue;
+                        }
+                        
+                        // Check if product has any stock
+                        if ($product->stock_quantity <= 0) {
+                            $errors[] = "Product '{$product->name}' is out of stock. Available quantity: 0";
+                            continue;
+                        }
+                        
+                        // Check stock availability
+                        if ($product->stock_quantity < $itemData['quantity']) {
+                            $errors[] = "Insufficient stock for '{$product->name}'. Available: {$product->stock_quantity}, Requested: {$itemData['quantity']}";
+                            continue;
+                        }
+
+                        // Find available batches (FIFO)
+                        $availableBatches = PurchaseItem::where('product_id', $product->id)
+                            ->where('remaining_quantity', '>', 0)
+                            ->orderBy('expiry_date', 'asc')
+                            ->orderBy('created_at', 'asc')
+                            ->get();
+
+                        $remainingQuantity = $itemData['quantity'];
+                        $saleItems = [];
+
+                        // Allocate from batches first
+                        foreach ($availableBatches as $batch) {
+                            if ($remainingQuantity <= 0) break;
+
+                            $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
+                            
+                            // Create sale item for this batch
+                            $saleItem = $sale->items()->create([
+                                'product_id' => $product->id,
+                                'purchase_item_id' => $batch->id,
+                                'batch_number_sold' => $batch->batch_number,
+                                'quantity' => $canSellFromThisBatch,
+                                'unit_price' => $itemData['unit_price'],
+                                'total_price' => $canSellFromThisBatch * $itemData['unit_price'],
+                                'cost_price_at_sale' => $batch->unit_cost,
+                            ]);
+
+                            $saleItems[] = $saleItem;
+                            $remainingQuantity -= $canSellFromThisBatch;
+
+                            // Update batch remaining quantity
+                            $batch->remaining_quantity -= $canSellFromThisBatch;
+                            $batch->save();
+                        }
+
+                        // If there's still remaining quantity, create item without batch
+                        if ($remainingQuantity > 0) {
+                            $saleItem = $sale->items()->create([
+                                'product_id' => $product->id,
+                                'purchase_item_id' => null,
+                                'batch_number_sold' => null,
+                                'quantity' => $remainingQuantity,
+                                'unit_price' => $itemData['unit_price'],
+                                'total_price' => $remainingQuantity * $itemData['unit_price'],
+                                'cost_price_at_sale' => 0,
+                            ]);
+                            $saleItems[] = $saleItem;
+                        }
+
+                        // Update product stock
+                        $product->stock_quantity -= $itemData['quantity'];
+                        $product->save();
+
+                        // Update sale totals
+                        $sale->total_amount += ($itemData['quantity'] * $itemData['unit_price']);
+                        
+                        $addedItems = array_merge($addedItems, $saleItems);
+                        $totalAdded++;
+
+                    } catch (\Exception $e) {
+                        $errors[] = "Failed to add product at index {$index}: " . $e->getMessage();
+                    }
+                }
+
+                // Save the updated sale totals
+                $sale->save();
+
+                return [
+                    'added_items' => $addedItems,
+                    'total_added' => $totalAdded,
+                    'errors' => $errors,
+                    'new_total' => $sale->total_amount,
+                    'new_due_amount' => $sale->total_amount - $sale->paid_amount
+                ];
+            });
+
+            // Load the updated sale with items
+            $sale->load([
+                'client:id,name',
+                'user:id,name',
+                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.purchaseItemBatch:id,batch_number,unit_cost',
+                'payments.user:id,name'
+            ]);
+
+            $message = $result['total_added'] > 0 
+                ? "Successfully added {$result['total_added']} item(s)" 
+                : "No items were added";
+
+            if (!empty($result['errors'])) {
+                $message .= ". Errors: " . implode(', ', $result['errors']);
+            }
+
+            return response()->json([
+                'message' => $message,
+                'sale' => new SaleResource($sale),
+                'added_items' => SaleItemResource::collection($result['added_items']),
+                'total_added' => $result['total_added'],
+                'errors' => $result['errors']
+            ], Response::HTTP_CREATED);
+
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            Log::error('Failed to add multiple sale items', [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Failed to add sale items. Please try again.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 }
 
