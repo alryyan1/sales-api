@@ -24,7 +24,8 @@ use App\Http\Controllers\Api\{
   SystemController,
   UnitController,
   UserController,
-  WhatsAppController
+  WhatsAppController,
+  WhatsAppSchedulerController
 };
 use App\Http\Controllers\UpdateController;
 
@@ -110,12 +111,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     
     // -- WhatsApp Scheduler Routes --
-    Route::get('/whatsapp-schedulers', [WhatsAppController::class, 'getSchedulers'])->name('whatsapp-schedulers.index');
-    Route::post('/whatsapp-schedulers', [WhatsAppController::class, 'createScheduler'])->name('whatsapp-schedulers.store');
-    Route::put('/whatsapp-schedulers/{id}', [WhatsAppController::class, 'updateScheduler'])->name('whatsapp-schedulers.update');
-    Route::delete('/whatsapp-schedulers/{id}', [WhatsAppController::class, 'deleteScheduler'])->name('whatsapp-schedulers.destroy');
-    Route::patch('/whatsapp-schedulers/{id}/toggle', [WhatsAppController::class, 'toggleScheduler'])->name('whatsapp-schedulers.toggle');
-    Route::post('/whatsapp-schedulers/test', [WhatsAppController::class, 'testScheduler'])->name('whatsapp-schedulers.test');
+    Route::apiResource('whatsapp-schedulers', WhatsAppSchedulerController::class);
+    Route::patch('/whatsapp-schedulers/{whatsapp_scheduler}/toggle', [WhatsAppSchedulerController::class, 'toggle'])->name('whatsapp-schedulers.toggle');
+    Route::get('/whatsapp-schedulers/options', [WhatsAppSchedulerController::class, 'options'])->name('whatsapp-schedulers.options');
     
     // -- WhatsApp API Routes --
     Route::prefix('whatsapp')->group(function () {
