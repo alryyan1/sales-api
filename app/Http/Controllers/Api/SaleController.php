@@ -730,6 +730,88 @@ class SaleController extends Controller
         }
     }
 
+    /**
+     * Add a single payment to an existing sale.
+     */
+    public function addSinglePayment(Request $request, Sale $sale)
+    {
+        $validatedData = $request->validate([
+            'method' => 'required|string|in:cash,visa,mastercard,bank_transfer,mada,store_credit,other,refund',
+            'amount' => 'required|numeric|min:0.01',
+            'reference_number' => 'nullable|string|max:255',
+            'notes' => 'nullable|string|max:65535',
+        ]);
+
+        try {
+            DB::transaction(function () use ($validatedData, $sale, $request) {
+                // Create a single payment record
+                $sale->payments()->create([
+                    'user_id' => $request->user()->id,
+                    'method' => $validatedData['method'],
+                    'amount' => $validatedData['amount'],
+                    'payment_date' => now()->format('Y-m-d'),
+                    'reference_number' => $validatedData['reference_number'] ?? null,
+                    'notes' => $validatedData['notes'] ?? null,
+                ]);
+
+                // Update the sale's paid_amount
+                $totalPaid = $sale->payments()->sum('amount');
+                $sale->update(['paid_amount' => $totalPaid]);
+            });
+
+            return response()->json([
+                'message' => 'Payment added successfully',
+            ], Response::HTTP_CREATED);
+
+        } catch (\Exception $e) {
+            Log::error('Error adding single payment to sale: ' . $e->getMessage(), [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to add payment. Please try again.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Delete a single payment from an existing sale.
+     */
+    public function deleteSinglePayment(Sale $sale, $paymentId)
+    {
+        try {
+            DB::transaction(function () use ($sale, $paymentId) {
+                // Find and delete the specific payment
+                $payment = $sale->payments()->findOrFail($paymentId);
+                $payment->delete();
+                
+                // Update the sale's paid_amount
+                $totalPaid = $sale->payments()->sum('amount');
+                $sale->update(['paid_amount' => $totalPaid]);
+            });
+
+            return response()->json([
+                'message' => 'Payment deleted successfully',
+            ], Response::HTTP_OK);
+
+        } catch (\Exception $e) {
+            Log::error('Error deleting single payment from sale: ' . $e->getMessage(), [
+                'sale_id' => $sale->id,
+                'payment_id' => $paymentId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to delete payment. Please try again.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
         /**
      * Add a new item to an existing sale.
      * 
