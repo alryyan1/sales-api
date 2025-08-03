@@ -91,7 +91,7 @@ class PurchaseController extends Controller
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
             'status' => ['required', Rule::in(['received', 'pending', 'ordered'])],
             'notes' => 'nullable|string|max:65535',
-            'items' => 'required|array|min:1',
+            'items' => 'nullable|array',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.batch_number' => 'nullable|string|max:100', // Max length for batch number
             'items.*.quantity' => 'required|integer|min:1', // Quantity of stocking units (e.g., boxes)
@@ -117,7 +117,8 @@ class PurchaseController extends Controller
                 $calculatedTotalAmount = 0;
 
                 // 2. Loop through items, create PurchaseItem, and set remaining_quantity
-                foreach ($validatedData['items'] as $itemData) {
+                if (!empty($validatedData['items'])) {
+                    foreach ($validatedData['items'] as $itemData) {
                     $product = Product::findOrFail($itemData['product_id']); // Load the product
                     $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
 
@@ -143,6 +144,7 @@ class PurchaseController extends Controller
                         'expiry_date' => $itemData['expiry_date'] ?? null,
                     ]);
                     // Product.stock_quantity (total sellable units) is updated by PurchaseItemObserver
+                    }
                 }
 
                 // 3. Update the total amount on the Purchase header
