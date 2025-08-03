@@ -510,14 +510,15 @@ class ReportController extends Controller
         $summaryStats = $this->calculateSalesSummary($sales);
 
         // 4. Generate PDF
-        $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf = new MyCustomTCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->SetTitle('Professional Sales Report');
         $pdf->AddPage();
         $pdf->setRTL(true);
 
         // PDF Content
         $this->generateProfessionalPDFHeader($pdf, $startDate, $endDate, $validated);
-        $this->generateSummarySection($pdf, $summaryStats);
+        $this->generateTotalIncomeSection($pdf, $summaryStats);
+        $this->generatePaymentsBreakdownSection($pdf, $summaryStats);
         $this->generateSalesTable($pdf, $sales);
         $this->generateFooter($pdf);
 
@@ -649,24 +650,55 @@ class ReportController extends Controller
         $pdf->Ln(8);
     }
 
-    private function generateSummarySection($pdf, $summaryStats)
+    private function generateTotalIncomeSection($pdf, $summaryStats)
     {
-        // Executive Summary Section
-        $pdf->addSectionHeader('Executive Summary');
-
-        // Key Metrics using professional summary box
-        $keyMetrics = [
-            'Total Sales' => $summaryStats['total_sales'],
-            'Total Revenue' => number_format($summaryStats['total_amount'], 2),
-            'Total Paid' => number_format($summaryStats['total_paid'], 2),
-            'Total Due' => number_format($summaryStats['total_due'], 2),
-            'Completion Rate' => number_format($summaryStats['completion_rate'], 1) . '%',
-            'Average Sale' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 2) : '0.00'
+        // Total Income Section at the top
+        $pdf->addSectionHeader('Total Income Summary');
+        
+        // Large prominent total income display
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
+        $pdf->SetFillColor(240, 248, 255); // Light blue background
+        $pdf->Cell(0, 12, 'Total Revenue: ' . number_format($summaryStats['total_amount'], 2), 1, 1, 'C', true);
+        $pdf->Ln(5);
+        
+        // Income breakdown in a table format
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
+        $pdf->Cell(0, 8, 'Income Breakdown', 0, 1, 'L');
+        $pdf->Ln(2);
+        
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
+        $incomeData = [
+            'Total Sales Amount' => number_format($summaryStats['total_amount'], 2),
+            'Total Paid Amount' => number_format($summaryStats['total_paid'], 2),
+            'Total Due Amount' => number_format($summaryStats['total_due'], 2),
+            'Number of Sales' => $summaryStats['total_sales'],
+            'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 2) : '0.00'
         ];
         
-        $pdf->addSummaryBox('Key Performance Indicators', $keyMetrics, 2);
+        $pdf->addSummaryBox('Income Details', $incomeData, 2);
+        $pdf->Ln(10);
+    }
 
-        // Status Breakdown
+    private function generatePaymentsBreakdownSection($pdf, $summaryStats)
+    {
+        // Payments Breakdown Section
+        $pdf->addSectionHeader('Payments Breakdown');
+        
+        // Payment Methods Distribution
+        if ($summaryStats['payment_methods']->count() > 0) {
+            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
+            $pdf->Cell(0, 8, 'Payment Methods Distribution', 0, 1, 'L');
+            $pdf->Ln(2);
+            
+            $paymentData = [];
+            foreach ($summaryStats['payment_methods'] as $method => $amount) {
+                $percentage = $summaryStats['total_paid'] > 0 ? ($amount / $summaryStats['total_paid']) * 100 : 0;
+                $paymentData[ucfirst($method)] = number_format($amount, 2) . ' (' . number_format($percentage, 1) . '%)';
+            }
+            $pdf->addSummaryBox('Payment Methods', $paymentData, 1);
+        }
+        
+        // Sales Status Breakdown
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
         $pdf->Cell(0, 8, 'Sales Status Breakdown', 0, 1, 'L');
         $pdf->Ln(2);
@@ -686,28 +718,21 @@ class ReportController extends Controller
             $pdf->Cell(47, 6, $info[0] . ': ' . $count . ' (' . number_format($percentage, 1) . '%)', 1, 0, 'C');
         }
         $pdf->Ln(8);
-
-        // Payment Methods (if any)
-        if ($summaryStats['payment_methods']->count() > 0) {
-            $paymentData = [];
-            foreach ($summaryStats['payment_methods'] as $method => $amount) {
-                $percentage = $summaryStats['total_paid'] > 0 ? ($amount / $summaryStats['total_paid']) * 100 : 0;
-                $paymentData[ucfirst($method)] = number_format($amount, 2) . ' (' . number_format($percentage, 1) . '%)';
-            }
-            $pdf->addSummaryBox('Payment Methods Distribution', $paymentData, 1);
-        }
-
+        
         // Top Clients (if any)
         if ($summaryStats['top_clients']->count() > 0) {
+            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
+            $pdf->Cell(0, 8, 'Top 5 Clients by Revenue', 0, 1, 'L');
+            $pdf->Ln(2);
+            
             $clientData = [];
             foreach ($summaryStats['top_clients'] as $client) {
                 $clientData[$client['name']] = number_format($client['total'], 2) . ' (' . $client['count'] . ' sales)';
             }
-            $pdf->addSummaryBox('Top 5 Clients by Revenue', $clientData, 1);
+            $pdf->addSummaryBox('Top Clients', $clientData, 1);
         }
-
-        // Add a chart placeholder for future enhancement
-        $pdf->addChartPlaceholder('Sales Trend Analysis', 180, 60);
+        
+        $pdf->Ln(10);
     }
 
     private function generateSalesTable($pdf, $sales)
@@ -721,9 +746,9 @@ class ReportController extends Controller
             return;
         }
 
-        // Table Headers - Updated to match requested format
+        // Table Headers - Updated for landscape format
         $headers = ['Sale ID', 'Total Amount', 'Paid', 'Discount', 'Date & Time', 'User', 'Sale Items Names'];
-        $columnWidths = [20, 25, 20, 20, 35, 25, 45];
+        $columnWidths = [25, 30, 25, 25, 40, 30, 60];
         
         $pdf->addTableHeader($headers, $columnWidths);
 
@@ -742,9 +767,9 @@ class ReportController extends Controller
                 return $item->product?->name ?? 'Unknown Product';
             })->implode(', ');
             
-            // Truncate item names if too long
-            if (strlen($itemNames) > 40) {
-                $itemNames = substr($itemNames, 0, 37) . '...';
+            // Truncate item names if too long (more space in landscape)
+            if (strlen($itemNames) > 60) {
+                $itemNames = substr($itemNames, 0, 57) . '...';
             }
             
             // Status color coding

@@ -111,9 +111,9 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     
     // -- WhatsApp Scheduler Routes --
+    Route::get('/whatsapp-schedulers/options', [WhatsAppSchedulerController::class, 'options'])->name('whatsapp-schedulers.options');
     Route::apiResource('whatsapp-schedulers', WhatsAppSchedulerController::class);
     Route::patch('/whatsapp-schedulers/{whatsapp_scheduler}/toggle', [WhatsAppSchedulerController::class, 'toggle'])->name('whatsapp-schedulers.toggle');
-    Route::get('/whatsapp-schedulers/options', [WhatsAppSchedulerController::class, 'options'])->name('whatsapp-schedulers.options');
     
     // -- WhatsApp API Routes --
     Route::prefix('whatsapp')->group(function () {
