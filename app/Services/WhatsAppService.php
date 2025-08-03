@@ -60,9 +60,8 @@ class WhatsAppService extends ServiceProvider
                     'accept' => 'application/json',
                     'authorization' => 'Bearer '.$this->apiToken,
                     'content-type' => 'application/json', // Guzzle sets this with 'json' option
-
                 ],
-                 'http_errors' => true, // Ensure Guzzle throws exceptions for 4xx/5xx responses
+                'http_errors' => true, // Ensure Guzzle throws exceptions for 4xx/5xx responses
             ]);
 
             $statusCode = $response->getStatusCode();

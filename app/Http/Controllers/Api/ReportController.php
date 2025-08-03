@@ -473,11 +473,18 @@ class ReportController extends Controller
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
             'client_id' => 'nullable|integer|exists:clients,id',
+            'user_id' => 'nullable|integer|exists:users,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
         ]);
 
         // 2. Fetch and Filter Sales Data
-        $query = Sale::query()->with(['client:id,name', 'user:id,name']);
+        $query = Sale::query()->with([
+            'client:id,name,phone,email',
+            'user:id,name',
+            'items.product:id,name,sku',
+            'payments'
+        ]);
+        
         $startDate = isset($validated['start_date']) ? Carbon::parse($validated['start_date'])->startOfDay() : Carbon::today()->startOfDay();
         $endDate = isset($validated['end_date']) ? Carbon::parse($validated['end_date'])->endOfDay() : Carbon::today()->endOfDay();
 
@@ -490,27 +497,32 @@ class ReportController extends Controller
         if (!empty($validated['client_id'])) {
             $query->where('client_id', $validated['client_id']);
         }
+        if (!empty($validated['user_id'])) {
+            $query->where('user_id', $validated['user_id']);
+        }
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
         }
 
         $sales = $query->orderBy('sale_date', 'desc')->get();
 
-        // 3. Generate PDF
+        // 3. Calculate Summary Statistics
+        $summaryStats = $this->calculateSalesSummary($sales);
+
+        // 4. Generate PDF
         $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-        $pdf->SetTitle('Sales Report');
-        // $pdf->SetSubject("Sales Report from {$startDate->format('Y-m-d') ?? 'All Time'} to {$endDate->format('Y-m-d') ?? 'All Time'}");
+        $pdf->SetTitle('Professional Sales Report');
         $pdf->AddPage();
         $pdf->setRTL(true);
 
-        // PDF Header
-        $this->generatePDFHeader($pdf, $startDate, $endDate);
-
-        // PDF Table
-        $this->generatePDFTable($pdf, $sales);
+        // PDF Content
+        $this->generateProfessionalPDFHeader($pdf, $startDate, $endDate, $validated);
+        $this->generateSummarySection($pdf, $summaryStats);
+        $this->generateSalesTable($pdf, $sales);
+        $this->generateFooter($pdf);
 
         // Output PDF
-        $pdfFileName = 'sales_report_' . now()->format('Ymd_His') . '.pdf';
+        $pdfFileName = 'professional_sales_report_' . now()->format('Y-m-d_H-i-s') . '.pdf';
         $pdfContent = $pdf->Output($pdfFileName, 'S');
 
         return response($pdfContent, 200)
@@ -518,69 +530,268 @@ class ReportController extends Controller
             ->header('Content-Disposition', "attachment; filename=\"{$pdfFileName}\"");
     }
 
-    private function generatePDFHeader($pdf, $startDate, $endDate)
+    private function calculateSalesSummary($sales)
     {
-        $formattedStartDate = $startDate ? $startDate->format('Y-m-d') : 'All Time';
-        $formattedEndDate = $endDate ? $endDate->format('Y-m-d') : 'All Time';
+        $totalSales = $sales->count();
+        $totalAmount = $sales->sum('total_amount');
+        $totalPaid = $sales->sum('paid_amount');
+        $totalDue = $totalAmount - $totalPaid;
+        
+        $statusBreakdown = $sales->groupBy('status')->map->count();
+        $completedSales = $statusBreakdown->get('completed', 0);
+        $pendingSales = $statusBreakdown->get('pending', 0);
+        $draftSales = $statusBreakdown->get('draft', 0);
+        $cancelledSales = $statusBreakdown->get('cancelled', 0);
+        
+        $completionRate = $totalSales > 0 ? ($completedSales / $totalSales) * 100 : 0;
+        
+        // Payment method breakdown
+        $paymentMethods = $sales->flatMap->payments->groupBy('method')->map->sum('amount');
+        
+        // Top clients
+        $topClients = $sales->groupBy('client_id')
+            ->map(function ($clientSales) {
+                return [
+                    'name' => $clientSales->first()->client?->name ?? 'Unknown',
+                    'total' => $clientSales->sum('total_amount'),
+                    'count' => $clientSales->count()
+                ];
+            })
+            ->sortByDesc('total')
+            ->take(5);
 
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
-        $pdf->Cell(0, 12, 'Sales Report', 0, 1, 'C');
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
-        $pdf->Cell(0, 8, "Period: {$formattedStartDate} to {$formattedEndDate}", 0, 1, 'C');
-        $pdf->Ln(6);
+        return [
+            'total_sales' => $totalSales,
+            'total_amount' => $totalAmount,
+            'total_paid' => $totalPaid,
+            'total_due' => $totalDue,
+            'completion_rate' => $completionRate,
+            'status_breakdown' => [
+                'completed' => $completedSales,
+                'pending' => $pendingSales,
+                'draft' => $draftSales,
+                'cancelled' => $cancelledSales
+            ],
+            'payment_methods' => $paymentMethods,
+            'top_clients' => $topClients
+        ];
     }
 
-    private function generatePDFTable($pdf, $sales)
+    private function generateProfessionalPDFHeader($pdf, $startDate, $endDate, $filters)
     {
-        $headers = ['Due', 'Paid', 'Total', 'Client', 'Invoice No.', 'Date'];
-        $columnWidths = [25, 25, 30, 55, 30, 25];
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
-        $pdf->SetFillColor(230, 230, 230);
+        // Company Information
+        $companyName = config('app_settings.company_name', 'Your Company');
+        $companyAddress = config('app_settings.company_address', '');
+        $companyPhone = config('app_settings.company_phone', '');
+        $companyEmail = config('app_settings.company_email', '');
 
-        foreach ($headers as $i => $header) {
-            $pdf->Cell($columnWidths[$i], 8, $header, 1, 0, 'C', true);
+        // Header with company logo area (left side)
+        $pdf->SetY(20);
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 18);
+        $pdf->Cell(0, 10, $companyName, 0, 1, 'C');
+        
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
+        if ($companyAddress) {
+            $pdf->Cell(0, 6, $companyAddress, 0, 1, 'C');
         }
-        $pdf->Ln();
+        if ($companyPhone) {
+            $pdf->Cell(0, 6, 'Phone: ' . $companyPhone, 0, 1, 'C');
+        }
+        if ($companyEmail) {
+            $pdf->Cell(0, 6, 'Email: ' . $companyEmail, 0, 1, 'C');
+        }
 
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
-        $pdf->SetFillColor(245, 245, 245);
-        $fill = false;
+        $pdf->Ln(5);
 
-        $totals = ['grandTotal' => 0, 'paid' => 0, 'due' => 0];
+        // Report Title and Date Range
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
+        $pdf->Cell(0, 10, 'Professional Sales Report', 0, 1, 'C');
+        
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 12);
+        $formattedStartDate = $startDate ? $startDate->format('F j, Y') : 'All Time';
+        $formattedEndDate = $endDate ? $endDate->format('F j, Y') : 'All Time';
+        $pdf->Cell(0, 8, "Period: {$formattedStartDate} to {$formattedEndDate}", 0, 1, 'C');
+        
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
+        $pdf->Cell(0, 6, 'Generated on: ' . now()->format('F j, Y \a\t g:i A'), 0, 1, 'C');
+
+        // Applied Filters
+        $appliedFilters = [];
+        if (!empty($filters['client_id'])) {
+            $client = \App\Models\Client::find($filters['client_id']);
+            $appliedFilters[] = 'Client: ' . ($client ? $client->name : 'Unknown');
+        }
+        if (!empty($filters['user_id'])) {
+            $user = \App\Models\User::find($filters['user_id']);
+            $appliedFilters[] = 'Salesperson: ' . ($user ? $user->name : 'Unknown');
+        }
+        if (!empty($filters['status'])) {
+            $appliedFilters[] = 'Status: ' . ucfirst($filters['status']);
+        }
+
+        if (!empty($appliedFilters)) {
+            $pdf->Ln(3);
+            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
+            $pdf->Cell(0, 6, 'Applied Filters: ' . implode(' | ', $appliedFilters), 0, 1, 'L');
+        }
+
+        $pdf->Ln(8);
+    }
+
+    private function generateSummarySection($pdf, $summaryStats)
+    {
+        // Executive Summary Section
+        $pdf->addSectionHeader('Executive Summary');
+
+        // Key Metrics using professional summary box
+        $keyMetrics = [
+            'Total Sales' => $summaryStats['total_sales'],
+            'Total Revenue' => number_format($summaryStats['total_amount'], 2),
+            'Total Paid' => number_format($summaryStats['total_paid'], 2),
+            'Total Due' => number_format($summaryStats['total_due'], 2),
+            'Completion Rate' => number_format($summaryStats['completion_rate'], 1) . '%',
+            'Average Sale' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 2) : '0.00'
+        ];
+        
+        $pdf->addSummaryBox('Key Performance Indicators', $keyMetrics, 2);
+
+        // Status Breakdown
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
+        $pdf->Cell(0, 8, 'Sales Status Breakdown', 0, 1, 'L');
+        $pdf->Ln(2);
+
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
+        $statuses = [
+            'completed' => ['Completed', 'green'],
+            'pending' => ['Pending', 'orange'],
+            'draft' => ['Draft', 'gray'],
+            'cancelled' => ['Cancelled', 'red']
+        ];
+
+        foreach ($statuses as $status => $info) {
+            $count = $summaryStats['status_breakdown'][$status] ?? 0;
+            $percentage = $summaryStats['total_sales'] > 0 ? ($count / $summaryStats['total_sales']) * 100 : 0;
+            
+            $pdf->Cell(47, 6, $info[0] . ': ' . $count . ' (' . number_format($percentage, 1) . '%)', 1, 0, 'C');
+        }
+        $pdf->Ln(8);
+
+        // Payment Methods (if any)
+        if ($summaryStats['payment_methods']->count() > 0) {
+            $paymentData = [];
+            foreach ($summaryStats['payment_methods'] as $method => $amount) {
+                $percentage = $summaryStats['total_paid'] > 0 ? ($amount / $summaryStats['total_paid']) * 100 : 0;
+                $paymentData[ucfirst($method)] = number_format($amount, 2) . ' (' . number_format($percentage, 1) . '%)';
+            }
+            $pdf->addSummaryBox('Payment Methods Distribution', $paymentData, 1);
+        }
+
+        // Top Clients (if any)
+        if ($summaryStats['top_clients']->count() > 0) {
+            $clientData = [];
+            foreach ($summaryStats['top_clients'] as $client) {
+                $clientData[$client['name']] = number_format($client['total'], 2) . ' (' . $client['count'] . ' sales)';
+            }
+            $pdf->addSummaryBox('Top 5 Clients by Revenue', $clientData, 1);
+        }
+
+        // Add a chart placeholder for future enhancement
+        $pdf->addChartPlaceholder('Sales Trend Analysis', 180, 60);
+    }
+
+    private function generateSalesTable($pdf, $sales)
+    {
+        // Table Title
+        $pdf->addSectionHeader('Detailed Sales Data');
 
         if ($sales->isEmpty()) {
-            $pdf->Cell(array_sum($columnWidths), 10, 'No sales data available for the selected period.', 1, 1, 'C');
-        } else {
-            foreach ($sales as $sale) {
-                $due = (float)$sale->total_amount - (float)$sale->paid_amount;
-
-                $totals['grandTotal'] += $sale->total_amount;
-                $totals['paid'] += $sale->paid_amount;
-                $totals['due'] += $due;
-
-                $rowData = [
-                    Carbon::parse($sale->sale_date)->format('Y-m-d'),
-                    $sale->invoice_number ?? '---',
-                    $sale->client?->name ?? 'Not Specified',
-                    number_format($sale->total_amount, 2),
-                    number_format($sale->paid_amount, 2),
-                    number_format($due, 2),
-                ];
-
-                foreach (array_reverse($rowData) as $i => $cellData) {
-                    $pdf->Cell($columnWidths[$i], 6, $cellData, 'LRB', 0, 'R', $fill);
-                }
-                $pdf->Ln();
-                $fill = !$fill;
-            }
+            $pdf->SetFont($pdf->getDefaultFontFamily(), '', 12);
+            $pdf->Cell(0, 10, 'No sales data available for the selected period.', 1, 1, 'C');
+            return;
         }
 
-        // Summary Totals
+        // Table Headers
+        $headers = ['Date', 'Invoice #', 'Client', 'Status', 'Items', 'Total', 'Paid', 'Due'];
+        $columnWidths = [25, 30, 45, 20, 15, 25, 25, 25];
+        
+        $pdf->addTableHeader($headers, $columnWidths);
+
+        // Table Data
+        $fill = false;
+
+        foreach ($sales as $sale) {
+            $due = (float)$sale->total_amount - (float)$sale->paid_amount;
+            $itemsCount = $sale->items->count();
+            
+            // Status color coding
+            $statusColor = $this->getStatusColor($sale->status);
+
+            $rowData = [
+                Carbon::parse($sale->sale_date)->format('Y-m-d'),
+                $sale->invoice_number ?? 'N/A',
+                $sale->client?->name ?? 'Not Specified',
+                ucfirst($sale->status),
+                $itemsCount,
+                number_format($sale->total_amount, 2),
+                number_format($sale->paid_amount, 2),
+                number_format($due, 2)
+            ];
+
+            $pdf->addTableRow($rowData, $columnWidths, 8, $fill, $statusColor);
+            $fill = !$fill;
+        }
+
+        // Summary Row
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
-        $pdf->Cell(25, 7, number_format($totals['due'], 2), 1, 0, 'R', true);
-        $pdf->Cell(25, 7, number_format($totals['paid'], 2), 1, 0, 'R', true);
-        $pdf->Cell(30, 7, number_format($totals['grandTotal'], 2), 1, 0, 'R', true);
-        $pdf->Cell(110, 7, 'Totals:', 1, 1, 'R', true);
+        $pdf->SetFillColor(200, 200, 200);
+        
+        $totalItems = $sales->sum(function($sale) { return $sale->items->count(); });
+        $totalAmount = $sales->sum('total_amount');
+        $totalPaid = $sales->sum('paid_amount');
+        $totalDue = $totalAmount - $totalPaid;
+
+        $summaryData = [
+            'TOTAL',
+            $sales->count() . ' sales',
+            '',
+            '',
+            $totalItems,
+            number_format($totalAmount, 2),
+            number_format($totalPaid, 2),
+            number_format($totalDue, 2)
+        ];
+
+        foreach ($summaryData as $i => $cellData) {
+            $pdf->Cell($columnWidths[$i], 8, $cellData, 1, 0, 'C', true);
+        }
+        $pdf->Ln(10);
+    }
+
+    private function getStatusColor($status)
+    {
+        switch ($status) {
+            case 'completed':
+                return [200, 255, 200]; // Light green
+            case 'pending':
+                return [255, 255, 200]; // Light yellow
+            case 'draft':
+                return [240, 240, 240]; // Light gray
+            case 'cancelled':
+                return [255, 200, 200]; // Light red
+            default:
+                return [255, 255, 255]; // White
+        }
+    }
+
+    private function generateFooter($pdf)
+    {
+        $pdf->SetY(-30);
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'I', 8);
+        $pdf->SetTextColor(128);
+        
+        $pdf->Cell(0, 5, 'This report was generated automatically by the sales management system.', 0, 1, 'C');
+        $pdf->Cell(0, 5, 'For questions or support, please contact your system administrator.', 0, 1, 'C');
+        $pdf->Cell(0, 5, 'Report generated on: ' . now()->format('Y-m-d H:i:s'), 0, 1, 'C');
     }
 
     /**

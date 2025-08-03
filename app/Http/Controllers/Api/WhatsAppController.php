@@ -52,7 +52,7 @@ class WhatsAppController extends Controller
             
             $payload = [
                 'chatId' => $request->chatId,
-                'text' => $request->text,
+                'message' => $request->text, // Changed from 'text' to 'message' to match API
             ];
 
             if ($request->quotedMessageId) {
@@ -62,21 +62,23 @@ class WhatsAppController extends Controller
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $apiToken,
                 'Content-Type' => 'application/json',
+                'Accept' => 'application/json',
             ])->post($endpoint, $payload);
 
             if ($response->successful()) {
                 $data = $response->json();
                 
+
+                
                 Log::info('WhatsApp message sent successfully', [
                     'chatId' => $request->chatId,
-                    'messageId' => $data['id'] ?? null,
-                    'response' => $data
+                    'messageId' => $data['data']['data']['id']['id'] ?? null
                 ]);
 
                 return response()->json([
                     'success' => true,
                     'message' => 'Message sent successfully',
-                    'data' => $data
+                    'data' => $data['data']['data'] ?? $data['data'] ?? $data
                 ]);
             } else {
                 Log::error('WhatsApp API error', [
@@ -149,27 +151,30 @@ class WhatsAppController extends Controller
             
             $payload = [
                 'chatId' => $chatId,
-                'text' => $testMessage,
+                'message' => $testMessage, // Changed from 'text' to 'message' to match API
             ];
 
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $apiToken,
                 'Content-Type' => 'application/json',
+                'Accept' => 'application/json',
             ])->post($endpoint, $payload);
 
             if ($response->successful()) {
                 $data = $response->json();
                 
+
+                
                 Log::info('WhatsApp test message sent successfully', [
                     'phoneNumber' => $request->phoneNumber,
                     'chatId' => $chatId,
-                    'messageId' => $data['id'] ?? null
+                    'messageId' => $data['data']['data']['id']['id'] ?? null
                 ]);
 
                 return response()->json([
                     'success' => true,
                     'message' => 'Test message sent successfully',
-                    'data' => $data
+                    'data' => $data['data']['data'] ?? $data['data'] ?? $data
                 ]);
             } else {
                 Log::error('WhatsApp test API error', [
@@ -308,12 +313,13 @@ class WhatsAppController extends Controller
             
             $payload = [
                 'chatId' => $chatId,
-                'text' => $request->message,
+                'message' => $request->message, // Changed from 'text' to 'message' to match API
             ];
 
             $response = Http::withHeaders([
                 'Authorization' => 'Bearer ' . $apiToken,
                 'Content-Type' => 'application/json',
+                'Accept' => 'application/json',
             ])->post($endpoint, $payload);
 
             if ($response->successful()) {
@@ -322,13 +328,13 @@ class WhatsAppController extends Controller
                 Log::info('WhatsApp sale notification sent successfully', [
                     'phoneNumber' => $request->phoneNumber,
                     'chatId' => $chatId,
-                    'messageId' => $data['id'] ?? null
+                    'messageId' => $data['data']['data']['id']['id'] ?? null
                 ]);
 
                 return response()->json([
                     'success' => true,
                     'message' => 'Sale notification sent successfully',
-                    'data' => $data
+                    'data' => $data['data']['data'] ?? $data['data'] ?? $data
                 ]);
             } else {
                 Log::error('WhatsApp sale notification API error', [
@@ -363,14 +369,10 @@ class WhatsAppController extends Controller
      */
     private function formatPhoneNumber($phoneNumber)
     {
-        // Remove all non-numeric characters except +
-        $phoneNumber = preg_replace('/[^0-9+]/', '', $phoneNumber);
+        // Remove all non-numeric characters (including +)
+        $phoneNumber = preg_replace('/[^0-9]/', '', $phoneNumber);
         
-        // If it starts with +, keep it, otherwise add +
-        if (!str_starts_with($phoneNumber, '+')) {
-            $phoneNumber = '+' . $phoneNumber;
-        }
-        
+        // Return only the numeric part (no + prefix)
         return $phoneNumber;
     }
 
