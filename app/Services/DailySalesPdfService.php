@@ -10,24 +10,64 @@ use Carbon\Carbon;
 class DailySalesPdfService
 {
     /**
-     * Generate a PDF report of daily sales
+     * Generate a PDF report of daily sales with filters
      *
-     * @param string|null $date
+     * @param array $filters
      * @return string PDF content
      */
-    public function generateDailySalesPdf(?string $date = null): string
+    public function generateDailySalesPdf(array $filters = []): string
     {
-        // Use today's date if no date provided
-        $targetDate = $date ? Carbon::parse($date) : Carbon::today();
+        // Build query with filters
+        $query = Sale::with(['items.product', 'client', 'payments', 'user']);
+
+        // Apply date filters and determine filename date
+        $filenameDate = Carbon::today(); // Default for filename
         
-        // Get sales for the specified date (include sales with items or payments)
-        $sales = Sale::with(['items.product', 'client', 'payments'])
-            ->whereDate('sale_date', $targetDate)
-            ->where(function($query) {
+        if (isset($filters['date'])) {
+            $targetDate = Carbon::parse($filters['date']);
+            $filenameDate = $targetDate;
+            $query->whereDate('sale_date', $targetDate);
+        } elseif (isset($filters['start_date']) || isset($filters['end_date'])) {
+            if (isset($filters['start_date'])) {
+                $filenameDate = Carbon::parse($filters['start_date']);
+                $query->whereDate('sale_date', '>=', $filters['start_date']);
+            }
+            if (isset($filters['end_date'])) {
+                $query->whereDate('sale_date', '<=', $filters['end_date']);
+            }
+        } else {
+            // Default to today if no date filters
+            $query->whereDate('sale_date', Carbon::today());
+        }
+
+        // Apply other filters
+        if (isset($filters['user_id'])) {
+            $query->where('user_id', $filters['user_id']);
+        }
+        if (isset($filters['sale_id'])) {
+            $query->where('id', $filters['sale_id']);
+        }
+        if (isset($filters['product_id'])) {
+            $query->whereHas('items', function($q) use ($filters) {
+                $q->where('product_id', $filters['product_id']);
+            });
+        }
+        if (isset($filters['start_time'])) {
+            $query->whereTime('created_at', '>=', $filters['start_time']);
+        }
+        if (isset($filters['end_time'])) {
+            $query->whereTime('created_at', '<=', $filters['end_time']);
+        }
+
+        // Get sales (include sales with items or payments)
+        $sales = $query->where(function($query) {
                 $query->whereHas('items')->orWhereHas('payments');
             })
             ->orderBy('created_at', 'asc')
             ->get();
+
+        // Determine report title based on filters
+        $reportTitle = $this->getReportTitle($filters);
 
         // Calculate summary statistics
         $summary = $this->calculateSummary($sales);
@@ -36,17 +76,17 @@ class DailySalesPdfService
         $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
 
         // Set document information
-        $pdf->SetTitle('Daily Sales Report - ' . $targetDate->format('Y-m-d'));
-        $pdf->SetSubject('Daily Sales Report');
+        $pdf->SetTitle($reportTitle);
+        $pdf->SetSubject('Sales Report');
 
         // Add a page
         $pdf->AddPage();
 
         // Generate PDF content using cell method
-        $this->generatePdfContent($pdf, $sales, $summary, $targetDate);
+        $this->generatePdfContent($pdf, $sales, $summary, $filters);
 
         // Return PDF content
-        return $pdf->Output('daily_sales_report_' . $targetDate->format('Y-m-d') . '.pdf', 'S');
+        return $pdf->Output('daily_sales_report_' . $filenameDate->format('Y-m-d') . '.pdf', 'S');
     }
 
     /**
@@ -90,16 +130,16 @@ class DailySalesPdfService
      * @param MyCustomTCPDF $pdf
      * @param \Illuminate\Database\Eloquent\Collection $sales
      * @param array $summary
-     * @param Carbon $date
+     * @param array $filters
      * @return void
      */
-    private function generatePdfContent($pdf, $sales, array $summary, Carbon $date): void
+    private function generatePdfContent($pdf, $sales, array $summary, array $filters): void
     {
         // Set RTL direction
         $pdf->setRTL(true);
 
         // Professional Header
-        $this->generateHeader($pdf, $date);
+        $this->generateHeader($pdf, $filters);
         $pdf->Ln(8);
 
         // Executive Summary
@@ -114,7 +154,7 @@ class DailySalesPdfService
 
         // Detailed Sales Table
         if ($sales->count() > 0) {
-            $this->generateSalesTable($pdf, $sales);
+            $this->generateSalesTable($pdf, $sales, $filters);
         } else {
             $pdf->SetFont('arial', '', 14);
             $pdf->Cell(0, 20, 'لا توجد مبيعات لهذا اليوم', 0, 1, 'C');
@@ -128,21 +168,33 @@ class DailySalesPdfService
      * Generate professional header
      *
      * @param MyCustomTCPDF $pdf
-     * @param Carbon $date
+     * @param array $filters
      * @return void
      */
-    private function generateHeader($pdf, Carbon $date): void
+    private function generateHeader($pdf, array $filters): void
     {
         // Company header with border
         $pdf->SetFillColor(51, 122, 183);
         $pdf->SetTextColor(255, 255, 255);
         $pdf->SetFont('arial', 'B', 20);
-        $pdf->Cell(0, 12, 'تقرير المبيعات اليومية', 0, 1, 'C', true);
+        $pdf->Cell(0, 12, 'تقرير المبيعات', 0, 1, 'C', true);
         
         // Date and time
         $pdf->SetTextColor(51, 51, 51);
         $pdf->SetFont('arial', '', 12);
-        $pdf->Cell(0, 8, 'التاريخ: ' . $date->format('Y-m-d') . ' (' . $this->getArabicDayName($date) . ')', 0, 1, 'C');
+        
+        // Determine date range for display
+        $dateText = $this->getDateRangeText($filters);
+        $pdf->Cell(0, 8, $dateText, 0, 1, 'C');
+        
+        // Add user filter information if present
+        if (isset($filters['user_id']) && !empty($filters['user_id'])) {
+            $user = \App\Models\User::find($filters['user_id']);
+            if ($user) {
+                $pdf->Cell(0, 6, 'المستخدم: ' . $user->name, 0, 1, 'C');
+            }
+        }
+        
         $pdf->Cell(0, 6, 'وقت التقرير: ' . now()->format('H:i:s'), 0, 1, 'C');
         
         // Reset colors
@@ -179,9 +231,9 @@ class DailySalesPdfService
         $pdf->SetFont('arial', 'B', 12);
         $pdf->SetFillColor(255, 255, 255);
         $pdf->Cell(47.5, 10, (string)$summary['totalSales'], 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, number_format($summary['totalAmount'], 2), 1, 0, 'C', true);
+        $pdf->Cell(47.5, 10, number_format($summary['totalAmount'], 0), 1, 0, 'C', true);
         $pdf->Cell(47.5, 10, (string)$summary['totalItems'], 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, number_format($summary['averageSale'], 2), 1, 1, 'C', true);
+        $pdf->Cell(47.5, 10, number_format($summary['averageSale'], 0), 1, 1, 'C', true);
         
         // Reset colors
         $pdf->SetTextColor(0, 0, 0);
@@ -251,7 +303,7 @@ class DailySalesPdfService
         foreach ($summary['paymentMethods'] as $method => $amount) {
             $percentage = $summary['totalAmount'] > 0 ? ($amount / $summary['totalAmount']) * 100 : 0;
             $pdf->Cell(65, 8, $this->getPaymentMethodName($method), 1, 0, 'C', true);
-            $pdf->Cell(45, 8, number_format($amount, 2), 1, 0, 'C', true);
+            $pdf->Cell(45, 8, number_format($amount, 0), 1, 0, 'C', true);
             $pdf->Cell(40, 8, number_format($percentage, 1) . '%', 1, 1, 'C', true);
         }
         
@@ -266,15 +318,19 @@ class DailySalesPdfService
      *
      * @param MyCustomTCPDF $pdf
      * @param \Illuminate\Database\Eloquent\Collection $sales
+     * @param array $filters
      * @return void
      */
-    private function generateSalesTable($pdf, $sales): void
+    private function generateSalesTable($pdf, $sales, array $filters = []): void
     {
         $pdf->SetFont('arial', 'B', 16);
         $pdf->SetTextColor(51, 122, 183);
         $pdf->Cell(0, 10, 'تفاصيل المبيعات', 0, 1, 'R');
         $pdf->Ln(3);
 
+        // Check if user filter is applied
+        $showUserColumn = !isset($filters['user_id']) || empty($filters['user_id']);
+        
         // Table headers
         $pdf->SetFont('arial', 'B', 10);
         $pdf->SetFillColor(248, 249, 250);
@@ -282,6 +338,9 @@ class DailySalesPdfService
         $pdf->Cell(25, 10, 'رقم المبيعات', 1, 0, 'C', true);
         $pdf->Cell(20, 10, 'الوقت', 1, 0, 'C', true);
         $pdf->Cell(40, 10, 'العميل', 1, 0, 'C', true);
+        if ($showUserColumn) {
+            $pdf->Cell(30, 10, 'المستخدم', 1, 0, 'C', true);
+        }
         $pdf->Cell(25, 10, 'العناصر', 1, 0, 'C', true);
         $pdf->Cell(30, 10, 'المبلغ', 1, 0, 'C', true);
         $pdf->Cell(50, 10, 'طرق الدفع', 1, 1, 'C', true);
@@ -298,8 +357,11 @@ class DailySalesPdfService
             $pdf->Cell(25, 8, ($sale->sale_order_number ?? $sale->id), 1, 0, 'C', true);
             $pdf->Cell(20, 8, Carbon::parse($sale->created_at)->format('H:i'), 1, 0, 'C', true);
             $pdf->Cell(40, 8, ($sale->client ? $sale->client->name : 'بدون عميل'), 1, 0, 'C', true);
+            if ($showUserColumn) {
+                $pdf->Cell(30, 8, ($sale->user ? $sale->user->name : 'غير محدد'), 1, 0, 'C', true);
+            }
             $pdf->Cell(25, 8, $sale->items->sum('quantity'), 1, 0, 'C', true);
-            $pdf->Cell(30, 8, number_format($sale->total_amount, 2), 1, 0, 'C', true);
+            $pdf->Cell(30, 8, number_format($sale->total_amount, 0), 1, 0, 'C', true);
             $pdf->Cell(50, 8, $this->formatPaymentMethods($sale->payments), 1, 1, 'C', true);
             $rowCount++;
         }
@@ -340,8 +402,52 @@ class DailySalesPdfService
         $formatted = [];
         foreach ($payments as $payment) {
             $methodName = $this->getPaymentMethodName($payment->method);
-            $formatted[] = $methodName . ' (' . number_format($payment->amount, 2) . ')';
+            $formatted[] = $methodName . ' (' . number_format($payment->amount, 0) . ')';
         }
         return implode(', ', $formatted);
+    }
+
+    /**
+     * Get report title based on filters
+     *
+     * @param array $filters
+     * @return string
+     */
+    private function getReportTitle(array $filters): string
+    {
+        if (isset($filters['date'])) {
+            return 'Daily Sales Report - ' . Carbon::parse($filters['date'])->format('Y-m-d');
+        } elseif (isset($filters['start_date']) && isset($filters['end_date'])) {
+            return 'Sales Report - ' . $filters['start_date'] . ' to ' . $filters['end_date'];
+        } elseif (isset($filters['start_date'])) {
+            return 'Sales Report - From ' . $filters['start_date'];
+        } elseif (isset($filters['end_date'])) {
+            return 'Sales Report - Until ' . $filters['end_date'];
+        } else {
+            return 'Sales Report - ' . Carbon::today()->format('Y-m-d');
+        }
+    }
+
+    /**
+     * Get date range text for display
+     *
+     * @param array $filters
+     * @return string
+     */
+    private function getDateRangeText(array $filters): string
+    {
+        if (isset($filters['date'])) {
+            $date = Carbon::parse($filters['date']);
+            return 'التاريخ: ' . $date->format('Y-m-d') . ' (' . $this->getArabicDayName($date) . ')';
+        } elseif (isset($filters['start_date']) && isset($filters['end_date'])) {
+            return 'الفترة: من ' . $filters['start_date'] . ' إلى ' . $filters['end_date'];
+        } elseif (isset($filters['start_date'])) {
+            return 'من تاريخ: ' . $filters['start_date'];
+        } elseif (isset($filters['end_date'])) {
+            return 'إلى تاريخ: ' . $filters['end_date'];
+        } else {
+            $today = Carbon::today();
+            return 'التاريخ: ' . $today->format('Y-m-d') . ' (' . $this->getArabicDayName($today) . ')';
+        }
     }
 } 

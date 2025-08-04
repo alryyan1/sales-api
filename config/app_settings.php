@@ -13,6 +13,7 @@ return [
 
     'invoice_prefix' => env('APP_SETTINGS_INVOICE_PREFIX', 'INV-'),
     'purchase_order_prefix' => env('APP_SETTINGS_PO_PREFIX', 'PO-'),
+    'default_profit_rate' => (float) env('APP_SETTINGS_DEFAULT_PROFIT_RATE', 20.0), // Default profit rate percentage
 
     // WhatsApp API Configuration
     'whatsapp_enabled' => env('APP_SETTINGS_WHATSAPP_ENABLED', false),

@@ -94,7 +94,7 @@ class PurchaseController extends Controller
             'items' => 'nullable|array',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.batch_number' => 'nullable|string|max:100', // Max length for batch number
-            'items.*.quantity' => 'required|integer|min:1', // Quantity of stocking units (e.g., boxes)
+            'items.*.quantity' => 'required|integer|min:0', // Quantity of stocking units (e.g., boxes)
             'items.*.unit_cost' => 'required|numeric|min:0',   // Cost per stocking unit
             'items.*.sale_price' => 'nullable|numeric|min:0', // Intended sale price PER SELLABLE UNIT
             'items.*.expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date', // Expiry date after purchase date
@@ -279,7 +279,7 @@ class PurchaseController extends Controller
         $validatedData = $request->validate([
             'product_id' => 'required|exists:products,id',
             'batch_number' => 'nullable|string|max:100',
-            'quantity' => 'required|integer|min:1',
+            'quantity' => 'required|integer|min:0',
             'unit_cost' => 'required|numeric|min:0',
             'sale_price' => 'nullable|numeric|min:0',
             'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',
@@ -324,7 +324,7 @@ class PurchaseController extends Controller
         $validatedData = $request->validate([
             'product_id' => 'required|exists:products,id',
             'batch_number' => 'nullable|string|max:100',
-            'quantity' => 'required|integer|min:1',
+            'quantity' => 'required|integer|min:0',
             'unit_cost' => 'required|numeric|min:0',
             'sale_price' => 'nullable|numeric|min:0',
             'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',

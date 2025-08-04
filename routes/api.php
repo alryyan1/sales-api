@@ -185,4 +185,7 @@ Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController:
   // -- Dashboard Data --
   Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
   Route::get('/dashboard/sales-terminal-summary', [DashboardController::class, 'salesTerminalSummary'])->name('api.dashboard.salesTerminalSummary'); //
+  
+  // -- Public Users Route for Filters --
+  Route::get('/users/list', [UserController::class, 'listForFilters'])->name('api.users.list');
 });

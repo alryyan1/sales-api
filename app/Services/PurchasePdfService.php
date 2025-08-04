@@ -115,9 +115,9 @@ class PurchasePdfService
             $html .= '<td>' . ($item->product ? htmlspecialchars($item->product->name) : 'منتج محذوف') . '</td>';
             $html .= '<td>' . ($item->batch_number ? htmlspecialchars($item->batch_number) : '---') . '</td>';
             $html .= '<td>' . number_format($item->quantity) . ' ' . ($item->product && $item->product->stockingUnit ? $item->product->stockingUnit->name : 'وحدة') . '</td>';
-            $html .= '<td>' . number_format($item->unit_cost, 2) . '</td>';
-            $html .= '<td>' . number_format($itemTotal, 2) . '</td>';
-            $html .= '<td>' . ($item->sale_price ? number_format($item->sale_price, 2) : '---') . '</td>';
+                    $html .= '<td>' . number_format($item->unit_cost, 0) . '</td>';
+        $html .= '<td>' . number_format($itemTotal, 0) . '</td>';
+        $html .= '<td>' . ($item->sale_price ? number_format($item->sale_price, 0) : '---') . '</td>';
             $html .= '<td>' . ($item->expiry_date ? $item->expiry_date : '---') . '</td>';
             $html .= '</tr>';
         }
@@ -128,7 +128,7 @@ class PurchasePdfService
         // Summary section
         $html .= '<div class="summary">';
         $html .= '<div class="summary-item"><strong>إجمالي العناصر:</strong> ' . $purchase->items->count() . '</div>';
-        $html .= '<div class="summary-item"><strong>إجمالي المبلغ:</strong> ' . number_format($totalAmount, 2) . '</div>';
+        $html .= '<div class="summary-item"><strong>إجمالي المبلغ:</strong> ' . number_format($totalAmount, 0) . '</div>';
         $html .= '</div>';
 
         return $html;

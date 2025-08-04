@@ -39,6 +39,13 @@ class ProductPdfService
             $query->where('stock_quantity', '>', 0);
         }
 
+        if (!empty($filters['low_stock_only'])) {
+            $query->where(function ($q) {
+                $q->whereNotNull('stock_alert_level')
+                  ->where('stock_quantity', '<=', DB::raw('stock_alert_level'));
+            });
+        }
+
         // Get all products (no pagination for PDF)
         $products = $query->orderBy('name')->get();
 

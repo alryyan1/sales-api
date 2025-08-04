@@ -46,6 +46,14 @@ class ProductController extends Controller
             $query->where('stock_quantity', '>', 0);
         }
 
+        // Filter by low stock (products where stock is at or below alert level)
+        if ($request->boolean('low_stock_only')) {
+            $query->where(function ($q) {
+                $q->whereNotNull('stock_alert_level')
+                  ->where('stock_quantity', '<=', \DB::raw('stock_alert_level'));
+            });
+        }
+
         // Sorting
         $sortBy = $request->input('sort_by', 'created_at'); // Default sort field
         $sortDirection = $request->input('sort_direction', 'desc'); // Default sort direction
@@ -256,6 +264,7 @@ class ProductController extends Controller
             'search' => $request->input('search'),
             'category_id' => $request->input('category_id'),
             'in_stock_only' => $request->boolean('in_stock_only'),
+            'low_stock_only' => $request->boolean('low_stock_only'),
         ];
 
         $pdfService = new ProductPdfService();
@@ -286,6 +295,7 @@ class ProductController extends Controller
             'search' => $request->input('search'),
             'category_id' => $request->input('category_id'),
             'in_stock_only' => $request->boolean('in_stock_only'),
+            'low_stock_only' => $request->boolean('low_stock_only'),
         ];
 
         $excelService = new ProductExcelService();

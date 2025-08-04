@@ -65,6 +65,23 @@ class SaleController extends Controller
         if ($endDate = $request->input('end_date')) {
             $query->whereDate('sale_date', '<=', $endDate);
         }
+        if ($userId = $request->input('user_id')) {
+            $query->where('user_id', $userId);
+        }
+        if ($saleId = $request->input('sale_id')) {
+            $query->where('id', $saleId);
+        }
+        if ($productId = $request->input('product_id')) {
+            $query->whereHas('items', function($q) use ($productId) {
+                $q->where('product_id', $productId);
+            });
+        }
+        if ($startTime = $request->input('start_time')) {
+            $query->whereTime('created_at', '>=', $startTime);
+        }
+        if ($endTime = $request->input('end_time')) {
+            $query->whereTime('created_at', '<=', $endTime);
+        }
 
         $sales = $query->latest('id')->paginate($request->input('per_page', 15));
         
@@ -853,10 +870,16 @@ class SaleController extends Controller
                     ]);
                 }
                 
-                // Check stock availability
-                if ($product->stock_quantity < $validatedData['quantity']) {
+                // Check stock availability - consider current sale items
+                $currentQuantityInThisSale = $sale->items()
+                    ->where('product_id', $product->id)
+                    ->sum('quantity');
+                $totalQuantityAfterAdd = $currentQuantityInThisSale + $validatedData['quantity'];
+                $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
+                
+                if ($totalQuantityAfterAdd > $originalStockQuantity) {
                     throw ValidationException::withMessages([
-                        'quantity' => "Insufficient stock. Available: {$product->stock_quantity}, Requested: {$validatedData['quantity']}"
+                        'quantity' => "Insufficient stock. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterAdd}"
                     ]);
                 }
 
@@ -1000,9 +1023,18 @@ class SaleController extends Controller
                         ]);
                     }
                     
-                    if ($product->stock_quantity < $quantityDifference) {
+                    // Calculate the total quantity that would be in this sale after the increase
+                    $currentQuantityInThisSale = $sale->items()
+                        ->where('product_id', $product->id)
+                        ->sum('quantity');
+                    $totalQuantityAfterIncrease = $currentQuantityInThisSale + $quantityDifference;
+                    
+                    // Get the original stock quantity (before any sales)
+                    $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
+                    
+                    if ($totalQuantityAfterIncrease > $originalStockQuantity) {
                         throw ValidationException::withMessages([
-                            'quantity' => "Insufficient stock. Available: {$product->stock_quantity}, Requested increase: {$quantityDifference}"
+                            'quantity' => "Insufficient stock. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterIncrease}"
                         ]);
                     }
                 }
@@ -1297,8 +1329,8 @@ class SaleController extends Controller
             $lineHeight = $pdf->getStringHeight($w_items[3], $productDescription); // Calculate height needed for description
             $lineHeight = max(6, $lineHeight); // Minimum height of 6
 
-            $pdf->Cell($w_items[0], $lineHeight, number_format((float)$item->total_price, 2), 'LRB', 0, 'R', $fill);
-            $pdf->Cell($w_items[1], $lineHeight, number_format((float)$item->unit_price, 2), 'LRB', 0, 'R', $fill);
+                    $pdf->Cell($w_items[0], $lineHeight, number_format((float)$item->total_price, 0), 'LRB', 0, 'R', $fill);
+        $pdf->Cell($w_items[1], $lineHeight, number_format((float)$item->unit_price, 0), 'LRB', 0, 'R', $fill);
             $pdf->Cell($w_items[2], $lineHeight, $item->quantity, 'LRB', 0, 'C', $fill);
 
             $x = $pdf->GetX();
@@ -1318,7 +1350,7 @@ class SaleController extends Controller
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
         $pdf->Cell($col1Width, 6, 'المجموع الفرعي:', 'LTR', 0, 'L', false); // Subtotal Label
-        $pdf->Cell($col2Width, 6, number_format((float)$sale->total_amount, 2), 'TR', 1, 'R', false); // Subtotal Value
+        $pdf->Cell($col2Width, 6, number_format((float)$sale->total_amount, 0), 'TR', 1, 'R', false); // Subtotal Value
 
         // Example: Discount (if you have it)
         // $pdf->Cell($col1Width, 6, 'الخصم:', 'LR', 0, 'L', false);
@@ -1329,16 +1361,16 @@ class SaleController extends Controller
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
         $pdf->SetFillColor(220, 220, 220);
         $pdf->Cell($col1Width, 7, 'الإجمالي المستحق:', 'LTRB', 0, 'L', true); // Grand Total Label
-        $pdf->Cell($col2Width, 7, number_format((float)$sale->total_amount, 2), 'TRB', 1, 'R', true); // Grand Total Value
+        $pdf->Cell($col2Width, 7, number_format((float)$sale->total_amount, 0), 'TRB', 1, 'R', true); // Grand Total Value
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
         $pdf->Cell($col1Width, 6, 'المبلغ المدفوع:', 'LR', 0, 'L', false); // Paid Amount Label
-        $pdf->Cell($col2Width, 6, number_format((float)$sale->paid_amount, 2), 'R', 1, 'R', false); // Paid Amount Value
+        $pdf->Cell($col2Width, 6, number_format((float)$sale->paid_amount, 0), 'R', 1, 'R', false); // Paid Amount Value
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
         $due = (float)$sale->total_amount - (float)$sale->paid_amount;
         $pdf->Cell($col1Width, 7, 'المبلغ المتبقي:', 'LTRB', 0, 'L', false); // Amount Due Label
-        $pdf->Cell($col2Width, 7, number_format($due, 2), 'TRB', 1, 'R', false); // Amount Due Value
+        $pdf->Cell($col2Width, 7, number_format($due, 0), 'TRB', 1, 'R', false); // Amount Due Value
 
 
         // --- Payments Information ---
@@ -1349,7 +1381,7 @@ class SaleController extends Controller
             $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
             foreach ($sale->payments as $payment) {
                 $paymentText = "طريقة الدفع: " . config('app_settings.payment_methods.' . $payment->method, $payment->method); // Assuming payment_methods in config
-                $paymentText .= "  |  المبلغ: " . number_format((float)$payment->amount, 2);
+                $paymentText .= "  |  المبلغ: " . number_format((float)$payment->amount, 0);
                 $paymentText .= "  |  التاريخ: " . Carbon::parse($payment->payment_date)->format('Y-m-d');
                 if ($payment->reference_number) $paymentText .= "  |  مرجع: " . $payment->reference_number;
                 $pdf->MultiCell(0, 5, $paymentText, 0, 'R', 0, 1);
@@ -1452,8 +1484,8 @@ class SaleController extends Controller
                 $productName = mb_substr($productName, 0, 18) . '..';
             }
 
-            $itemTotal = number_format((float)$item->total_price, 2);
-            $itemPrice = number_format((float)$item->unit_price, 2);
+                    $itemTotal = number_format((float)$item->total_price, 0);
+        $itemPrice = number_format((float)$item->unit_price, 0);
             $itemQty = (string)$item->quantity;
 
             // Using MultiCell for name to handle potential (though short) wrapping
@@ -1472,22 +1504,22 @@ class SaleController extends Controller
         // --- Totals ---
         $pdf->SetFont('dejavusans', 'B', 8);
         $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R'); // Total Amount Label (spans 2 cols)
-        $pdf->Cell(26, 5, number_format((float)$sale->total_amount, 2), 0, 1, 'R'); // Total Amount
+        $pdf->Cell(26, 5, number_format((float)$sale->total_amount, 0), 0, 1, 'R'); // Total Amount
 
 
 
         $pdf->SetFont('dejavusans', 'B', 9);
         $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
-        $pdf->Cell(26, 6, number_format((float)$sale->total_amount, 2), 0, 1, 'R');
+        $pdf->Cell(26, 6, number_format((float)$sale->total_amount, 0), 0, 1, 'R');
 
         $pdf->SetFont('dejavusans', '', 8);
         $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
-        $pdf->Cell(26, 5, number_format((float)$sale->paid_amount, 2), 0, 1, 'R');
+        $pdf->Cell(26, 5, number_format((float)$sale->paid_amount, 0), 0, 1, 'R');
 
         $due = (float)$sale->total_amount - (float)$sale->paid_amount;
         $pdf->SetFont('dejavusans', 'B', 8);
         $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
-        $pdf->Cell(26, 5, number_format($due, 2), 0, 1, 'R');
+        $pdf->Cell(26, 5, number_format($due, 0), 0, 1, 'R');
         $pdf->Ln(1);
 
         // --- Payment Methods Used ---
@@ -1497,7 +1529,7 @@ class SaleController extends Controller
             $pdf->SetFont('dejavusans', '', 7);
             foreach ($sale->payments as $payment) {
                 $pdf->Cell(46, 4, config('app_settings.payment_methods_ar.' . $payment->method, $payment->method) . ':', 0, 0, 'R'); // Translate method
-                $pdf->Cell(26, 4, number_format((float)$payment->amount, 2), 0, 1, 'R');
+                $pdf->Cell(26, 4, number_format((float)$payment->amount, 0), 0, 1, 'R');
             }
             $pdf->Ln(1);
         }
@@ -1655,9 +1687,15 @@ class SaleController extends Controller
                             continue;
                         }
                         
-                        // Check stock availability
-                        if ($product->stock_quantity < $itemData['quantity']) {
-                            $errors[] = "Insufficient stock for '{$product->name}'. Available: {$product->stock_quantity}, Requested: {$itemData['quantity']}";
+                        // Check stock availability - consider current sale items
+                        $currentQuantityInThisSale = $sale->items()
+                            ->where('product_id', $product->id)
+                            ->sum('quantity');
+                        $totalQuantityAfterAdd = $currentQuantityInThisSale + $itemData['quantity'];
+                        $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
+                        
+                        if ($totalQuantityAfterAdd > $originalStockQuantity) {
+                            $errors[] = "Insufficient stock for '{$product->name}'. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterAdd}";
                             continue;
                         }
 

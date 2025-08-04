@@ -110,27 +110,89 @@ class MyCustomTCPDF extends TCPDF
     public function addTableHeader($headers, $columnWidths, $fontSize = 9)
     {
         $this->SetFont($this->defaultFontFamily, 'B', $fontSize);
-        $this->SetFillColor(220, 220, 220);
-        $this->SetTextColor(0);
+        $this->SetFillColor(70, 130, 180); // Professional blue background
+        $this->SetTextColor(255, 255, 255); // White text
 
         foreach ($headers as $i => $header) {
             $this->Cell($columnWidths[$i], 8, $header, 1, 0, 'C', true);
         }
         $this->Ln();
+        $this->SetTextColor(0, 0, 0); // Reset text color
+        $this->SetFillColor(255, 255, 255); // Reset fill color
     }
 
     /**
      * Create a professional table row
      */
-    public function addTableRow($data, $columnWidths, $fontSize = 8, $fill = false, $fillColor = [245, 245, 245])
+    public function addTableRow($data, $columnWidths, $rowHeight = 8, $fill = false, $fillColor = [245, 245, 245])
     {
-        $this->SetFont($this->defaultFontFamily, '', $fontSize);
+        $this->SetFont($this->defaultFontFamily, '', 8);
         $this->SetFillColor($fillColor[0], $fillColor[1], $fillColor[2]);
 
+        // Calculate the maximum height needed for this row
+        $maxHeight = $rowHeight;
+        
+        // Check if any cell needs more height due to text wrapping
         foreach ($data as $i => $cellData) {
-            $this->Cell($columnWidths[$i], 6, $cellData, 'LRB', 0, 'C', $fill);
+            $cellHeight = $this->calculateStringHeight($columnWidths[$i], $cellData);
+            $maxHeight = max($maxHeight, $cellHeight);
         }
-        $this->Ln();
+
+        // Draw cells with proper height
+        $startY = $this->GetY();
+        foreach ($data as $i => $cellData) {
+            $x = $this->GetX();
+            $y = $startY;
+            
+            // Use MultiCell for text wrapping
+            $this->SetXY($x, $y);
+            $this->MultiCell($columnWidths[$i], $maxHeight, $cellData, 'LRB', 'C', $fill, 0);
+            
+            $this->SetXY($x + $columnWidths[$i], $y);
+        }
+        
+        $this->SetY($startY + $maxHeight);
+    }
+
+    /**
+     * Calculate the height needed for a string in a given width
+     */
+    private function calculateStringHeight($width, $text)
+    {
+        $lines = $this->getStringLines($width, $text);
+        return count($lines) * 4; // 4mm per line
+    }
+
+    /**
+     * Get the number of lines a string will take in a given width
+     */
+    private function getStringLines($width, $text)
+    {
+        $words = explode(' ', $text);
+        $lines = [];
+        $currentLine = '';
+        
+        foreach ($words as $word) {
+            $testLine = $currentLine . ($currentLine ? ' ' : '') . $word;
+            if ($this->GetStringWidth($testLine) <= $width) {
+                $currentLine = $testLine;
+            } else {
+                if ($currentLine) {
+                    $lines[] = $currentLine;
+                    $currentLine = $word;
+                } else {
+                    // Word is too long for the cell, truncate it
+                    $lines[] = substr($word, 0, floor($width / $this->GetStringWidth('a')));
+                    $currentLine = '';
+                }
+            }
+        }
+        
+        if ($currentLine) {
+            $lines[] = $currentLine;
+        }
+        
+        return $lines;
     }
 
     /**

@@ -171,7 +171,6 @@ class ReportController extends Controller
         // --- Pagination ---
         $perPage = $validated['per_page'] ?? 25;
         $products = $query->with('purchaseItemsWithStock')->paginate($perPage);
-        $products->getCollection()->each->append(['suggested_sale_price_per_sellable_unit', 'latest_cost_per_sellable_unit']);
 
 
         // --- Return Paginated Resource Collection ---
@@ -658,7 +657,7 @@ class ReportController extends Controller
         // Large prominent total income display
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
         $pdf->SetFillColor(240, 248, 255); // Light blue background
-        $pdf->Cell(0, 12, 'Total Revenue: ' . number_format($summaryStats['total_amount'], 2), 1, 1, 'C', true);
+        $pdf->Cell(0, 12, 'Total Revenue: ' . number_format($summaryStats['total_amount'], 0), 1, 1, 'C', true);
         $pdf->Ln(5);
         
         // Income breakdown in a table format
@@ -668,11 +667,11 @@ class ReportController extends Controller
         
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
         $incomeData = [
-            'Total Sales Amount' => number_format($summaryStats['total_amount'], 2),
-            'Total Paid Amount' => number_format($summaryStats['total_paid'], 2),
-            'Total Due Amount' => number_format($summaryStats['total_due'], 2),
+            'Total Sales Amount' => number_format($summaryStats['total_amount'], 0),
+            'Total Paid Amount' => number_format($summaryStats['total_paid'], 0),
+            'Total Due Amount' => number_format($summaryStats['total_due'], 0),
             'Number of Sales' => $summaryStats['total_sales'],
-            'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 2) : '0.00'
+            'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 0) : '0'
         ];
         
         $pdf->addSummaryBox('Income Details', $incomeData, 2);
@@ -693,7 +692,7 @@ class ReportController extends Controller
             $paymentData = [];
             foreach ($summaryStats['payment_methods'] as $method => $amount) {
                 $percentage = $summaryStats['total_paid'] > 0 ? ($amount / $summaryStats['total_paid']) * 100 : 0;
-                $paymentData[ucfirst($method)] = number_format($amount, 2) . ' (' . number_format($percentage, 1) . '%)';
+                $paymentData[ucfirst($method)] = number_format($amount, 0) . ' (' . number_format($percentage, 1) . '%)';
             }
             $pdf->addSummaryBox('Payment Methods', $paymentData, 1);
         }
@@ -727,7 +726,7 @@ class ReportController extends Controller
             
             $clientData = [];
             foreach ($summaryStats['top_clients'] as $client) {
-                $clientData[$client['name']] = number_format($client['total'], 2) . ' (' . $client['count'] . ' sales)';
+                $clientData[$client['name']] = number_format($client['total'], 0) . ' (' . $client['count'] . ' sales)';
             }
             $pdf->addSummaryBox('Top Clients', $clientData, 1);
         }
@@ -753,23 +752,24 @@ class ReportController extends Controller
             return;
         }
 
-        // Enhanced Table Headers with better column names
+        // Professional Table Headers with optimized column names
         $headers = [
-            'Transaction ID', 
-            'Gross Amount', 
-            'Net Paid', 
-            'Discount Applied', 
-            'Transaction Date', 
-            'Sales Representative', 
-            'Products & Services'
+            'ID', 
+            'Amount', 
+            'Paid', 
+            'Discount', 
+            'Date', 
+            'User', 
+            'Items'
         ];
-        $columnWidths = [25, 30, 25, 25, 40, 35, 55];
+        // Optimized column widths for landscape A4 (297mm width)
+        // Total width: 20+25+20+20+30+25+35 = 175mm (leaving margin for borders)
+        $columnWidths = [20, 25, 20, 20, 30, 25, 35];
         
         $pdf->addTableHeader($headers, $columnWidths);
 
         // Table Data with enhanced formatting
         $fill = false;
-        $rowHeight = 10; // Increased row height for better readability
 
         foreach ($sales as $sale) {
             // Calculate discount (if any)
@@ -778,34 +778,37 @@ class ReportController extends Controller
                 $discount = $sale->discount_amount;
             }
             
-            // Get sale items names with quantity
+            // Get sale items names with quantity (optimized for smaller column)
             $itemNames = $sale->items->map(function($item) {
-                $productName = $item->product?->name ?? 'Unknown Product';
+                $productName = $item->product?->name ?? 'Unknown';
                 $quantity = $item->quantity ?? 1;
                 return $productName . ' (x' . $quantity . ')';
             })->implode(', ');
             
-            // Truncate item names if too long (more space in landscape)
-            if (strlen($itemNames) > 55) {
-                $itemNames = substr($itemNames, 0, 52) . '...';
+            // Truncate item names for smaller column width
+            if (strlen($itemNames) > 30) {
+                $itemNames = substr($itemNames, 0, 27) . '...';
             }
             
             // Status color coding with enhanced colors
             $statusColor = $this->getStatusColor($sale->status);
             
             // Format currency with proper alignment
-            $totalAmount = number_format($sale->total_amount, 2);
-            $paidAmount = number_format($sale->paid_amount, 2);
-            $discountAmount = number_format($discount, 2);
+                    $totalAmount = number_format($sale->total_amount, 0);
+        $paidAmount = number_format($sale->paid_amount, 0);
+        $discountAmount = number_format($discount, 0);
             
-            // Format date in a more professional way
-            $saleDate = Carbon::parse($sale->sale_date)->format('M d, Y H:i');
+            // Format date for smaller column (compact format)
+            $saleDate = Carbon::parse($sale->sale_date)->format('M d, H:i');
             
-            // Get user name with fallback
+            // Get user name with fallback (truncate if too long)
             $userName = $sale->user?->name ?? 'System';
+            if (strlen($userName) > 20) {
+                $userName = substr($userName, 0, 17) . '...';
+            }
             
-            // Add status indicator to transaction ID
-            $transactionId = '#' . $sale->id . ' (' . ucfirst($sale->status) . ')';
+            // Compact transaction ID with status
+            $transactionId = '#' . $sale->id . ' (' . substr(ucfirst($sale->status), 0, 3) . ')';
 
             $rowData = [
                 $transactionId,
@@ -817,7 +820,7 @@ class ReportController extends Controller
                 $itemNames
             ];
 
-            $pdf->addTableRow($rowData, $columnWidths, $rowHeight, $fill, $statusColor);
+            $pdf->addTableRow($rowData, $columnWidths, 8, $fill, $statusColor);
             $fill = !$fill;
         }
 
@@ -842,13 +845,13 @@ class ReportController extends Controller
         $totalDue = $totalAmount - $totalPaid;
 
         $summaryData = [
-            'TOTAL SUMMARY',
-            number_format($totalAmount, 2),
-            number_format($totalPaid, 2),
-            number_format($totalDiscount, 2),
-            $sales->count() . ' transactions',
-            'All Representatives',
-            'All Products'
+            'TOTAL',
+            number_format($totalAmount, 0),
+            number_format($totalPaid, 0),
+            number_format($totalDiscount, 0),
+            $sales->count() . ' sales',
+            'All Users',
+            'All Items'
         ];
 
         foreach ($summaryData as $i => $cellData) {
@@ -883,9 +886,9 @@ class ReportController extends Controller
         
         // Create statistics in a professional format
         $statsData = [
-            'Average Transaction Value' => number_format($avgSaleValue, 2),
+            'Average Transaction Value' => number_format($avgSaleValue, 0),
             'Payment Collection Rate' => number_format($paymentRate, 1) . '%',
-            'Outstanding Amount' => number_format($totalDue, 2),
+            'Outstanding Amount' => number_format($totalDue, 0),
             'Completed Transactions' => $completedCount,
             'Pending Transactions' => $pendingCount,
             'Total Products Sold' => $sales->flatMap->items->sum('quantity')
@@ -969,19 +972,24 @@ class ReportController extends Controller
             abort(403, 'You do not have permission to view reports.');
         }
 
-        // Validate date parameter
+        // Validate parameters
         $validated = $request->validate([
             'date' => 'nullable|date_format:Y-m-d',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+            'user_id' => 'nullable|integer|exists:users,id',
+            'product_id' => 'nullable|integer|exists:products,id',
+            'sale_id' => 'nullable|integer|exists:sales,id',
+            'start_time' => 'nullable|date_format:H:i',
+            'end_time' => 'nullable|date_format:H:i',
         ]);
 
-        $date = $validated['date'] ?? null;
-
-        // Generate PDF using the service
+        // Generate PDF using the service with filters
         $pdfService = new DailySalesPdfService();
-        $pdfContent = $pdfService->generateDailySalesPdf($date);
+        $pdfContent = $pdfService->generateDailySalesPdf($validated);
 
         // Return PDF response
-        $filename = 'daily_sales_report_' . ($date ?? now()->format('Y-m-d')) . '.pdf';
+        $filename = 'sales_report_' . now()->format('Y-m-d_H-i-s') . '.pdf';
         
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')

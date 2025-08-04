@@ -187,4 +187,18 @@ class UserController extends Controller
             return response()->json(['message' => 'Failed to delete user.'], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
+
+    /**
+     * Get a simple list of users for filters (no admin required)
+     */
+    public function listForFilters(Request $request)
+    {
+        $users = User::select('id', 'name')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json([
+            'data' => $users
+        ]);
+    }
 }

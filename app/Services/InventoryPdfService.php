@@ -149,8 +149,8 @@ class InventoryPdfService
             $html .= '<td>' . htmlspecialchars($product->name) . '</td>';
             $html .= '<td>' . number_format($product->stock_quantity) . '</td>';
             $html .= '<td>' . ($product->stock_alert_level ? number_format($product->stock_alert_level) : '-') . '</td>';
-            $html .= '<td>' . ($product->latest_cost_per_sellable_unit ? number_format($product->latest_cost_per_sellable_unit, 2) : '-') . '</td>';
-            $html .= '<td>' . ($product->last_sale_price_per_sellable_unit ? number_format($product->last_sale_price_per_sellable_unit, 2) : '-') . '</td>';
+                    $html .= '<td>' . ($product->latest_cost_per_sellable_unit ? number_format($product->latest_cost_per_sellable_unit, 0) : '-') . '</td>';
+        $html .= '<td>' . ($product->last_sale_price_per_sellable_unit ? number_format($product->last_sale_price_per_sellable_unit, 0) : '-') . '</td>';
             $html .= '<td>' . number_format($product->total_items_purchased) . '</td>';
             $html .= '<td>' . number_format($product->total_items_sold) . '</td>';
             $html .= '<td>' . htmlspecialchars($product->sellableUnit?->name ?: '-') . '</td>';

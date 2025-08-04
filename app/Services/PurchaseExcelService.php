@@ -108,7 +108,7 @@ class PurchaseExcelService
             $sheet->setCellValue('E' . $row, $purchase->reference_number ?: '-');
             $sheet->setCellValue('F' . $row, $purchase->supplier?->name ?: '-');
             $sheet->setCellValue('G' . $row, $this->getStatusText($purchase->status));
-            $sheet->setCellValue('H' . $row, number_format($purchase->total_amount, 2));
+            $sheet->setCellValue('H' . $row, number_format($purchase->total_amount, 0));
             $sheet->setCellValue('I' . $row, $purchase->items?->count() ?: 0);
             $sheet->setCellValue('J' . $row, $purchase->user?->name ?: '-');
             $sheet->setCellValue('K' . $row, $purchase->notes ?: '-');
@@ -151,7 +151,7 @@ class PurchaseExcelService
         
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'إجمالي المبالغ:');
-        $sheet->setCellValue('B' . $summaryRow, number_format($purchases->sum('total_amount'), 2));
+        $sheet->setCellValue('B' . $summaryRow, number_format($purchases->sum('total_amount'), 0));
         
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'تم الاستلام:');
