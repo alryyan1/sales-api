@@ -737,23 +737,39 @@ class ReportController extends Controller
 
     private function generateSalesTable($pdf, $sales)
     {
-        // Table Title
-        $pdf->addSectionHeader('Detailed Sales Data');
+        // Professional Section Header
+        $pdf->addSectionHeader('Detailed Sales Transactions');
+        
+        // Add a brief description
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
+        $pdf->SetTextColor(100, 100, 100);
+        $pdf->Cell(0, 6, 'Comprehensive breakdown of all sales transactions with detailed financial and product information', 0, 1, 'L');
+        $pdf->Ln(3);
 
         if ($sales->isEmpty()) {
             $pdf->SetFont($pdf->getDefaultFontFamily(), '', 12);
-            $pdf->Cell(0, 10, 'No sales data available for the selected period.', 1, 1, 'C');
+            $pdf->SetTextColor(128, 128, 128);
+            $pdf->Cell(0, 15, 'No sales transactions found for the selected period.', 1, 1, 'C');
             return;
         }
 
-        // Table Headers - Updated for landscape format
-        $headers = ['Sale ID', 'Total Amount', 'Paid', 'Discount', 'Date & Time', 'User', 'Sale Items Names'];
-        $columnWidths = [25, 30, 25, 25, 40, 30, 60];
+        // Enhanced Table Headers with better column names
+        $headers = [
+            'Transaction ID', 
+            'Gross Amount', 
+            'Net Paid', 
+            'Discount Applied', 
+            'Transaction Date', 
+            'Sales Representative', 
+            'Products & Services'
+        ];
+        $columnWidths = [25, 30, 25, 25, 40, 35, 55];
         
         $pdf->addTableHeader($headers, $columnWidths);
 
-        // Table Data
+        // Table Data with enhanced formatting
         $fill = false;
+        $rowHeight = 10; // Increased row height for better readability
 
         foreach ($sales as $sale) {
             // Calculate discount (if any)
@@ -762,68 +778,134 @@ class ReportController extends Controller
                 $discount = $sale->discount_amount;
             }
             
-            // Get sale items names
+            // Get sale items names with quantity
             $itemNames = $sale->items->map(function($item) {
-                return $item->product?->name ?? 'Unknown Product';
+                $productName = $item->product?->name ?? 'Unknown Product';
+                $quantity = $item->quantity ?? 1;
+                return $productName . ' (x' . $quantity . ')';
             })->implode(', ');
             
             // Truncate item names if too long (more space in landscape)
-            if (strlen($itemNames) > 60) {
-                $itemNames = substr($itemNames, 0, 57) . '...';
+            if (strlen($itemNames) > 55) {
+                $itemNames = substr($itemNames, 0, 52) . '...';
             }
             
-            // Status color coding
+            // Status color coding with enhanced colors
             $statusColor = $this->getStatusColor($sale->status);
+            
+            // Format currency with proper alignment
+            $totalAmount = number_format($sale->total_amount, 2);
+            $paidAmount = number_format($sale->paid_amount, 2);
+            $discountAmount = number_format($discount, 2);
+            
+            // Format date in a more professional way
+            $saleDate = Carbon::parse($sale->sale_date)->format('M d, Y H:i');
+            
+            // Get user name with fallback
+            $userName = $sale->user?->name ?? 'System';
+            
+            // Add status indicator to transaction ID
+            $transactionId = '#' . $sale->id . ' (' . ucfirst($sale->status) . ')';
 
             $rowData = [
-                $sale->id,
-                number_format($sale->total_amount, 2),
-                number_format($sale->paid_amount, 2),
-                number_format($discount, 2),
-                Carbon::parse($sale->sale_date)->format('Y-m-d H:i'),
-                $sale->user?->name ?? 'Unknown',
+                $transactionId,
+                $totalAmount,
+                $paidAmount,
+                $discountAmount,
+                $saleDate,
+                $userName,
                 $itemNames
             ];
 
-            $pdf->addTableRow($rowData, $columnWidths, 8, $fill, $statusColor);
+            $pdf->addTableRow($rowData, $columnWidths, $rowHeight, $fill, $statusColor);
             $fill = !$fill;
         }
 
-        // Summary Row
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
-        $pdf->SetFillColor(200, 200, 200);
+        // Professional Summary Section
+        $pdf->Ln(5);
+        $this->generateProfessionalSummaryRow($pdf, $sales, $columnWidths);
+        
+        // Add additional statistics
+        $this->generateSalesStatistics($pdf, $sales);
+    }
+
+    private function generateProfessionalSummaryRow($pdf, $sales, $columnWidths)
+    {
+        // Enhanced summary row with better styling
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
+        $pdf->SetFillColor(70, 130, 180); // Steel blue background
+        $pdf->SetTextColor(255, 255, 255); // White text
         
         $totalAmount = $sales->sum('total_amount');
         $totalPaid = $sales->sum('paid_amount');
         $totalDiscount = $sales->sum('discount_amount');
+        $totalDue = $totalAmount - $totalPaid;
 
         $summaryData = [
-            'TOTAL',
+            'TOTAL SUMMARY',
             number_format($totalAmount, 2),
             number_format($totalPaid, 2),
             number_format($totalDiscount, 2),
-            $sales->count() . ' sales',
-            '',
-            ''
+            $sales->count() . ' transactions',
+            'All Representatives',
+            'All Products'
         ];
 
         foreach ($summaryData as $i => $cellData) {
-            $pdf->Cell($columnWidths[$i], 8, $cellData, 1, 0, 'C', true);
+            $pdf->Cell($columnWidths[$i], 10, $cellData, 1, 0, 'C', true);
         }
-        $pdf->Ln(10);
+        $pdf->Ln(12);
+        
+        // Reset colors
+        $pdf->SetTextColor(0, 0, 0);
+    }
+
+    private function generateSalesStatistics($pdf, $sales)
+    {
+        // Additional professional statistics
+        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
+        $pdf->Cell(0, 8, 'Transaction Analysis', 0, 1, 'L');
+        $pdf->Ln(3);
+        
+        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
+        
+        // Calculate additional statistics
+        $totalAmount = $sales->sum('total_amount');
+        $totalPaid = $sales->sum('paid_amount');
+        $totalDue = $totalAmount - $totalPaid;
+        $avgSaleValue = $sales->count() > 0 ? $totalAmount / $sales->count() : 0;
+        $paymentRate = $totalAmount > 0 ? ($totalPaid / $totalAmount) * 100 : 0;
+        
+        // Status breakdown
+        $statusBreakdown = $sales->groupBy('status')->map->count();
+        $completedCount = $statusBreakdown->get('completed', 0);
+        $pendingCount = $statusBreakdown->get('pending', 0);
+        
+        // Create statistics in a professional format
+        $statsData = [
+            'Average Transaction Value' => number_format($avgSaleValue, 2),
+            'Payment Collection Rate' => number_format($paymentRate, 1) . '%',
+            'Outstanding Amount' => number_format($totalDue, 2),
+            'Completed Transactions' => $completedCount,
+            'Pending Transactions' => $pendingCount,
+            'Total Products Sold' => $sales->flatMap->items->sum('quantity')
+        ];
+        
+        $pdf->addSummaryBox('Key Performance Metrics', $statsData, 2);
+        $pdf->Ln(8);
     }
 
     private function getStatusColor($status)
     {
         switch ($status) {
             case 'completed':
-                return [200, 255, 200]; // Light green
+                return [220, 255, 220]; // Professional light green
             case 'pending':
-                return [255, 255, 200]; // Light yellow
+                return [255, 248, 220]; // Professional light yellow/cream
             case 'draft':
-                return [240, 240, 240]; // Light gray
+                return [245, 245, 245]; // Professional light gray
             case 'cancelled':
-                return [255, 200, 200]; // Light red
+                return [255, 235, 235]; // Professional light red
             default:
                 return [255, 255, 255]; // White
         }
