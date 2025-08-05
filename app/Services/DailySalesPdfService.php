@@ -329,21 +329,23 @@ class DailySalesPdfService
         $pdf->Ln(3);
 
         // Check if user filter is applied
+
         $showUserColumn = !isset($filters['user_id']) || empty($filters['user_id']);
-        
+        $page_width = $pdf->GetPageWidth() - 20;
+        $column_width = $page_width / 7;
         // Table headers
         $pdf->SetFont('arial', 'B', 10);
         $pdf->SetFillColor(248, 249, 250);
         $pdf->SetTextColor(51, 51, 51);
-        $pdf->Cell(25, 10, 'رقم المبيعات', 1, 0, 'C', true);
-        $pdf->Cell(20, 10, 'الوقت', 1, 0, 'C', true);
-        $pdf->Cell(40, 10, 'العميل', 1, 0, 'C', true);
+        $pdf->Cell($column_width, 10, 'رقم المبيعات', 1, 0, 'C', true);
+        $pdf->Cell($column_width, 10, 'الوقت', 1, 0, 'C', true);
+        $pdf->Cell($column_width, 10, 'العميل', 1, 0, 'C', true);
         if ($showUserColumn) {
-            $pdf->Cell(30, 10, 'المستخدم', 1, 0, 'C', true);
+            $pdf->Cell($column_width, 10, 'المستخدم', 1, 0, 'C', true);
         }
-        $pdf->Cell(25, 10, 'العناصر', 1, 0, 'C', true);
-        $pdf->Cell(30, 10, 'المبلغ', 1, 0, 'C', true);
-        $pdf->Cell(50, 10, 'طرق الدفع', 1, 1, 'C', true);
+        $pdf->Cell($column_width, 10, 'العناصر', 1, 0, 'C', true);
+        $pdf->Cell($column_width, 10, 'المبلغ', 1, 0, 'C', true);
+        $pdf->Cell($column_width, 10, 'طرق الدفع', 1, 1, 'C', true);
 
         // Table data
         $pdf->SetFont('arial', '', 9);
@@ -354,15 +356,15 @@ class DailySalesPdfService
             $fillColor = ($rowCount % 2 == 0) ? [255, 255, 255] : [248, 249, 250];
             $pdf->SetFillColor($fillColor[0], $fillColor[1], $fillColor[2]);
             
-            $pdf->Cell(25, 8, ($sale->sale_order_number ?? $sale->id), 1, 0, 'C', true);
-            $pdf->Cell(20, 8, Carbon::parse($sale->created_at)->format('H:i'), 1, 0, 'C', true);
-            $pdf->Cell(40, 8, ($sale->client ? $sale->client->name : 'بدون عميل'), 1, 0, 'C', true);
+            $pdf->Cell($column_width, 8, ($sale->sale_order_number ?? $sale->id), 'TB', 0, 'C', true);
+            $pdf->Cell($column_width, 8, Carbon::parse($sale->created_at)->format('H:i'), 'TB', 0, 'C', true);
+            $pdf->Cell($column_width, 8, ($sale->client ? $sale->client->name : 'بدون عميل'), 'TB', 0, 'C', true);
             if ($showUserColumn) {
-                $pdf->Cell(30, 8, ($sale->user ? $sale->user->name : 'غير محدد'), 1, 0, 'C', true);
+                $pdf->Cell($column_width, 8, ($sale->user ? $sale->user->name : 'غير محدد'), 'TB', 0, 'C', true);
             }
-            $pdf->Cell(25, 8, $sale->items->sum('quantity'), 1, 0, 'C', true);
-            $pdf->Cell(30, 8, number_format($sale->total_amount, 0), 1, 0, 'C', true);
-            $pdf->Cell(50, 8, $this->formatPaymentMethods($sale->payments), 1, 1, 'C', true);
+            $pdf->Cell($column_width, 8, $sale->items->sum('quantity'), 'TB', 0, 'C', true);
+            $pdf->Cell($column_width, 8, number_format($sale->total_amount, 0), 'TB', 0, 'C', true);
+            $pdf->Cell($column_width, 8, $this->formatPaymentMethods($sale->payments), 'TB', 1, 'C', true);
             $rowCount++;
         }
         

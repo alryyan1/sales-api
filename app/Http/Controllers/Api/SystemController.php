@@ -60,51 +60,40 @@ class SystemController extends Controller
     }
 
     /**
-     * Check for updates by fetching from remote
+     * Check for updates by fetching from remote (both backend and frontend)
      */
     public function checkForUpdates(Request $request)
     {
         // $this->checkAuthorization('update-system');
 
         try {
-            // Fetch latest changes from remote
-            $fetchResult = shell_exec('git fetch origin 2>&1');
+            // Backend updates check
+            $backendUpdates = $this->checkBackendUpdates();
             
-            // Get current commit
-            $currentCommit = trim(shell_exec('git rev-parse HEAD 2>/dev/null') ?: 'unknown');
+            // Frontend updates check
+            $frontendUpdates = $this->checkFrontendUpdates();
             
-            // Get latest commit on current branch
-            $latestCommit = trim(shell_exec('git rev-parse origin/' . trim(shell_exec('git branch --show-current 2>/dev/null')) . ' 2>/dev/null') ?: 'unknown');
-            
-            // Check if there are updates available
-            $hasUpdates = $currentCommit !== $latestCommit && $latestCommit !== 'unknown';
-            
-            // Get commit count difference
-            $commitCount = 0;
-            if ($hasUpdates) {
-                $commitCount = (int)trim(shell_exec('git rev-list --count HEAD..origin/' . trim(shell_exec('git branch --show-current 2>/dev/null')) . ' 2>/dev/null') ?: '0');
-            }
-            
-            // Get latest commit info
-            $latestCommitInfo = null;
-            if ($hasUpdates) {
-                $latestCommitInfo = [
-                    'hash' => $latestCommit,
-                    'message' => trim(shell_exec('git log -1 --format=%s origin/' . trim(shell_exec('git branch --show-current 2>/dev/null')) . ' 2>/dev/null') ?: ''),
-                    'author' => trim(shell_exec('git log -1 --format=%an origin/' . trim(shell_exec('git branch --show-current 2>/dev/null')) . ' 2>/dev/null') ?: ''),
-                    'date' => trim(shell_exec('git log -1 --format=%cd origin/' . trim(shell_exec('git branch --show-current 2>/dev/null')) . ' 2>/dev/null') ?: '')
-                ];
-            }
+            // Determine overall update status
+            $hasUpdates = $backendUpdates['has_updates'] || $frontendUpdates['has_updates'];
+            $totalCommitCount = $backendUpdates['commit_count'] + $frontendUpdates['commit_count'];
 
             return response()->json([
                 'data' => [
                     'has_updates' => $hasUpdates,
-                    'current_commit' => $currentCommit,
-                    'latest_commit' => $latestCommit,
-                    'commit_count' => $commitCount,
-                    'latest_commit_info' => $latestCommitInfo,
-                    'fetch_result' => $fetchResult,
-                    'checked_at' => now()->toISOString()
+                    'current_commit' => $backendUpdates['current_commit'],
+                    'latest_commit' => $backendUpdates['latest_commit'],
+                    'commit_count' => $totalCommitCount,
+                    'latest_commit_info' => $backendUpdates['latest_commit_info'],
+                    'fetch_result' => $backendUpdates['fetch_result'],
+                    'checked_at' => now()->toISOString(),
+                    
+                    // Enhanced fields for frontend/backend separation
+                    'backend_has_updates' => $backendUpdates['has_updates'],
+                    'frontend_has_updates' => $frontendUpdates['has_updates'],
+                    'backend_commit_count' => $backendUpdates['commit_count'],
+                    'frontend_commit_count' => $frontendUpdates['commit_count'],
+                    'backend_latest_commit_info' => $backendUpdates['latest_commit_info'],
+                    'frontend_latest_commit_info' => $frontendUpdates['latest_commit_info'],
                 ]
             ]);
 
@@ -114,6 +103,119 @@ class SystemController extends Controller
                 'message' => 'Failed to check for updates',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Check for backend updates
+     */
+    private function checkBackendUpdates()
+    {
+        // Fetch latest changes from remote
+        $fetchResult = shell_exec('git fetch origin 2>&1');
+        
+        // Get current commit
+        $currentCommit = trim(shell_exec('git rev-parse HEAD 2>/dev/null') ?: 'unknown');
+        
+        // Get latest commit on current branch
+        $currentBranch = trim(shell_exec('git branch --show-current 2>/dev/null') ?: 'main');
+        $latestCommit = trim(shell_exec("git rev-parse origin/{$currentBranch} 2>/dev/null") ?: 'unknown');
+        
+        // Check if there are updates available
+        $hasUpdates = $currentCommit !== $latestCommit && $latestCommit !== 'unknown';
+        
+        // Get commit count difference
+        $commitCount = 0;
+        if ($hasUpdates) {
+            $commitCount = (int)trim(shell_exec("git rev-list --count HEAD..origin/{$currentBranch} 2>/dev/null") ?: '0');
+        }
+        
+        // Get latest commit info
+        $latestCommitInfo = null;
+        if ($hasUpdates) {
+            $latestCommitInfo = [
+                'hash' => $latestCommit,
+                'message' => trim(shell_exec("git log -1 --format=%s origin/{$currentBranch} 2>/dev/null") ?: ''),
+                'author' => trim(shell_exec("git log -1 --format=%an origin/{$currentBranch} 2>/dev/null") ?: ''),
+                'date' => trim(shell_exec("git log -1 --format=%cd origin/{$currentBranch} 2>/dev/null") ?: '')
+            ];
+        }
+
+        return [
+            'has_updates' => $hasUpdates,
+            'current_commit' => $currentCommit,
+            'latest_commit' => $latestCommit,
+            'commit_count' => $commitCount,
+            'latest_commit_info' => $latestCommitInfo,
+            'fetch_result' => $fetchResult
+        ];
+    }
+
+    /**
+     * Check for frontend updates
+     */
+    private function checkFrontendUpdates()
+    {
+        $frontendPath = dirname(base_path()) . '/sales-ui';
+        
+        // Check if frontend directory exists
+        if (!File::exists($frontendPath)) {
+            return [
+                'has_updates' => false,
+                'current_commit' => 'unknown',
+                'latest_commit' => 'unknown',
+                'commit_count' => 0,
+                'latest_commit_info' => null,
+                'fetch_result' => 'Frontend directory not found'
+            ];
+        }
+
+        // Change to frontend directory and check for updates
+        $originalDir = getcwd();
+        chdir($frontendPath);
+        
+        try {
+            // Fetch latest changes from remote
+            $fetchResult = shell_exec('git fetch origin 2>&1');
+            
+            // Get current commit
+            $currentCommit = trim(shell_exec('git rev-parse HEAD 2>/dev/null') ?: 'unknown');
+            
+            // Get latest commit on current branch
+            $currentBranch = trim(shell_exec('git branch --show-current 2>/dev/null') ?: 'main');
+            $latestCommit = trim(shell_exec("git rev-parse origin/{$currentBranch} 2>/dev/null") ?: 'unknown');
+            
+            // Check if there are updates available
+            $hasUpdates = $currentCommit !== $latestCommit && $latestCommit !== 'unknown';
+            
+            // Get commit count difference
+            $commitCount = 0;
+            if ($hasUpdates) {
+                $commitCount = (int)trim(shell_exec("git rev-list --count HEAD..origin/{$currentBranch} 2>/dev/null") ?: '0');
+            }
+            
+            // Get latest commit info
+            $latestCommitInfo = null;
+            if ($hasUpdates) {
+                $latestCommitInfo = [
+                    'hash' => $latestCommit,
+                    'message' => trim(shell_exec("git log -1 --format=%s origin/{$currentBranch} 2>/dev/null") ?: ''),
+                    'author' => trim(shell_exec("git log -1 --format=%an origin/{$currentBranch} 2>/dev/null") ?: ''),
+                    'date' => trim(shell_exec("git log -1 --format=%cd origin/{$currentBranch} 2>/dev/null") ?: '')
+                ];
+            }
+
+            return [
+                'has_updates' => $hasUpdates,
+                'current_commit' => $currentCommit,
+                'latest_commit' => $latestCommit,
+                'commit_count' => $commitCount,
+                'latest_commit_info' => $latestCommitInfo,
+                'fetch_result' => $fetchResult
+            ];
+        } finally {
+            // Restore original directory
+            chdir($originalDir);
         }
     }
 
@@ -139,7 +241,8 @@ class SystemController extends Controller
 
             // Step 2: Pull latest changes
             $steps[] = 'Pulling latest changes...';
-            $pullResult = shell_exec('git pull origin ' . trim(shell_exec('git branch --show-current 2>/dev/null')) . ' 2>&1');
+            $currentBranch = trim(shell_exec('git branch --show-current 2>/dev/null') ?: 'main');
+            $pullResult = shell_exec("git pull origin {$currentBranch} 2>&1");
             if (strpos($pullResult, 'Already up to date') !== false) {
                 $steps[] = 'Already up to date';
             } elseif (strpos($pullResult, 'Updating') !== false) {
@@ -207,6 +310,154 @@ class SystemController extends Controller
             Log::error('Error updating backend: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Failed to update backend',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Perform frontend update operations
+     */
+    public function updateFrontend(Request $request)
+    {
+        // $this->checkAuthorization('update-system');
+
+        try {
+            $steps = [];
+            $errors = [];
+            $buildOutput = '';
+
+            $frontendPath = dirname(base_path()) . '/sales-ui';
+            
+            // Check if frontend directory exists
+            if (!File::exists($frontendPath)) {
+                return response()->json([
+                    'message' => 'Frontend directory not found',
+                    'data' => [
+                        'steps' => ['Error: Frontend directory not found'],
+                        'errors' => ['Frontend directory not found at: ' . $frontendPath],
+                        'success' => false,
+                        'updated_at' => now()->toISOString()
+                    ]
+                ], 404);
+            }
+
+            // Change to frontend directory
+            $originalDir = getcwd();
+            chdir($frontendPath);
+
+            try {
+                // Step 1: Stash any changes
+                $steps[] = 'Stashing frontend changes...';
+                $stashResult = shell_exec('git stash 2>&1');
+                if (strpos($stashResult, 'No local changes') === false) {
+                    $steps[] = 'Frontend changes stashed successfully';
+                } else {
+                    $steps[] = 'No frontend changes to stash';
+                }
+
+                // Step 2: Pull latest changes
+                $steps[] = 'Pulling latest frontend changes...';
+                $currentBranch = trim(shell_exec('git branch --show-current 2>/dev/null') ?: 'main');
+                $pullResult = shell_exec("git pull origin {$currentBranch} 2>&1");
+                if (strpos($pullResult, 'Already up to date') !== false) {
+                    $steps[] = 'Frontend already up to date';
+                } elseif (strpos($pullResult, 'Updating') !== false) {
+                    $steps[] = 'Successfully pulled latest frontend changes';
+                } else {
+                    $errors[] = 'Failed to pull frontend changes: ' . $pullResult;
+                }
+
+                // Step 3: Install dependencies
+                $steps[] = 'Installing frontend dependencies...';
+                $npmInstallResult = shell_exec('npm install 2>&1');
+                if (strpos($npmInstallResult, 'added') !== false || strpos($npmInstallResult, 'up to date') !== false) {
+                    $steps[] = 'Frontend dependencies installed successfully';
+                } else {
+                    $errors[] = 'Failed to install frontend dependencies: ' . $npmInstallResult;
+                }
+
+                // Step 4: Build frontend
+                $steps[] = 'Building frontend application...';
+                $buildResult = shell_exec('npm run build 2>&1');
+                $buildOutput = $buildResult;
+                
+                if (strpos($buildResult, 'built successfully') !== false || strpos($buildResult, 'Build complete') !== false) {
+                    $steps[] = 'Frontend built successfully';
+                } else {
+                    $errors[] = 'Failed to build frontend: ' . $buildResult;
+                }
+
+                // Step 5: Pop stashed changes if any
+                $steps[] = 'Restoring stashed frontend changes...';
+                $stashList = shell_exec('git stash list 2>/dev/null');
+                if (!empty(trim($stashList))) {
+                    $popResult = shell_exec('git stash pop 2>&1');
+                    if (strpos($popResult, 'Dropped refs/stash') !== false) {
+                        $steps[] = 'Stashed frontend changes restored successfully';
+                    } else {
+                        $errors[] = 'Failed to restore stashed frontend changes: ' . $popResult;
+                    }
+                } else {
+                    $steps[] = 'No stashed frontend changes to restore';
+                }
+
+            } finally {
+                // Restore original directory
+                chdir($originalDir);
+            }
+
+            return response()->json([
+                'message' => empty($errors) ? 'Frontend updated successfully' : 'Frontend updated with some errors',
+                'data' => [
+                    'steps' => $steps,
+                    'errors' => $errors,
+                    'success' => empty($errors),
+                    'updated_at' => now()->toISOString(),
+                    'build_output' => $buildOutput
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error updating frontend: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to update frontend',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Perform combined update (both frontend and backend)
+     */
+    public function updateBoth(Request $request)
+    {
+        // $this->checkAuthorization('update-system');
+
+        try {
+            $backendResult = $this->updateBackend($request);
+            $frontendResult = $this->updateFrontend($request);
+
+            $backendData = json_decode($backendResult->getContent(), true);
+            $frontendData = json_decode($frontendResult->getContent(), true);
+
+            $overallSuccess = $backendData['data']['success'] && $frontendData['data']['success'];
+            $allErrors = array_merge($backendData['data']['errors'], $frontendData['data']['errors']);
+
+            return response()->json([
+                'message' => $overallSuccess ? 'Both backend and frontend updated successfully' : 'Update completed with some errors',
+                'data' => [
+                    'backend' => $backendData['data'],
+                    'frontend' => $frontendData['data'],
+                    'overall_success' => $overallSuccess,
+                    'updated_at' => now()->toISOString()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Error updating both: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to update both backend and frontend',
                 'error' => $e->getMessage()
             ], 500);
         }

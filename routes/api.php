@@ -107,6 +107,8 @@ Route::middleware('auth:sanctum')->group(function () {
       Route::get('/version', [SystemController::class, 'getVersion'])->name('version');
       Route::get('/check-updates', [SystemController::class, 'checkForUpdates'])->name('check-updates');
       Route::post('/update-backend', [SystemController::class, 'updateBackend'])->name('update-backend');
+      Route::post('/update-frontend', [SystemController::class, 'updateFrontend'])->name('update-frontend');
+      Route::post('/update-both', [SystemController::class, 'updateBoth'])->name('update-both');
       Route::get('/frontend-instructions', [SystemController::class, 'getFrontendUpdateInstructions'])->name('frontend-instructions');
     });
     
