@@ -54,6 +54,11 @@ class SettingController extends Controller
                 $rule = ['nullable', 'integer', 'min:0'];
             } elseif (is_bool($value)) {
                 $rule = ['nullable', 'boolean'];
+            } elseif (is_float($value)) {
+                $rule = ['nullable', 'numeric'];
+            } elseif ($key === 'default_profit_rate') {
+                // Accept numeric for profit rate even if config holds it as string
+                $rule = ['nullable', 'numeric'];
             } elseif ($key === 'company_email') {
                 $rule = ['nullable', 'email', 'max:255'];
             } elseif ($key === 'currency_symbol') {
@@ -62,9 +67,11 @@ class SettingController extends Controller
             $rules[$key] = $rule;
         }
         
-        // Ensure whatsapp_enabled is properly validated as boolean
-        if (isset($rules['whatsapp_enabled'])) {
-            $rules['whatsapp_enabled'] = ['nullable', 'boolean'];
+        // Ensure boolean keys are properly validated
+        foreach (['whatsapp_enabled', 'use_sidebar_layout'] as $boolKey) {
+            if (isset($currentSettings[$boolKey])) {
+                $rules[$boolKey] = ['nullable', 'boolean'];
+            }
         }
 
         // Debug: Log the incoming data
@@ -84,11 +91,16 @@ class SettingController extends Controller
             $envKey = 'APP_SETTINGS_' . strtoupper($key); // Match .env variable naming convention
             
             // Handle boolean values properly for .env file
-            if ($key === 'whatsapp_enabled') {
-                $escapedValue = $value ? 'true' : 'false';
+            // Normalize booleans
+            if (is_bool($currentSettings[$key]) || in_array($key, ['whatsapp_enabled','use_sidebar_layout'])) {
+                $escapedValue = filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
             } else {
-                $escapedValue = is_string($value) && (str_contains($value, ' ') || str_contains($value, '#')) ? "\"{$value}\"" : $value;
-                $escapedValue = is_null($value) ? '' : $escapedValue; // Handle null to empty string for .env
+                // Leave numbers and strings as-is, quote strings with spaces
+                if (is_null($value)) {
+                    $escapedValue = '';
+                } else {
+                    $escapedValue = is_string($value) && (str_contains($value, ' ') || str_contains($value, '#')) ? "\"{$value}\"" : $value;
+                }
             }
 
             // Replace or add the line in .env

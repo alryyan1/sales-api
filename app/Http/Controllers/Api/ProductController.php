@@ -54,6 +54,11 @@ class ProductController extends Controller
             });
         }
 
+        // Filter by out of stock only
+        if ($request->boolean('out_of_stock_only')) {
+            $query->where('stock_quantity', '<=', 0);
+        }
+
         // Sorting
         $sortBy = $request->input('sort_by', 'created_at'); // Default sort field
         $sortDirection = $request->input('sort_direction', 'desc'); // Default sort direction
