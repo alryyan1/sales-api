@@ -277,12 +277,12 @@ class ReportController extends Controller
         // --- 1. Get Daily Sales Totals ---
         $dailySalesQuery = Sale::query()
             ->select(
-                DB::raw('DATE(sale_date) as sale_day'),
+                DB::raw("DATE(COALESCE(sale_date, created_at)) as sale_day"),
                 DB::raw('SUM(total_amount) as daily_total_revenue'),
                 DB::raw('SUM(paid_amount) as daily_total_paid') // Sum of initial paid amounts on Sale record
             )
-            ->whereBetween('sale_date', [$startDate, $endDate])
-            ->whereIn('status', ['completed', 'pending']); // Consider which statuses count as revenue
+            ->whereBetween(DB::raw("DATE(COALESCE(sale_date, created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
+            ->whereIn('status', ['completed', 'pending', 'draft']); // Include drafts created today
 
         // if (!empty($validated['client_id'])) { $dailySalesQuery->where('client_id', $validated['client_id']); }
         // if (!empty($validated['user_id'])) { $dailySalesQuery->where('user_id', $validated['user_id']); }
@@ -304,11 +304,11 @@ class ReportController extends Controller
                 DB::raw('SUM(payments.amount) as total_amount_by_method')
             )
             // Option A: Payments made within the month for sales made within the month
-            ->whereBetween('sales.sale_date', [$startDate, $endDate])
+            ->whereBetween(DB::raw("DATE(COALESCE(sales.sale_date, sales.created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
             ->whereBetween('payments.payment_date', [$startDate, $endDate]) // Payment also in this month
             // Option B: All payments made within the month, regardless of sale date (cash flow focused)
             // ->whereBetween('payments.payment_date', [$startDate, $endDate])
-            ->whereIn('sales.status', ['completed', 'pending']);
+            ->whereIn('sales.status', ['completed', 'pending', 'draft']);
 
 
         // if (!empty($validated['client_id'])) { $dailyPaymentsQuery->where('sales.client_id', $validated['client_id']); }
