@@ -431,6 +431,48 @@ class ReportController extends Controller
             ]
         ]);
     }
+
+    /**
+     * Top selling products for a date range (default current month).
+     * Returns product name and total quantity sold, ordered desc.
+     */
+    public function topSellingProducts(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date',
+            'limit' => 'nullable|integer|min:1|max:50',
+        ]);
+
+        $start = isset($validated['start_date']) ? Carbon::parse($validated['start_date'])->startOfDay() : Carbon::now()->startOfMonth();
+        $end = isset($validated['end_date']) ? Carbon::parse($validated['end_date'])->endOfDay() : Carbon::now()->endOfMonth();
+        $limit = $validated['limit'] ?? 10;
+
+        $rows = SaleItem::query()
+            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+            ->leftJoin('products', 'sale_items.product_id', '=', 'products.id')
+            ->whereBetween(DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at))'), [$start->toDateString(), $end->toDateString()])
+            ->whereIn('sales.status', ['completed', 'pending', 'draft'])
+            ->groupBy('sale_items.product_id', 'products.name')
+            ->select(
+                'sale_items.product_id',
+                DB::raw('COALESCE(products.name, "Unknown Product") as product_name'),
+                DB::raw('SUM(sale_items.quantity) as total_qty'),
+                DB::raw('SUM(sale_items.total_price) as total_amount')
+            )
+            ->orderByDesc('total_qty')
+            ->limit($limit)
+            ->get();
+
+        return response()->json([
+            'data' => $rows,
+            'meta' => [
+                'start_date' => $start->toDateString(),
+                'end_date' => $end->toDateString(),
+                'limit' => $limit,
+            ],
+        ]);
+    }
     /**
      * Generate a Profit and Loss summary for a given period.
      * Calculates Revenue (from Sales) and COGS (from linked PurchaseItem batches).
