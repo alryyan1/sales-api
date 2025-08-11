@@ -377,6 +377,60 @@ class ReportController extends Controller
             ]
         ]);
     }
+
+    /**
+     * Monthly Purchases Report (by total purchase cost per day within month)
+     */
+    public function monthlyPurchasesReport(Request $request)
+    {
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+        ]);
+
+        $year = $validated['year'];
+        $month = $validated['month'];
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+
+        // Assume purchases table exists with purchase_date and total_amount (cost)
+        $daily = \App\Models\Purchase::query()
+            ->select(
+                DB::raw('DATE(COALESCE(purchase_date, created_at)) as day'),
+                DB::raw('SUM(total_amount) as daily_total_cost')
+            )
+            ->whereBetween(DB::raw('DATE(COALESCE(purchase_date, created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
+            ->groupBy('day')
+            ->orderBy('day', 'asc')
+            ->get()
+            ->keyBy('day');
+
+        $report = [];
+        $summaryTotal = 0;
+        $current = $startDate->copy();
+        while ($current->lte($endDate)) {
+            $dayStr = $current->toDateString();
+            $row = $daily->get($dayStr);
+            $amount = $row ? (float) $row->daily_total_cost : 0.0;
+            $report[] = [
+                'date' => $dayStr,
+                'total_purchases_cost' => $amount,
+            ];
+            $summaryTotal += $amount;
+            $current->addDay();
+        }
+
+        return response()->json([
+            'data' => [
+                'year' => $year,
+                'month' => $month,
+                'daily_breakdown' => $report,
+                'month_summary' => [
+                    'total_amount_purchases' => $summaryTotal,
+                ],
+            ]
+        ]);
+    }
     /**
      * Generate a Profit and Loss summary for a given period.
      * Calculates Revenue (from Sales) and COGS (from linked PurchaseItem batches).
