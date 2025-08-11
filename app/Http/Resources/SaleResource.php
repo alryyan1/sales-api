@@ -20,6 +20,8 @@ class SaleResource extends JsonResource
             // Client Info
             'client_id' => $this->client_id,
             'client_name' => $this->whenLoaded('client', fn() => $this->client?->name), // Use optional chaining
+            // Include full client object when eager loaded so frontend can pre-select it in UI
+            'client' => $this->whenLoaded('client', fn() => new ClientResource($this->client)),
 
              // User (Salesperson) Info
              'user_id' => $this->user_id,

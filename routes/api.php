@@ -51,6 +51,9 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/stock-requisitions/{stock_requisition}/process', [StockRequisitionController::class, 'processRequisition'])->name('api.stock-requisitions.process');
   // -- Clients Management --
   Route::apiResource('clients', ClientController::class);
+  Route::get('/clients/{client}/ledger', [\App\Http\Controllers\Api\ClientLedgerController::class, 'getLedger']);
+  Route::get('/clients/{client}/ledger/pdf', [\App\Http\Controllers\Api\ClientLedgerController::class, 'downloadLedgerPDF']);
+  Route::post('/clients/{client}/settle-debt', [\App\Http\Controllers\Api\ClientLedgerController::class, 'settleDebt']);
   Route::get('products/{product}/available-batches', [ProductController::class, 'getAvailableBatches']);
 
   // -- User Profile Routes --

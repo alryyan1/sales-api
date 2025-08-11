@@ -99,6 +99,7 @@ class DailySalesPdfService
     {
         $totalSales = $sales->count();
         $totalAmount = $sales->sum('total_amount');
+        $totalPaid = 0;
         $totalItems = $sales->sum(function ($sale) {
             return $sale->items->sum('quantity');
         });
@@ -112,12 +113,14 @@ class DailySalesPdfService
                     $paymentMethods[$method] = 0;
                 }
                 $paymentMethods[$method] += $payment->amount;
+                $totalPaid += $payment->amount;
             }
         }
 
         return [
             'totalSales' => $totalSales,
             'totalAmount' => $totalAmount,
+            'totalPaid' => $totalPaid,
             'totalItems' => $totalItems,
             'paymentMethods' => $paymentMethods,
             'averageSale' => $totalSales > 0 ? $totalAmount / $totalSales : 0
@@ -220,20 +223,30 @@ class DailySalesPdfService
         $pdf->SetFont('arial', 'B', 11);
         $pdf->SetFillColor(248, 249, 250);
         $pdf->SetTextColor(51, 51, 51);
-        
+
+        // Dynamic 5-column layout across usable width
+        $margins = $pdf->getMargins();
+        $usableWidth = $pdf->getPageWidth() - ($margins['left'] ?? 0) - ($margins['right'] ?? 0);
+        $numCols = 5;
+        $baseColWidth = round($usableWidth / $numCols, 2);
+        $colWidths = array_fill(0, $numCols, $baseColWidth);
+        $colWidths[$numCols - 1] = $usableWidth - array_sum(array_slice($colWidths, 0, $numCols - 1));
+
         // Table headers
-        $pdf->Cell(47.5, 10, 'إجمالي المبيعات', 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, 'إجمالي المبلغ', 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, 'إجمالي العناصر', 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, 'متوسط المبيعات', 1, 1, 'C', true);
+        $pdf->Cell($colWidths[0], 10, 'إجمالي المبيعات', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[1], 10, 'إجمالي المبلغ', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[2], 10, 'إجمالي المدفوع', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[3], 10, 'إجمالي العناصر', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[4], 10, 'متوسط المبيعات', 1, 1, 'C', true);
 
         // Table data
         $pdf->SetFont('arial', 'B', 12);
         $pdf->SetFillColor(255, 255, 255);
-        $pdf->Cell(47.5, 10, (string)$summary['totalSales'], 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, number_format($summary['totalAmount'], 0), 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, (string)$summary['totalItems'], 1, 0, 'C', true);
-        $pdf->Cell(47.5, 10, number_format($summary['averageSale'], 0), 1, 1, 'C', true);
+        $pdf->Cell($colWidths[0], 10, (string)$summary['totalSales'], 1, 0, 'C', true);
+        $pdf->Cell($colWidths[1], 10, number_format($summary['totalAmount'], 0), 1, 0, 'C', true);
+        $pdf->Cell($colWidths[2], 10, number_format($summary['totalPaid'], 0), 1, 0, 'C', true);
+        $pdf->Cell($colWidths[3], 10, (string)$summary['totalItems'], 1, 0, 'C', true);
+        $pdf->Cell($colWidths[4], 10, number_format($summary['averageSale'], 0), 1, 1, 'C', true);
         
         // Reset colors
         $pdf->SetTextColor(0, 0, 0);

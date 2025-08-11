@@ -102,7 +102,8 @@ class SaleController extends Controller
     public function getTodaySalesByCreatedAt(Request $request)
     {
         $query = Sale::with([
-            'client:id,name',
+            // Load full client timestamps to avoid null created_at in ClientResource
+            'client:id,name,email,phone,address,created_at,updated_at',
             'user:id,name',
             'items.product' => function($query) {
                 $query->with(['category', 'stockingUnit', 'sellableUnit']);
@@ -531,7 +532,8 @@ class SaleController extends Controller
             'client:id,name,email',
             'user:id,name',
             'items',
-            'items.product:id,name,sku',
+            'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+            'items.product.sellableUnit:id,name',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
             'payments'
         ]);
@@ -577,8 +579,15 @@ class SaleController extends Controller
 
         $sale->update($validatedData);
 
-        $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'items.purchaseItemBatch:id,batch_number,unit_cost']);
-        return response()->json(['sale' => new SaleResource($sale->fresh())]);
+                    $sale->load([
+                'client:id,name',
+                'user:id,name',
+                'items',
+                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product.sellableUnit:id,name',
+                'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date'
+            ]);
+            return response()->json(['sale' => new SaleResource($sale->fresh())]);
     }
 
 
@@ -688,7 +697,14 @@ class SaleController extends Controller
             });
 
             // Reload the sale with payments
-            $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'payments']);
+            $sale->load([
+                'client:id,name',
+                'user:id,name',
+                'items',
+                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product.sellableUnit:id,name',
+                'payments'
+            ]);
             
             $message = empty($validatedData['payments']) ? 'All payments cleared successfully' : 'Payment(s) added successfully';
             
@@ -726,7 +742,14 @@ class SaleController extends Controller
             });
 
             // Reload the sale with payments
-            $sale->load(['client:id,name', 'user:id,name', 'items', 'items.product:id,name,sku', 'payments']);
+            $sale->load([
+                'client:id,name',
+                'user:id,name',
+                'items',
+                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product.sellableUnit:id,name',
+                'payments'
+            ]);
             
             return response()->json([
                 'message' => 'All payments deleted successfully',

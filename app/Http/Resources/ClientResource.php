@@ -20,8 +20,8 @@ class ClientResource extends JsonResource
             'email' => $this->email, // Return null if null in DB
             'phone' => $this->phone, // Return null if null in DB
             'address' => $this->address, // Return null if null in DB
-            'created_at' => $this->created_at->toISOString(), // Consistent format (ISO8601)
-            'updated_at' => $this->updated_at->toISOString(),
+            'created_at' => $this->created_at?->toISOString(), // Handle when not selected in relations
+            'updated_at' => $this->updated_at?->toISOString(),
 
             // Example: Conditionally load relationships if needed later
             // 'sales_count' => $this->whenCounted('sales'),
