@@ -100,6 +100,9 @@ class DailySalesPdfService
         $totalSales = $sales->count();
         $totalAmount = $sales->sum('total_amount');
         $totalPaid = 0;
+        $totalDiscount = $sales->sum(function ($sale) {
+            return (float) ($sale->discount_amount ?? 0);
+        });
         $totalItems = $sales->sum(function ($sale) {
             return $sale->items->sum('quantity');
         });
@@ -121,6 +124,7 @@ class DailySalesPdfService
             'totalSales' => $totalSales,
             'totalAmount' => $totalAmount,
             'totalPaid' => $totalPaid,
+            'totalDiscount' => $totalDiscount,
             'totalItems' => $totalItems,
             'paymentMethods' => $paymentMethods,
             'averageSale' => $totalSales > 0 ? $totalAmount / $totalSales : 0
@@ -224,10 +228,10 @@ class DailySalesPdfService
         $pdf->SetFillColor(248, 249, 250);
         $pdf->SetTextColor(51, 51, 51);
 
-        // Dynamic 5-column layout across usable width
+        // Dynamic 6-column layout across usable width
         $margins = $pdf->getMargins();
         $usableWidth = $pdf->getPageWidth() - ($margins['left'] ?? 0) - ($margins['right'] ?? 0);
-        $numCols = 5;
+        $numCols = 6;
         $baseColWidth = round($usableWidth / $numCols, 2);
         $colWidths = array_fill(0, $numCols, $baseColWidth);
         $colWidths[$numCols - 1] = $usableWidth - array_sum(array_slice($colWidths, 0, $numCols - 1));
@@ -236,8 +240,9 @@ class DailySalesPdfService
         $pdf->Cell($colWidths[0], 10, 'إجمالي المبيعات', 1, 0, 'C', true);
         $pdf->Cell($colWidths[1], 10, 'إجمالي المبلغ', 1, 0, 'C', true);
         $pdf->Cell($colWidths[2], 10, 'إجمالي المدفوع', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[3], 10, 'إجمالي العناصر', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[4], 10, 'متوسط المبيعات', 1, 1, 'C', true);
+        $pdf->Cell($colWidths[3], 10, 'إجمالي الخصم', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[4], 10, 'إجمالي العناصر', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[5], 10, 'متوسط المبيعات', 1, 1, 'C', true);
 
         // Table data
         $pdf->SetFont('arial', 'B', 12);
@@ -245,8 +250,9 @@ class DailySalesPdfService
         $pdf->Cell($colWidths[0], 10, (string)$summary['totalSales'], 1, 0, 'C', true);
         $pdf->Cell($colWidths[1], 10, number_format($summary['totalAmount'], 0), 1, 0, 'C', true);
         $pdf->Cell($colWidths[2], 10, number_format($summary['totalPaid'], 0), 1, 0, 'C', true);
-        $pdf->Cell($colWidths[3], 10, (string)$summary['totalItems'], 1, 0, 'C', true);
-        $pdf->Cell($colWidths[4], 10, number_format($summary['averageSale'], 0), 1, 1, 'C', true);
+        $pdf->Cell($colWidths[3], 10, number_format($summary['totalDiscount'], 0), 1, 0, 'C', true);
+        $pdf->Cell($colWidths[4], 10, (string)$summary['totalItems'], 1, 0, 'C', true);
+        $pdf->Cell($colWidths[5], 10, number_format($summary['averageSale'], 0), 1, 1, 'C', true);
         
         // Reset colors
         $pdf->SetTextColor(0, 0, 0);

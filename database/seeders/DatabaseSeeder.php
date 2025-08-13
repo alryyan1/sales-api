@@ -29,6 +29,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RolesAndPermissionsSeeder::class, // Creates roles & permissions
             AdminUserSeeder::class, // Create an admin user
+            AppSettingsSeeder::class, // Seed app settings defaults into DB
             // ProductSeeder::class, // Create an admin user
             // Add other seeders here if needed
         ]);

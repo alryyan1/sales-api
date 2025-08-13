@@ -210,7 +210,8 @@ class Product extends Model
     // Accessor for a suggested sale price PER SELLABLE UNIT
     public function getSuggestedSalePricePerSellableUnitAttribute(?float $markupPercentage = null): ?float
     {
-        $markupToUse = $markupPercentage ?? config('app_settings.default_markup_percentage', 25.0); // Example: get from config
+        $settings = (new \App\Services\SettingsService())->getAll();
+        $markupToUse = $markupPercentage ?? ($settings['default_profit_rate'] ?? 25.0);
         $latestCostPerSellable = $this->latest_cost_per_sellable_unit;
 
         if ($latestCostPerSellable !== null) {

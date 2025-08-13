@@ -16,16 +16,19 @@ class MyCustomTCPDF extends TCPDF
 {
     protected $companyName;
     protected $companyAddress;
-    protected $defaultFontFamily = 'dejavusans'; // Changed to dejavusans for better Arabic support
+    protected $companyLogoUrl;
+    protected $defaultFontFamily = 'arial'; // Changed to dejavusans for better Arabic support
     protected $defaultFontSize = 10;
-    protected $defaultFontBold = 'dejavusansb'; // Bold variant for Arabic support
+    protected $defaultFontBold = 'arial'; // Bold variant for Arabic support
 
     public function __construct($orientation = 'P', $unit = 'mm', $format = 'A4', $unicode = true, $encoding = 'UTF-8', $diskcache = false, $pdfa = false)
     {
         parent::__construct($orientation, $unit, $format, $unicode, $encoding, $diskcache, $pdfa);
 
-        $this->companyName = config('app_settings.company_name', 'Your Company');
-        $this->companyAddress = config('app_settings.company_address', '');
+        $settings = (new \App\Services\SettingsService())->getAll();
+        $this->companyName = $settings['company_name'] ?? 'Your Company';
+        $this->companyAddress = $settings['company_address'] ?? '';
+        $this->companyLogoUrl = $settings['company_logo_url'] ?? null;
 
         $this->SetCreator('Sales Management System');
         $this->SetAuthor($this->companyName);
@@ -64,22 +67,42 @@ class MyCustomTCPDF extends TCPDF
     // Override Header() method
     public function Header()
     {
-        // Logo example
-        // $image_file = storage_path('app/public/logo.png'); // Example path
-        // if (file_exists($image_file)) {
-        //     $this->Image($image_file, 180, 6, 20, '', 'PNG', '', 'T', false, 300, 'R', false, false, 0);
-        // }
+        // Try to place logo on the left if available
+        $logoPlaced = false;
+        if (!empty($this->companyLogoUrl)) {
+            try {
+                $x = 15;
+                $y = 10;
+                $w = 24;
+                $logoPath = $this->companyLogoUrl;
+                if (is_string($logoPath)) {
+                    $path = parse_url($logoPath, PHP_URL_PATH) ?: '';
+                    if ($path) {
+                        $storagePos = strpos($path, '/storage/');
+                        if ($storagePos !== false) {
+                            $relative = substr($path, $storagePos + strlen('/storage/'));
+                            $candidate = public_path('storage/' . ltrim($relative, '/'));
+                            if (file_exists($candidate)) {
+                                $logoPath = $candidate;
+                            }
+                        }
+                    }
+                }
+                @$this->Image($logoPath, $x +20, $y, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+                $logoPlaced = true;
+            } catch (\Throwable $e) {
+                // ignore logo errors
+            }
+        }
 
+        // Title & address centered
         $this->SetY(10);
-        // Use default font for header, perhaps bold
         $this->SetFont($this->defaultFontBold ?: $this->defaultFontFamily, 'B', 12);
         $this->Cell(0, 10, $this->companyName, 0, 1, 'C', 0, '', 0, false, 'M', 'M');
-
         $this->SetFont($this->defaultFontFamily, '', 9);
         $this->Cell(0, 8, $this->companyAddress, 0, 1, 'C', 0, '', 0, false, 'M', 'M');
-
-        $this->Line($this->GetX(), $this->GetY() + 2, $this->getPageWidth() - $this->GetX(), $this->GetY() + 2);
-        $this->Ln(5); // Space after header line
+        // $this->Line($this->GetX(), $this->GetY() + 2, $this->getPageWidth() - $this->GetX(), $this->GetY() + 2);
+        $this->Ln(5);
     }
 
     // Override Footer() method

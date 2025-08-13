@@ -906,6 +906,15 @@ class SaleController extends Controller
                     ]);
                 }
 
+                // Determine unit price (fallback to product defaults if request sent 0)
+                $resolvedUnitPrice = (float)($validatedData['unit_price'] ?? 0);
+                if ($resolvedUnitPrice <= 0) {
+                    $fallback = $product->last_sale_price_per_sellable_unit
+                        ?? $product->suggested_sale_price_per_sellable_unit
+                        ?? 0;
+                    $resolvedUnitPrice = (float)$fallback;
+                }
+
                 // Find available batches (FIFO)
                 $availableBatches = PurchaseItem::where('product_id', $product->id)
                     ->where('remaining_quantity', '>', 0)
@@ -929,8 +938,8 @@ class SaleController extends Controller
                         'purchase_item_id' => $batch->id,
                         'batch_number_sold' => $batch->batch_number,
                         'quantity' => $canSellFromThisBatch,
-                        'unit_price' => $validatedData['unit_price'],
-                        'total_price' => $canSellFromThisBatch * $validatedData['unit_price'],
+                        'unit_price' => $resolvedUnitPrice,
+                        'total_price' => $canSellFromThisBatch * $resolvedUnitPrice,
                         'cost_price_at_sale' => $batch->unit_cost,
                     ]);
 
@@ -950,8 +959,8 @@ class SaleController extends Controller
                         'purchase_item_id' => null,
                         'batch_number_sold' => null,
                         'quantity' => $remainingQuantity,
-                        'unit_price' => $validatedData['unit_price'],
-                        'total_price' => $remainingQuantity * $validatedData['unit_price'],
+                        'unit_price' => $resolvedUnitPrice,
+                        'total_price' => $remainingQuantity * $resolvedUnitPrice,
                         'cost_price_at_sale' => 0,
                     ]);
                     $saleItems[] = $saleItem;
@@ -962,7 +971,7 @@ class SaleController extends Controller
                 $product->save();
 
                 // Update sale totals
-                $sale->total_amount += ($validatedData['quantity'] * $validatedData['unit_price']);
+                $sale->total_amount += ($validatedData['quantity'] * $resolvedUnitPrice);
                 $sale->save();
 
                 return [
@@ -1255,11 +1264,12 @@ class SaleController extends Controller
         $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
 
         // --- Company & Invoice Info (from config and Sale) ---
-        $companyName = config('app_settings.company_name', 'Your Company LLC');
-        $companyAddress = config('app_settings.company_address', '123 Business Rd, Suite 404, City, Country');
-        $companyPhone = config('app_settings.company_phone', 'N/A');
-        $companyEmail = config('app_settings.company_email', 'N/A');
-        $invoicePrefix = config('app_settings.invoice_prefix', 'INV-');
+        $settings = (new \App\Services\SettingsService())->getAll();
+        $companyName = $settings['company_name'] ?? 'Your Company LLC';
+        $companyAddress = $settings['company_address'] ?? '123 Business Rd, Suite 404, City, Country';
+        $companyPhone = $settings['company_phone'] ?? 'N/A';
+        $companyEmail = $settings['company_email'] ?? 'N/A';
+        $invoicePrefix = $settings['invoice_prefix'] ?? 'INV-';
 
 
         // --- Set PDF Metadata ---
@@ -1422,7 +1432,8 @@ class SaleController extends Controller
         }
         $pdf->Ln(10);
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'I', 8);
-        $pdf->MultiCell(0, 5, config('app_settings.invoice_terms', 'شكراً لتعاملكم معنا. تطبق الشروط والأحكام.'), 0, 'C', 0, 1); // Example terms
+        $terms = $settings['invoice_terms'] ?? 'شكراً لتعاملكم معنا. تطبق الشروط والأحكام.';
+        $pdf->MultiCell(0, 5, $terms, 0, 'C', 0, 1);
 
         // --- Output PDF ---
         $pdfFileName = 'invoice_' . ($sale->invoice_number ?: $sale->id) . '_' . now()->format('Ymd') . '.pdf';
@@ -1446,7 +1457,10 @@ class SaleController extends Controller
         ]);
 
         // --- PDF Setup for Thermal (e.g., 80mm width) ---
-        $pdf = new MyCustomTCPDF('P', 'mm', [80, 250], true, 'UTF-8', false); // Custom page size [width, height]
+        // Dynamic height: base 65mm + 5mm per sale item
+        $itemsCount = $sale->items?->count() ?? 0;
+        $pageHeightMm = 100 + (5 * $itemsCount);
+        $pdf = new MyCustomTCPDF('P', 'mm', [80, $pageHeightMm], true, 'UTF-8', false); // Custom page size [width, height]
         // $pdf->setThermalDefaults(80, 250); // Or use your preset method
 
         $pdf->setPrintHeader(false);
@@ -1457,9 +1471,36 @@ class SaleController extends Controller
         $pdf->setRTL(true); // Ensure RTL for Arabic content
 
         // --- Company Info (Simplified for Thermal) ---
-        $companyName = config('app_settings.company_name', 'Your Company');
-        $companyPhone = config('app_settings.company_phone', '');
+        $settingsThermal = (new \App\Services\SettingsService())->getAll();
+        $companyName = $settingsThermal['company_name'] ?? 'Your Company';
+        $companyPhone = $settingsThermal['company_phone'] ?? '';
+        $companyLogoUrl = $settingsThermal['company_logo_url'] ?? null;
         // $vatNumber = config('app_settings.vat_number', ''); // If applicable
+
+        // Draw logo if exists
+        if (!empty($companyLogoUrl) && is_string($companyLogoUrl)) {
+            try {
+                $path = parse_url($companyLogoUrl, PHP_URL_PATH) ?: '';
+                $logoPath = $companyLogoUrl;
+                if ($path) {
+                    $storagePos = strpos($path, '/storage/');
+                    if ($storagePos !== false) {
+                        $relative = substr($path, $storagePos + strlen('/storage/'));
+                        $candidate = public_path('storage/' . ltrim($relative, '/'));
+                        if (file_exists($candidate)) {
+                            $logoPath = $candidate;
+                        }
+                    }
+                }
+                $w = 20; // mm
+                $x = ($pdf->getPageWidth() - $w) / 2;
+                $y = 5;
+                @$pdf->Image($logoPath, $x +20, $y, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+                $pdf->Ln(h: 20);
+            } catch (\Throwable $e) {
+                // ignore logo errors on thermal
+            }
+        }
 
         $pdf->SetFont('dejavusans', 'B', 10); // Or your preferred Arabic thermal font
         $pdf->MultiCell(0, 5, $companyName, 0, 'C', 0, 1);
@@ -1524,22 +1565,36 @@ class SaleController extends Controller
         $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
         $pdf->Ln(1);
 
-        // --- Totals ---
+        // --- Totals --- (with discount)
+        $itemsSubtotal = (float) ($sale->items?->sum('total_price') ?? 0);
+        $discountAmount = (float) ($sale->discount_amount ?? 0);
+        if ($discountAmount <= 0) {
+            // Fallback: if subtotal column exists or infer from items
+            if (isset($sale->subtotal) && $sale->subtotal !== null) {
+                $discountAmount = max(0, (float)$sale->subtotal - (float)$sale->total_amount);
+            } else {
+                $discountAmount = max(0, $itemsSubtotal - (float)$sale->total_amount);
+            }
+        }
+        $finalTotal = (float) ($sale->total_amount ?? max(0, $itemsSubtotal - $discountAmount));
+
         $pdf->SetFont('dejavusans', 'B', 8);
-        $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R'); // Total Amount Label (spans 2 cols)
-        $pdf->Cell(26, 5, number_format((float)$sale->total_amount, 0), 0, 1, 'R'); // Total Amount
+        $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
+        $pdf->Cell(26, 5, number_format($itemsSubtotal, 0), 0, 1, 'R');
 
-
+        $pdf->SetFont('dejavusans', '', 8);
+        $pdf->Cell(46, 5, 'الخصم:', 0, 0, 'R');
+        $pdf->Cell(26, 5, '-' . number_format($discountAmount, 0), 0, 1, 'R');
 
         $pdf->SetFont('dejavusans', 'B', 9);
         $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
-        $pdf->Cell(26, 6, number_format((float)$sale->total_amount, 0), 0, 1, 'R');
+        $pdf->Cell(26, 6, number_format($finalTotal, 0), 0, 1, 'R');
 
         $pdf->SetFont('dejavusans', '', 8);
         $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
         $pdf->Cell(26, 5, number_format((float)$sale->paid_amount, 0), 0, 1, 'R');
 
-        $due = (float)$sale->total_amount - (float)$sale->paid_amount;
+        $due = (float)$finalTotal - (float)$sale->paid_amount;
         $pdf->SetFont('dejavusans', 'B', 8);
         $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
         $pdf->Cell(26, 5, number_format($due, 0), 0, 1, 'R');
@@ -1551,7 +1606,11 @@ class SaleController extends Controller
             $pdf->Cell(0, 4, 'طرق الدفع:', 0, 1, 'R');
             $pdf->SetFont('dejavusans', '', 7);
             foreach ($sale->payments as $payment) {
-                $pdf->Cell(46, 4, config('app_settings.payment_methods_ar.' . $payment->method, $payment->method) . ':', 0, 0, 'R'); // Translate method
+                $methodLabel = $payment->method;
+                if (function_exists('config')) {
+                    $methodLabel = config('app_settings.payment_methods_ar.' . $payment->method, $payment->method);
+                }
+                $pdf->Cell(46, 4, $methodLabel . ':', 0, 0, 'R');
                 $pdf->Cell(26, 4, number_format((float)$payment->amount, 0), 0, 1, 'R');
             }
             $pdf->Ln(1);
@@ -1560,7 +1619,8 @@ class SaleController extends Controller
 
         // --- Footer Message ---
         $pdf->SetFont('dejavusans', '', 7);
-        $pdf->MultiCell(0, 4, config('app_settings.invoice_thermal_footer', 'شكراً لزيارتكم!'), 0, 'C', 0, 1);
+        $thermalFooter = $settingsThermal['invoice_thermal_footer'] ?? config('app_settings.invoice_thermal_footer', 'شكراً لزيارتكم!');
+        $pdf->MultiCell(0, 4, $thermalFooter, 0, 'C', 0, 1);
 
         // --- Barcode/QR Code (Optional) ---
         // if ($sale->invoice_number) {
@@ -1722,6 +1782,15 @@ class SaleController extends Controller
                             continue;
                         }
 
+                        // Resolve unit price with backend fallback if 0/empty comes from client
+                        $resolvedUnitPrice = (float)($itemData['unit_price'] ?? 0);
+                        if ($resolvedUnitPrice <= 0) {
+                            $fallback = $product->last_sale_price_per_sellable_unit
+                                ?? $product->suggested_sale_price_per_sellable_unit
+                                ?? 0;
+                            $resolvedUnitPrice = (float)$fallback;
+                        }
+
                         // Find available batches (FIFO)
                         $availableBatches = PurchaseItem::where('product_id', $product->id)
                             ->where('remaining_quantity', '>', 0)
@@ -1744,8 +1813,8 @@ class SaleController extends Controller
                                 'purchase_item_id' => $batch->id,
                                 'batch_number_sold' => $batch->batch_number,
                                 'quantity' => $canSellFromThisBatch,
-                                'unit_price' => $itemData['unit_price'],
-                                'total_price' => $canSellFromThisBatch * $itemData['unit_price'],
+                                'unit_price' => $resolvedUnitPrice,
+                                'total_price' => $canSellFromThisBatch * $resolvedUnitPrice,
                                 'cost_price_at_sale' => $batch->unit_cost,
                             ]);
 
@@ -1764,8 +1833,8 @@ class SaleController extends Controller
                                 'purchase_item_id' => null,
                                 'batch_number_sold' => null,
                                 'quantity' => $remainingQuantity,
-                                'unit_price' => $itemData['unit_price'],
-                                'total_price' => $remainingQuantity * $itemData['unit_price'],
+                                'unit_price' => $resolvedUnitPrice,
+                                'total_price' => $remainingQuantity * $resolvedUnitPrice,
                                 'cost_price_at_sale' => 0,
                             ]);
                             $saleItems[] = $saleItem;
@@ -1776,7 +1845,7 @@ class SaleController extends Controller
                         $product->save();
 
                         // Update sale totals
-                        $sale->total_amount += ($itemData['quantity'] * $itemData['unit_price']);
+                        $sale->total_amount += ($itemData['quantity'] * $resolvedUnitPrice);
                         
                         $addedItems = array_merge($addedItems, $saleItems);
                         $totalAdded++;

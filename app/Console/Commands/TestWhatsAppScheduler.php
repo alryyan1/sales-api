@@ -7,6 +7,7 @@ use App\Models\WhatsAppScheduler;
 use App\Http\Controllers\Api\WhatsAppController;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
+use App\Services\SettingsService;
 
 class TestWhatsAppScheduler extends Command
 {
@@ -109,7 +110,7 @@ class TestWhatsAppScheduler extends Command
 
         try {
             // Direct API call to avoid authentication issues
-            $settings = config('app_settings');
+            $settings = (new SettingsService())->getAll();
             
             if (!$settings['whatsapp_enabled']) {
                 $this->error("❌ WhatsApp integration is not enabled");

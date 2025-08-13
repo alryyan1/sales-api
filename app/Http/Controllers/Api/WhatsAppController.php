@@ -6,9 +6,9 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Config;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Auth;
+use App\Services\SettingsService;
 
 class WhatsAppController extends Controller
 {
@@ -22,13 +22,15 @@ class WhatsAppController extends Controller
         $this->checkAuthorization('send-whatsapp-messages');
 
         $request->validate([
-            'chatId' => 'required|string',
-            'text' => 'required|string|max:4096',
-            'quotedMessageId' => 'nullable|string',
+            'number' => 'nullable|string',
+            'phoneNumber' => 'nullable|string',
+            'chatId' => 'nullable|string',
+            'text' => 'nullable|string|max:4096',
+            'message' => 'nullable|string|max:4096',
         ]);
 
         try {
-            $settings = config('app_settings');
+            $settings = (new SettingsService())->getAll();
             
             if (!$settings['whatsapp_enabled']) {
                 return response()->json([
@@ -37,7 +39,7 @@ class WhatsAppController extends Controller
                 ], 400);
             }
 
-            $apiUrl = $settings['whatsapp_api_url'];
+            $apiUrl = rtrim($settings['whatsapp_api_url'], '/');
             $apiToken = $settings['whatsapp_api_token'];
             $instanceId = $settings['whatsapp_instance_id'];
 
@@ -48,21 +50,33 @@ class WhatsAppController extends Controller
                 ], 400);
             }
 
-            $endpoint = "{$apiUrl}/instances/{$instanceId}/client/action/send-message";
-            
-            $payload = [
-                'chatId' => $request->chatId,
-                'message' => $request->text, // Changed from 'text' to 'message' to match API
-            ];
+            $endpoint = "{$apiUrl}/send";
 
-            if ($request->quotedMessageId) {
-                $payload['quotedMessageId'] = $request->quotedMessageId;
+            // Determine number and message fields from various inputs for backward compatibility
+            $rawNumber = $request->input('number')
+                ?? $request->input('phoneNumber')
+                ?? ($request->input('chatId') ? str_replace('@c.us', '', $request->input('chatId')) : null);
+            $number = $this->formatPhoneNumber((string) $rawNumber);
+            $message = $request->input('message') ?? $request->input('text');
+
+            if (empty($number) || empty($message)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Missing number or message'
+                ], 422);
             }
 
+            $payload = [
+                'number' => $number,
+                'type' => 'text',
+                'message' => $message,
+                'instance_id' => $instanceId,
+                'access_token' => $apiToken,
+            ];
+
             $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $apiToken,
-                'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
             ])->post($endpoint, $payload);
 
             if ($response->successful()) {
@@ -71,8 +85,8 @@ class WhatsAppController extends Controller
 
                 
                 Log::info('WhatsApp message sent successfully', [
-                    'chatId' => $request->chatId,
-                    'messageId' => $data['data']['data']['id']['id'] ?? null
+                    'number' => $number,
+                    'response' => $data
                 ]);
 
                 return response()->json([
@@ -84,7 +98,7 @@ class WhatsAppController extends Controller
                 Log::error('WhatsApp API error', [
                     'status' => $response->status(),
                     'response' => $response->json(),
-                    'chatId' => $request->chatId
+                    'number' => $number
                 ]);
 
                 return response()->json([
@@ -121,7 +135,7 @@ class WhatsAppController extends Controller
         ]);
 
         try {
-            $settings = config('app_settings');
+            $settings = (new SettingsService())->getAll();
             
             if (!$settings['whatsapp_enabled']) {
                 return response()->json([
@@ -130,7 +144,7 @@ class WhatsAppController extends Controller
                 ], 400);
             }
 
-            $apiUrl = $settings['whatsapp_api_url'];
+            $apiUrl = rtrim($settings['whatsapp_api_url'], '/');
             $apiToken = $settings['whatsapp_api_token'];
             $instanceId = $settings['whatsapp_instance_id'];
 
@@ -143,21 +157,20 @@ class WhatsAppController extends Controller
 
             // Format phone number for WhatsApp API
             $phoneNumber = $this->formatPhoneNumber($request->phoneNumber);
-            $chatId = $phoneNumber . '@c.us';
-            
             $testMessage = $request->message ?? 'This is a test message from your sales system. If you receive this, WhatsApp integration is working correctly!';
-            
-            $endpoint = "{$apiUrl}/instances/{$instanceId}/client/action/send-message";
-            
+
+            $endpoint = "{$apiUrl}/send";
             $payload = [
-                'chatId' => $chatId,
-                'message' => $testMessage, // Changed from 'text' to 'message' to match API
+                'number' => $phoneNumber,
+                'type' => 'text',
+                'message' => $testMessage,
+                'instance_id' => $instanceId,
+                'access_token' => $apiToken,
             ];
 
             $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $apiToken,
-                'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
             ])->post($endpoint, $payload);
 
             if ($response->successful()) {
@@ -167,8 +180,8 @@ class WhatsAppController extends Controller
                 
                 Log::info('WhatsApp test message sent successfully', [
                     'phoneNumber' => $request->phoneNumber,
-                    'chatId' => $chatId,
-                    'messageId' => $data['data']['data']['id']['id'] ?? null
+                    'number' => $phoneNumber,
+                    'response' => $data
                 ]);
 
                 return response()->json([
@@ -212,7 +225,7 @@ class WhatsAppController extends Controller
         $this->checkAuthorization('view-whatsapp-status');
 
         try {
-            $settings = config('app_settings');
+            $settings = (new SettingsService())->getAll();
             
             if (!$settings['whatsapp_enabled']) {
                 return response()->json([
@@ -221,7 +234,7 @@ class WhatsAppController extends Controller
                 ], 400);
             }
 
-            $apiUrl = $settings['whatsapp_api_url'];
+            $apiUrl = rtrim($settings['whatsapp_api_url'], '/');
             $apiToken = $settings['whatsapp_api_token'];
             $instanceId = $settings['whatsapp_instance_id'];
 
@@ -232,12 +245,9 @@ class WhatsAppController extends Controller
                 ], 400);
             }
 
-            $endpoint = "{$apiUrl}/instances/{$instanceId}/client";
-            
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $apiToken,
-                'Content-Type' => 'application/json',
-            ])->get($endpoint);
+            // Use get_groups as a proxy for status/connectivity
+            $endpoint = "{$apiUrl}/get_groups?instance_id={$instanceId}&access_token={$apiToken}";
+            $response = Http::get($endpoint);
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -285,7 +295,7 @@ class WhatsAppController extends Controller
         ]);
 
         try {
-            $settings = config('app_settings');
+            $settings = (new SettingsService())->getAll();
             
             if (!$settings['whatsapp_enabled']) {
                 return response()->json([
@@ -294,7 +304,7 @@ class WhatsAppController extends Controller
                 ], 400);
             }
 
-            $apiUrl = $settings['whatsapp_api_url'];
+            $apiUrl = rtrim($settings['whatsapp_api_url'], '/');
             $apiToken = $settings['whatsapp_api_token'];
             $instanceId = $settings['whatsapp_instance_id'];
 
@@ -307,19 +317,18 @@ class WhatsAppController extends Controller
 
             // Format phone number for WhatsApp API
             $phoneNumber = $this->formatPhoneNumber($request->phoneNumber);
-            $chatId = $phoneNumber . '@c.us';
-            
-            $endpoint = "{$apiUrl}/instances/{$instanceId}/client/action/send-message";
-            
+            $endpoint = "{$apiUrl}/send";
             $payload = [
-                'chatId' => $chatId,
-                'message' => $request->message, // Changed from 'text' to 'message' to match API
+                'number' => $phoneNumber,
+                'type' => 'text',
+                'message' => $request->message,
+                'instance_id' => $instanceId,
+                'access_token' => $apiToken,
             ];
 
             $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $apiToken,
-                'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
             ])->post($endpoint, $payload);
 
             if ($response->successful()) {
@@ -327,8 +336,8 @@ class WhatsAppController extends Controller
                 
                 Log::info('WhatsApp sale notification sent successfully', [
                     'phoneNumber' => $request->phoneNumber,
-                    'chatId' => $chatId,
-                    'messageId' => $data['data']['data']['id']['id'] ?? null
+                    'number' => $phoneNumber,
+                    'response' => $data
                 ]);
 
                 return response()->json([

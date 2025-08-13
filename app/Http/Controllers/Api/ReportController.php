@@ -676,10 +676,11 @@ class ReportController extends Controller
     private function generateProfessionalPDFHeader($pdf, $startDate, $endDate, $filters)
     {
         // Company Information
-        $companyName = config('app_settings.company_name', 'Your Company');
-        $companyAddress = config('app_settings.company_address', '');
-        $companyPhone = config('app_settings.company_phone', '');
-        $companyEmail = config('app_settings.company_email', '');
+        $settings = (new \App\Services\SettingsService())->getAll();
+        $companyName = $settings['company_name'] ?? 'Your Company';
+        $companyAddress = $settings['company_address'] ?? '';
+        $companyPhone = $settings['company_phone'] ?? '';
+        $companyEmail = $settings['company_email'] ?? '';
 
         // Header with company logo area (left side)
         $pdf->SetY(20);

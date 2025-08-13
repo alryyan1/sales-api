@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Artisan; // To clear config cache
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Validation\Rule;
 use Log;
+use App\Services\SettingsService;
+use Illuminate\Support\Facades\Storage;
 
 class SettingController extends Controller
 {
@@ -22,14 +24,8 @@ class SettingController extends Controller
     public function index(Request $request)
     {
         // $this->checkAuthorization('view-settings'); // Policy or Gate check
-
-        // Fetch settings directly from the config file
-        // We use 'app_settings' as the config file name (config/app_settings.php)
-        $settings = config('app_settings');
-
-        // Filter out any null values if desired, or return all
-        // $settings = array_filter($settings, fn($value) => !is_null($value));
-
+        $service = new SettingsService();
+        $settings = $service->getAll();
         return response()->json(['data' => $settings]);
     }
 
@@ -41,97 +37,41 @@ class SettingController extends Controller
     public function update(Request $request)
     {
         $this->checkAuthorization('update-settings');
-
-        // Get current settings to know which keys are valid
-        $currentSettings = config('app_settings');
-        $validKeys = array_keys($currentSettings);
-
-        // Define validation rules based on expected types from config
-        $rules = [];
-        foreach ($currentSettings as $key => $value) {
-            $rule = ['nullable', 'string', 'max:255']; // Default
-            if (is_int($value)) {
-                $rule = ['nullable', 'integer', 'min:0'];
-            } elseif (is_bool($value)) {
-                $rule = ['nullable', 'boolean'];
-            } elseif (is_float($value)) {
-                $rule = ['nullable', 'numeric'];
-            } elseif ($key === 'default_profit_rate') {
-                // Accept numeric for profit rate even if config holds it as string
-                $rule = ['nullable', 'numeric'];
-            } elseif ($key === 'company_email') {
-                $rule = ['nullable', 'email', 'max:255'];
-            } elseif ($key === 'currency_symbol') {
-                $rule = ['nullable', 'string', 'max:5']; // Currency symbol is now optional
-            }
-            $rules[$key] = $rule;
-        }
-        
-        // Ensure boolean keys are properly validated
-        foreach (['whatsapp_enabled', 'use_sidebar_layout'] as $boolKey) {
-            if (isset($currentSettings[$boolKey])) {
-                $rules[$boolKey] = ['nullable', 'boolean'];
-            }
-        }
-
-        // Debug: Log the incoming data
+        $service = new SettingsService();
+        $rules = $service->validationRules();
         Log::info('Settings update request data:', $request->all());
-        Log::info('Validation rules:', $rules);
-        
-        $validatedData = $request->validate($rules);
+        $validated = $request->validate($rules);
+        $newSettings = $service->update($validated);
+        return response()->json([
+            'message' => 'Settings updated successfully.',
+            'data' => $newSettings,
+        ]);
+    }
 
-        // --- Updating .env file ---
-        // This is a sensitive operation. Ensure proper server permissions and backups.
-        $envFilePath = base_path('.env');
-        $envFileContent = File::get($envFilePath);
+    /**
+     * Upload and set company logo.
+     */
+    public function uploadLogo(Request $request)
+    {
+        $this->checkAuthorization('update-settings');
 
-        foreach ($validatedData as $key => $value) {
-            if (!in_array($key, $validKeys)) continue; // Skip if key not in our defined settings
+        $request->validate([
+            'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:2048'],
+        ]);
 
-            $envKey = 'APP_SETTINGS_' . strtoupper($key); // Match .env variable naming convention
-            
-            // Handle boolean values properly for .env file
-            // Normalize booleans
-            if (is_bool($currentSettings[$key]) || in_array($key, ['whatsapp_enabled','use_sidebar_layout'])) {
-                $escapedValue = filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 'true' : 'false';
-            } else {
-                // Leave numbers and strings as-is, quote strings with spaces
-                if (is_null($value)) {
-                    $escapedValue = '';
-                } else {
-                    $escapedValue = is_string($value) && (str_contains($value, ' ') || str_contains($value, '#')) ? "\"{$value}\"" : $value;
-                }
-            }
+        $file = $request->file('logo');
+        $path = $file->store('logos', 'public');
+        // Build absolute URL that respects subdirectory deployments (e.g., /sales-api/public)
+        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . Storage::url($path);
 
-            // Replace or add the line in .env
-            if (str_contains($envFileContent, "{$envKey}=")) {
-                // Update existing line
-                $envFileContent = preg_replace("/^{$envKey}=.*/m", "{$envKey}={$escapedValue}", $envFileContent);
-            } else {
-                // Add new line if it doesn't exist
-                $envFileContent .= "\n{$envKey}={$escapedValue}";
-            }
-        }
+        $service = new SettingsService();
+        $newSettings = $service->update(['company_logo_url' => $publicUrl]);
 
-        try {
-            File::put($envFilePath, $envFileContent);
-
-            // Clear config cache so Laravel reloads the .env values
-            Artisan::call('config:clear'); // Important for changes to take effect
-            Artisan::call('config:cache');  // Recache for production (optional here, but good practice)
-
-            // Fetch the newly updated settings from the reloaded config
-            $newSettings = config('app_settings');
-
-            return response()->json([
-                'message' => 'Settings updated successfully. Config cache cleared.',
-                'data' => $newSettings
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error("Failed to update .env file for settings: " . $e->getMessage());
-            return response()->json(['message' => 'Failed to update settings file on server.'], 500);
-        }
+        return response()->json([
+            'message' => 'Logo uploaded successfully.',
+            'url' => $publicUrl,
+            'data' => $newSettings,
+        ]);
     }
 
      /**
