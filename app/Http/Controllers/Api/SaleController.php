@@ -1457,9 +1457,10 @@ class SaleController extends Controller
         ]);
 
         // --- PDF Setup for Thermal (e.g., 80mm width) ---
-        // Dynamic height: base 65mm + 5mm per sale item
+        // Dynamic height: base + items + payments
         $itemsCount = $sale->items?->count() ?? 0;
-        $pageHeightMm = 100 + (5 * $itemsCount);
+        $paymentsCount = $sale->payments?->count() ?? 0;
+        $pageHeightMm = 105 + (5 * $itemsCount) + (5 * $paymentsCount);
         $pdf = new MyCustomTCPDF('P', 'mm', [80, $pageHeightMm], true, 'UTF-8', false); // Custom page size [width, height]
         // $pdf->setThermalDefaults(80, 250); // Or use your preset method
 
