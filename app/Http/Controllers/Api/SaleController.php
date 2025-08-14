@@ -1041,6 +1041,7 @@ class SaleController extends Controller
             $result = DB::transaction(function () use ($validatedData, $sale, $saleItemId) {
                 $saleItem = $sale->items()->findOrFail($saleItemId);
                 $product = $saleItem->product;
+                $batch = $saleItem->purchaseItemBatch; // May be null when no specific batch was used
                 
                 $oldQuantity = $saleItem->quantity;
                 $newQuantity = $validatedData['quantity'];
@@ -1048,48 +1049,59 @@ class SaleController extends Controller
 
                 // If increasing quantity, check stock availability
                 if ($quantityDifference > 0) {
-                    // Check if product has any stock
-                    if ($product->stock_quantity <= 0) {
-                        throw ValidationException::withMessages([
-                            'quantity' => "Product '{$product->name}' is out of stock. Available quantity: 0"
-                        ]);
-                    }
-                    
-                    // Calculate the total quantity that would be in this sale after the increase
-                    $currentQuantityInThisSale = $sale->items()
-                        ->where('product_id', $product->id)
-                        ->sum('quantity');
-                    $totalQuantityAfterIncrease = $currentQuantityInThisSale + $quantityDifference;
-                    
-                    // Get the original stock quantity (before any sales)
-                    $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
-                    
-                    if ($totalQuantityAfterIncrease > $originalStockQuantity) {
-                        throw ValidationException::withMessages([
-                            'quantity' => "Insufficient stock. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterIncrease}"
-                        ]);
+                    if ($batch) {
+                        // Lock the batch row to ensure consistent check/update
+                        $lockedBatch = PurchaseItem::whereKey($batch->id)->lockForUpdate()->first();
+                        if (!$lockedBatch) {
+                            throw ValidationException::withMessages([
+                                'quantity' => 'Associated batch not found.'
+                            ]);
+                        }
+                        // Must have enough remaining in this specific batch
+                        if ($lockedBatch->remaining_quantity < $quantityDifference) {
+                            throw ValidationException::withMessages([
+                                'quantity' => "Insufficient batch stock. Batch '{$lockedBatch->batch_number}' available: {$lockedBatch->remaining_quantity}, requested additional: {$quantityDifference}"
+                            ]);
+                        }
+                    } else {
+                        // No batch: rely on product total stock
+                        if ($product->stock_quantity < $quantityDifference) {
+                            throw ValidationException::withMessages([
+                                'quantity' => "Insufficient stock for '{$product->name}'. Available: {$product->stock_quantity}, requested additional: {$quantityDifference}"
+                            ]);
+                        }
                     }
                 }
 
-                // Update the sale item
+                // Handle stock changes first (so observers update product totals where applicable)
+                if ($quantityDifference !== 0) {
+                    if ($batch) {
+                        // Adjust the specific batch (lock again to be safe)
+                        $lockedBatch = PurchaseItem::whereKey($batch->id)->lockForUpdate()->first();
+                        if ($quantityDifference > 0) {
+                            $lockedBatch->remaining_quantity -= $quantityDifference;
+                        } else {
+                            $lockedBatch->remaining_quantity += abs($quantityDifference);
+                        }
+                        $lockedBatch->save(); // Observer will update Product.stock_quantity
+                    } else {
+                        // No batch tracking: adjust product stock directly
+                        if ($quantityDifference > 0) {
+                            $product->decrement('stock_quantity', $quantityDifference);
+                        } else {
+                            $product->increment('stock_quantity', abs($quantityDifference));
+                        }
+                    }
+                }
+
+                // Update the sale item after stock adjustments
                 $saleItem->quantity = $newQuantity;
                 $saleItem->unit_price = $validatedData['unit_price'];
                 $saleItem->total_price = $newQuantity * $validatedData['unit_price'];
                 $saleItem->save();
 
-                // Handle stock changes
-                if ($quantityDifference > 0) {
-                    // Increasing quantity - just update product stock
-                    $product->stock_quantity -= $quantityDifference;
-                } elseif ($quantityDifference < 0) {
-                    // Decreasing quantity - return stock to product
-                    $product->stock_quantity += abs($quantityDifference);
-                }
-
-                $product->save();
-
                 // Update sale totals
-                $sale->total_amount = $sale->items->sum('total_price');
+                $sale->total_amount = $sale->items()->sum('total_price');
                 $sale->save();
 
                 return [
