@@ -818,6 +818,90 @@ class SaleController extends Controller
     }
 
     /**
+     * Update discount on a sale instantly (amount and type) and recalculate totals.
+     * - discount_amount: numeric value; interpreted as percent when type=percentage, absolute when type=fixed
+     * - discount_type: 'percentage' | 'fixed'
+     */
+    public function updateDiscount(Request $request, Sale $sale)
+    {
+        $validated = $request->validate([
+            'discount_amount' => 'required|numeric|min:0',
+            'discount_type' => ['required', Rule::in(['percentage', 'fixed'])],
+        ]);
+
+        try {
+            DB::transaction(function () use ($validated, $sale) {
+                // Always compute subtotal from items to ensure accuracy
+                $subtotal = (float)$sale->items()->sum('total_price');
+
+                // Compute discount value (absolute) from input
+                $discountValue = 0.0;
+                if ($validated['discount_type'] === 'percentage') {
+                    // Cap percentage to 100
+                    if ($validated['discount_amount'] > 100) {
+                        throw ValidationException::withMessages([
+                            'discount_amount' => ['Discount percentage cannot exceed 100%']
+                        ]);
+                    }
+                    $discountValue = $subtotal * ((float)$validated['discount_amount'] / 100);
+                } else { // fixed
+                    $discountValue = min((float)$validated['discount_amount'], $subtotal);
+                }
+
+                // Ensure discount does not reduce total below amount already paid
+                $paidAmount = (float)$sale->payments()->sum('amount');
+                $maxDiscountAllowed = max(0.0, $subtotal - $paidAmount);
+                if ($discountValue > $maxDiscountAllowed) {
+                    throw ValidationException::withMessages([
+                        'discount_amount' => [
+                            "Discount cannot exceed remaining due. Max allowed: {$maxDiscountAllowed}"
+                        ]
+                    ]);
+                }
+
+                $totalAfterDiscount = $subtotal - $discountValue;
+
+                // Persist changes
+                $sale->update([
+                    'subtotal' => $subtotal,
+                    'discount_amount' => $discountValue,
+                    'discount_type' => $validated['discount_type'],
+                    'total_amount' => $totalAfterDiscount,
+                    // Keep paid_amount as is; due = total - paid (derived on client/UI)
+                ]);
+            });
+
+            // Reload relevant relations for client consumption
+            $sale->load([
+                'client:id,name',
+                'user:id,name',
+                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
+                'payments.user:id,name'
+            ]);
+
+            return response()->json([
+                'message' => 'Discount updated successfully',
+                'sale' => new SaleResource($sale)
+            ], Response::HTTP_OK);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            Log::error('Failed to update sale discount', [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Failed to update discount. Please try again.'
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * Delete a single payment from an existing sale.
      */
     public function deleteSinglePayment(Sale $sale, $paymentId)

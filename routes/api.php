@@ -177,6 +177,7 @@ Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController:
   Route::post('/sales/{sale}/payments', [SaleController::class, 'addPayment'])->name('api.sales.addPayment');
   Route::delete('/sales/{sale}/payments', [SaleController::class, 'deletePayments'])->name('api.sales.deletePayments');
   Route::post('/sales/{sale}/payments/single', [SaleController::class, 'addSinglePayment'])->name('api.sales.addSinglePayment');
+  Route::put('/sales/{sale}/discount', [SaleController::class, 'updateDiscount'])->name('api.sales.updateDiscount');
   Route::delete('/sales/{sale}/payments/{payment}', [SaleController::class, 'deleteSinglePayment'])->name('api.sales.deleteSinglePayment');
   Route::post('/sales/{sale}/items', [SaleController::class, 'addSaleItem'])->name('api.sales.addSaleItem');
   Route::post('/sales/{sale}/items/multiple', [SaleController::class, 'addMultipleSaleItems'])->name('api.sales.addMultipleSaleItems');
