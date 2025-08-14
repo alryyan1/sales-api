@@ -93,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/monthly-purchases', [ReportController::class, 'monthlyPurchasesReport'])->name('monthly-purchases');
   Route::get('/top-products', [ReportController::class, 'topSellingProducts'])->name('top-products');
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
+    Route::get('/sales-pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('sales-pdf');
     Route::get('/inventory-pdf', [ReportController::class, 'inventoryPdf'])->name('inventory-pdf');
     Route::get('/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('inventory-log');
     Route::get('/inventory-log/pdf', [App\Http\Controllers\Api\InventoryLogController::class, 'generatePdf'])->name('inventory-log.pdf');

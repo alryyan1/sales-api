@@ -142,6 +142,9 @@ class Sale extends Model
     // Accessor for due amount
     public function getCalculatedDueAmountAttribute(): float
     {
-        return (float) $this->total_amount - $this->getCalculatedPaidAmountAttribute();
+        $grossTotal = (float) ($this->total_amount ?? 0);
+        $discount = (float) ($this->discount_amount ?? 0);
+        $paid = $this->getCalculatedPaidAmountAttribute();
+        return (float) ($grossTotal - $discount - $paid);
     }
 }

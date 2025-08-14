@@ -583,6 +583,7 @@ class ReportController extends Controller
             'client_id' => 'nullable|integer|exists:clients,id',
             'user_id' => 'nullable|integer|exists:users,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
+            'has_discount' => 'nullable|boolean',
         ]);
 
         // 2. Fetch and Filter Sales Data
@@ -610,6 +611,16 @@ class ReportController extends Controller
         }
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
+        }
+        if (array_key_exists('has_discount', $validated)) {
+            $hasDiscount = filter_var($validated['has_discount'], FILTER_VALIDATE_BOOLEAN);
+            if ($hasDiscount) {
+                $query->where('discount_amount', '>', 0);
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('discount_amount')->orWhere('discount_amount', '<=', 0);
+                });
+            }
         }
 
         $sales = $query->orderBy('sale_date', 'desc')->get();
