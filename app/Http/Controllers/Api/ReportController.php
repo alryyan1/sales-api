@@ -42,6 +42,7 @@ class ReportController extends Controller
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'per_page' => 'nullable|integer|min:5|max:100', // Control pagination size
             // Add validation for sort_by, sort_direction if implementing dynamic sorting
+            'has_discount' => 'nullable|boolean',
         ]);
 
         // --- Authorization Check (Example - Needs Policy/Gate setup) ---
@@ -83,6 +84,18 @@ class ReportController extends Controller
         // Status Filter
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
+        }
+
+        // Has Discount Filter
+        if (array_key_exists('has_discount', $validated)) {
+            $hasDiscount = filter_var($validated['has_discount'], FILTER_VALIDATE_BOOLEAN);
+            if ($hasDiscount) {
+                $query->where('discount_amount', '>', 0);
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('discount_amount')->orWhere('discount_amount', '<=', 0);
+                });
+            }
         }
 
         // --- Sorting (Default: Newest first) ---

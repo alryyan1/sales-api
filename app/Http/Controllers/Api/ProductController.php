@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
 {
@@ -123,16 +124,20 @@ class ProductController extends Controller
      */
     public function update(Request $request, Product $product) // Route model binding
     {
+        // Prevent changing SKU once set
+        if ($request->has('sku')) {
+            $incomingSku = $request->input('sku');
+            if ($incomingSku !== $product->sku) {
+                throw ValidationException::withMessages([
+                    'sku' => ['SKU cannot be changed after creation.']
+                ]);
+            }
+        }
+
         $validatedData = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'scientific_name' => 'sometimes|nullable|string|max:255',
-            'sku' => [
-                'sometimes',
-                'nullable',
-                'string',
-                'max:100',
-                Rule::unique('products')->ignore($product->id),
-            ],
+            // 'sku' is intentionally not editable after creation
             'description' => 'sometimes|nullable|string|max:65535',
             'stock_alert_level' => 'sometimes|nullable|integer|min:0',
             'category_id' => 'sometimes|nullable|exists:categories,id',

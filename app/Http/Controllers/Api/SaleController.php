@@ -817,6 +817,9 @@ class SaleController extends Controller
         }
     }
 
+
+
+
     /**
      * Update discount on a sale instantly (amount and type) and recalculate totals.
      * - discount_amount: numeric value; interpreted as percent when type=percentage, absolute when type=fixed

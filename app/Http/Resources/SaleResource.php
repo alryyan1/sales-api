@@ -31,6 +31,8 @@ class SaleResource extends JsonResource
             'invoice_number' => $this->invoice_number,
             'status' => $this->status,
             'total_amount' => $this->total_amount, // Cast in model
+            'discount_amount' => $this->discount_amount,
+            'discount_type' => $this->discount_type,
             'notes' => $this->notes,
             'created_at' => $this->created_at->toISOString(),
             'updated_at' => $this->updated_at->toISOString(), // Include if needed
