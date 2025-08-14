@@ -329,8 +329,9 @@ class SaleController extends Controller
         // Calculate amount after discount
         $amountAfterDiscount = $subtotal - $discountAmount;
 
-        // Calculate final total (no tax)
-        $calculatedTotalSaleAmount = $amountAfterDiscount;
+        // Calculate final total to STORE in DB as GROSS (pre-discount)
+        // Note: We keep gross in total_amount and use discount_amount to derive net
+        $calculatedTotalSaleAmount = $subtotal;
 
         // Calculate total paid amount
         $calculatedTotalPaidAmount = 0;
@@ -353,8 +354,10 @@ class SaleController extends Controller
 
     private function validatePaidAmount(array $calculatedTotals)
     {
-        if ($calculatedTotals['totalPaidAmount'] > $calculatedTotals['totalSaleAmount']) {
-            throw ValidationException::withMessages(['payments' => ['Total paid amount cannot exceed the total sale amount.']]);
+        // Paid amount cannot exceed NET amount (gross - discount)
+        $netAmount = (float)$calculatedTotals['amountAfterDiscount'];
+        if ($calculatedTotals['totalPaidAmount'] > $netAmount) {
+            throw ValidationException::withMessages(['payments' => ['Total paid amount cannot exceed the net sale amount after discount.']]);
         }
     }
 
@@ -571,10 +574,12 @@ class SaleController extends Controller
 
         // For this simplified version, we only update header fields.
         // The frontend form should also restrict item editing for completed/non-draft sales.
-        if (isset($validatedData['paid_amount']) && $validatedData['paid_amount'] > $sale->total_amount) {
+        // Paid amount should not exceed net amount (gross - discount)
+        $currentNet = max(0, (float)($sale->total_amount ?? 0) - (float)($sale->discount_amount ?? 0));
+        if (isset($validatedData['paid_amount']) && $validatedData['paid_amount'] > $currentNet) {
             // If items are not editable, total_amount doesn't change.
-            // If total_amount could change, this check needs to be against the new total.
-            throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed the sale total.']]);
+            // If total_amount could change, this check needs to be against the new net.
+            throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed the net sale amount after discount.']]);
         }
 
         $sale->update($validatedData);
@@ -866,11 +871,11 @@ class SaleController extends Controller
 
                 // Persist changes
                 $sale->update([
-                    'subtotal' => $subtotal,
-                    'discount_amount' => $discountValue,
+                    'subtotal' => $subtotal,              // store the computed subtotal from items
+                    'discount_amount' => $discountValue,  // absolute discount value
                     'discount_type' => $validated['discount_type'],
-                    'total_amount' => $totalAfterDiscount,
-                    // Keep paid_amount as is; due = total - paid (derived on client/UI)
+                    'total_amount' => $subtotal,          // keep GROSS in DB
+                    // paid_amount unchanged; due = gross - discount - paid (via accessor)
                 ]);
             });
 
@@ -968,7 +973,7 @@ class SaleController extends Controller
                     return [
                         'sale_items' => [],
                         'new_total' => $sale->total_amount,
-                        'new_due_amount' => $sale->total_amount - $sale->paid_amount,
+                        'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount),
                         'product_already_exists' => true
                     ];
                 }
@@ -1064,7 +1069,7 @@ class SaleController extends Controller
                 return [
                     'sale_items' => $saleItems,
                     'new_total' => $sale->total_amount,
-                    'new_due_amount' => $sale->total_amount - $sale->paid_amount
+                    'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount)
                 ];
             });
 
@@ -1194,7 +1199,7 @@ class SaleController extends Controller
                 return [
                     'updated_item' => $saleItem,
                     'new_total' => $sale->total_amount,
-                    'new_due_amount' => $sale->total_amount - $sale->paid_amount
+                    'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount)
                 ];
             });
 
@@ -1286,7 +1291,7 @@ class SaleController extends Controller
                 $newSubtotal = $remainingItems->sum('total_price');
                 $newTotalAmount = $newSubtotal; // No tax calculation for now
                 
-                // Update sale totals
+                // Update sale totals (gross)
                 $sale->total_amount = $newTotalAmount;
                 $sale->paid_amount = $sale->payments->sum('amount');
                 // due_amount is calculated, not stored in database
@@ -1391,7 +1396,7 @@ class SaleController extends Controller
         $pdf->Cell(0, 6, 'رقم الفاتورة: ' . ($sale->invoice_number ?: $invoicePrefix . $sale->id), 0, 1, 'L'); // Align left
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
-        $pdf->MultiCell(90, 5, $companyAddress, 0, 'R', 0, 0, '', '', true, 0, false, true, 0, 'T');
+        $pdf->MultiCell(90, 5, $companyAddress, 0, 'R', 0, 0, null, null, true, 0, false, true, 0, 'T');
         $pdf->Cell(0, 5, 'تاريخ الفاتورة: ' . Carbon::parse($sale->sale_date)->format('Y-m-d'), 0, 1, 'L');
 
         $currentY = $pdf->GetY(); // Store Y after address
@@ -1415,7 +1420,7 @@ class SaleController extends Controller
         if ($sale->client) {
             $pdf->Cell(0, 5, $sale->client->name, 0, 1, 'R');
             if ($sale->client->address) {
-                $pdf->MultiCell(0, 5, $sale->client->address, 0, 'R', 0, 1, '', '', true, 0, false, true, 0, 'T');
+                $pdf->MultiCell(0, 5, $sale->client->address, 0, 'R', 0, 1, null, null, true, 0, false, true, 0, 'T');
             }
             if ($sale->client->phone) {
                 $pdf->Cell(0, 5, 'الهاتف: ' . $sale->client->phone, 0, 1, 'R');
@@ -1480,29 +1485,34 @@ class SaleController extends Controller
         $col1Width = array_sum($w_items) - $w_items[0]; // Width for labels
         $col2Width = $w_items[0]; // Width for amounts
 
+        // Compute totals using gross (total_amount) and discount
+        $subtotalValue = (float) ($sale->total_amount ?? 0);
+        $discountValue = (float) ($sale->discount_amount ?? 0);
+        $netTotal = max(0, $subtotalValue - $discountValue);
+        $paidValue = (float) ($sale->paid_amount ?? 0);
+        $due = max(0, $netTotal - $paidValue);
+
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
-        $pdf->Cell($col1Width, 6, 'المجموع الفرعي:', 'LTR', 0, 'L', false); // Subtotal Label
-        $pdf->Cell($col2Width, 6, number_format((float)$sale->total_amount, 0), 'TR', 1, 'R', false); // Subtotal Value
+        $pdf->Cell($col1Width, 6, 'المجموع الفرعي:', 'LTR', 0, 'L', false);
+        $pdf->Cell($col2Width, 6, number_format($subtotalValue, 0), 'TR', 1, 'R', false);
 
-        // Example: Discount (if you have it)
-        // $pdf->Cell($col1Width, 6, 'الخصم:', 'LR', 0, 'L', false);
-        // $pdf->Cell($col2Width, 6, number_format(0, 2), 'R', 1, 'R', false);
-
-
+        if ($discountValue > 0) {
+            $pdf->Cell($col1Width, 6, 'الخصم:', 'LR', 0, 'L', false);
+            $pdf->Cell($col2Width, 6, '-' . number_format($discountValue, 0), 'R', 1, 'R', false);
+        }
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
         $pdf->SetFillColor(220, 220, 220);
-        $pdf->Cell($col1Width, 7, 'الإجمالي المستحق:', 'LTRB', 0, 'L', true); // Grand Total Label
-        $pdf->Cell($col2Width, 7, number_format((float)$sale->total_amount, 0), 'TRB', 1, 'R', true); // Grand Total Value
+        $pdf->Cell($col1Width, 7, 'الإجمالي المستحق:', 'LTRB', 0, 'L', true);
+        $pdf->Cell($col2Width, 7, number_format($netTotal, 0), 'TRB', 1, 'R', true);
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
-        $pdf->Cell($col1Width, 6, 'المبلغ المدفوع:', 'LR', 0, 'L', false); // Paid Amount Label
-        $pdf->Cell($col2Width, 6, number_format((float)$sale->paid_amount, 0), 'R', 1, 'R', false); // Paid Amount Value
+        $pdf->Cell($col1Width, 6, 'المبلغ المدفوع:', 'LR', 0, 'L', false);
+        $pdf->Cell($col2Width, 6, number_format($paidValue, 0), 'R', 1, 'R', false);
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
-        $due = (float)$sale->total_amount - (float)$sale->paid_amount;
-        $pdf->Cell($col1Width, 7, 'المبلغ المتبقي:', 'LTRB', 0, 'L', false); // Amount Due Label
-        $pdf->Cell($col2Width, 7, number_format($due, 0), 'TRB', 1, 'R', false); // Amount Due Value
+        $pdf->Cell($col1Width, 7, 'المبلغ المتبقي:', 'LTRB', 0, 'L', false);
+        $pdf->Cell($col2Width, 7, number_format($due, 0), 'TRB', 1, 'R', false);
 
 
         // --- Payments Information ---
@@ -1665,18 +1675,11 @@ class SaleController extends Controller
         $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
         $pdf->Ln(1);
 
-        // --- Totals --- (with discount)
+        // --- Totals --- (with discount) using gross total_amount and discount_amount
         $itemsSubtotal = (float) ($sale->items?->sum('total_price') ?? 0);
+        $gross = (float) ($sale->total_amount ?? $itemsSubtotal);
         $discountAmount = (float) ($sale->discount_amount ?? 0);
-        if ($discountAmount <= 0) {
-            // Fallback: if subtotal column exists or infer from items
-            if (isset($sale->subtotal) && $sale->subtotal !== null) {
-                $discountAmount = max(0, (float)$sale->subtotal - (float)$sale->total_amount);
-            } else {
-                $discountAmount = max(0, $itemsSubtotal - (float)$sale->total_amount);
-            }
-        }
-        $finalTotal = (float) ($sale->total_amount ?? max(0, $itemsSubtotal - $discountAmount));
+        $finalTotal = max(0, $gross - $discountAmount);
 
         $pdf->SetFont('dejavusans', 'B', 8);
         $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
@@ -1963,7 +1966,7 @@ class SaleController extends Controller
                     'total_added' => $totalAdded,
                     'errors' => $errors,
                     'new_total' => $sale->total_amount,
-                    'new_due_amount' => $sale->total_amount - $sale->paid_amount
+                    'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount)
                 ];
             });
 

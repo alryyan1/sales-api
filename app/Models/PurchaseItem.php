@@ -52,7 +52,8 @@ class PurchaseItem extends Model
         'remaining_quantity',       // Remaining quantity in sellable_unit_name (e.g., pieces)
         'unit_cost',                // Cost per stocking_unit_name (e.g., cost per box)
         'total_cost',               // quantity * unit_cost
-        'sale_price',               // Intended sale price PER SELLABLE UNIT for this batch
+        'sale_price',               // Intended sale price PER SELLABLE UNIT for this batch (required)
+        'sale_price_stocking_unit', // Optional: Intended sale price per STOCKING UNIT
         'expiry_date',
     ];
 
@@ -60,7 +61,8 @@ class PurchaseItem extends Model
         'quantity' => 'integer',
         'unit_cost' => 'decimal:2',
         'total_cost' => 'decimal:2',
-        'sale_price' => 'decimal:2', // New
+        'sale_price' => 'decimal:2',
+        'sale_price_stocking_unit' => 'decimal:2',
         'cost_per_sellable_unit' => 'decimal:2', // New
         'expiry_date' => 'date',     // New
         'remaining_quantity' => 'integer'

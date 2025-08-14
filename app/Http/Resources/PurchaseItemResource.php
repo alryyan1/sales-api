@@ -27,6 +27,7 @@ class PurchaseItemResource extends JsonResource
             'cost_per_sellable_unit' => $this->cost_per_sellable_unit, // Accessor value
             'total_cost' => $this->total_cost,
             'sale_price' => $this->sale_price, // Intended sale price per sellable unit for this batch
+            'sale_price_stocking_unit' => $this->sale_price_stocking_unit,
             'expiry_date' => $this->expiry_date ? $this->expiry_date->format('Y-m-d') : null,
         ];
     }

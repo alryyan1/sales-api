@@ -96,7 +96,8 @@ class PurchaseController extends Controller
             'items.*.batch_number' => 'nullable|string|max:100', // Max length for batch number
             'items.*.quantity' => 'required|integer|min:0', // Quantity of stocking units (e.g., boxes)
             'items.*.unit_cost' => 'required|numeric|min:0',   // Cost per stocking unit
-            'items.*.sale_price' => 'nullable|numeric|min:0', // Intended sale price PER SELLABLE UNIT
+            'items.*.sale_price' => 'required|numeric|min:0', // Required: sale price per SELLABLE UNIT
+            'items.*.sale_price_stocking_unit' => 'nullable|numeric|min:0', // Optional: sale price per STOCKING UNIT
             'items.*.expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date', // Expiry date after purchase date
         ]);
 
@@ -140,7 +141,8 @@ class PurchaseController extends Controller
                         'unit_cost' => $unitCostPerStockingUnit,        // Store cost per STOCKING unit
                         'cost_per_sellable_unit' => $costPerSellableUnit, // Store cost per SELLABLE unit
                         'total_cost' => $totalCostForStockingUnits,     // Total cost for this line
-                        'sale_price' => $itemData['sale_price'] ?? null, // Intended sale price PER SELLABLE UNIT
+                        'sale_price' => $itemData['sale_price'], // Required intended sale price per SELLABLE UNIT
+                        'sale_price_stocking_unit' => $itemData['sale_price_stocking_unit'] ?? null,
                         'expiry_date' => $itemData['expiry_date'] ?? null,
                     ]);
                     // Product.stock_quantity (total sellable units) is updated by PurchaseItemObserver
@@ -281,7 +283,8 @@ class PurchaseController extends Controller
             'batch_number' => 'nullable|string|max:100',
             'quantity' => 'required|integer|min:0',
             'unit_cost' => 'required|numeric|min:0',
-            'sale_price' => 'nullable|numeric|min:0',
+            'sale_price' => 'required|numeric|min:0',
+            'sale_price_stocking_unit' => 'nullable|numeric|min:0',
             'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',
         ]);
 
@@ -294,7 +297,8 @@ class PurchaseController extends Controller
                     'quantity' => $validatedData['quantity'],
                     'unit_cost' => $validatedData['unit_cost'],
                     'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'], // Calculate total cost
-                    'sale_price' => $validatedData['sale_price'] ?? null,
+                    'sale_price' => $validatedData['sale_price'],
+                    'sale_price_stocking_unit' => $validatedData['sale_price_stocking_unit'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
                     'remaining_quantity' => $validatedData['quantity'], // Initially, remaining = total quantity
                 ]);
