@@ -210,7 +210,7 @@ class ProductController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $query = Product::select('*'); // Include stock_quantity
+        $query = Product::select('*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name']); // Include relations for names
 
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {

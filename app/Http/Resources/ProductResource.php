@@ -36,6 +36,8 @@ class ProductResource extends JsonResource
             'latest_cost_per_sellable_unit' => $this->latest_cost_per_sellable_unit ?? null,
             'suggested_sale_price_per_sellable_unit' => $this->suggested_sale_price_per_sellable_unit ?? null,
             'last_sale_price_per_sellable_unit' => $this->last_sale_price_per_sellable_unit ?? null,
+            'suggested_sale_price_per_stocking_unit' => $this->suggested_sale_price_per_stocking_unit ?? null,
+            'last_sale_price_per_stocking_unit' => $this->last_sale_price_per_stocking_unit ?? null,
             'earliest_expiry_date' => $this->earliest_expiry_date ?? null,
             'current_stock_quantity' => $this->current_stock_quantity ?? 0,
             'total_items_purchased' => $this->total_items_purchased ?? 0,
