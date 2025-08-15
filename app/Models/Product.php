@@ -8,18 +8,30 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany; // For relationships
 
 /**
- * 
- *
  * @property int $id
  * @property string $name
+ * @property string|null $scientific_name
  * @property string|null $sku
  * @property string|null $description
+ * @property int|null $category_id
  * @property int $stock_quantity
  * @property int|null $stock_alert_level
+ * @property int $units_per_stocking_unit
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property int|null $stocking_unit_id
+ * @property int|null $sellable_unit_id
+ * @property-read \App\Models\Category|null $category
+ * @property-read int $calculated_total_stock
+ * @property-read int $current_stock_quantity
+ * @property-read string|null $earliest_expiry_date
+ * @property-read float|null $last_sale_price_per_sellable_unit
+ * @property-read float|null $latest_cost_per_sellable_unit
  * @property-read float|null $latest_purchase_cost
  * @property-read float|null $suggested_sale_price
+ * @property-read float|null $suggested_sale_price_per_sellable_unit
+ * @property-read int $total_items_purchased
+ * @property-read int $total_items_sold
  * @property-read int $total_stock_quantity
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\PurchaseItem> $purchaseItems
  * @property-read int|null $purchase_items_count
@@ -27,25 +39,28 @@ use Illuminate\Database\Eloquent\Relations\HasMany; // For relationships
  * @property-read int|null $purchase_items_with_stock_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\SaleItem> $saleItems
  * @property-read int|null $sale_items_count
+ * @property-read \App\Models\Unit|null $sellableUnit
+ * @property-read \App\Models\Unit|null $stockingUnit
  * @method static \Database\Factories\ProductFactory factory($count = null, $state = [])
  * @method static \Illuminate\Database\Eloquent\Builder|Product hasPurchaseItemsWithStock()
+ * @method static \Illuminate\Database\Eloquent\Builder|Product hasStock()
+ * @method static \Illuminate\Database\Eloquent\Builder|Product lowStock()
  * @method static \Illuminate\Database\Eloquent\Builder|Product newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder|Product newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder|Product query()
+ * @method static \Illuminate\Database\Eloquent\Builder|Product whereCategoryId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereCreatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereDescription($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereName($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|Product whereScientificName($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|Product whereSellableUnitId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereSku($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereStockAlertLevel($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereStockQuantity($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|Product whereStockingUnitId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|Product whereUnitsPerStockingUnit($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereUpdatedAt($value)
- * @property int|null $category_id
- * @property-read \App\Models\Category|null $category
- * @property-read int $calculated_total_stock
- * @method static \Illuminate\Database\Eloquent\Builder|Product hasStock()
- * @method static \Illuminate\Database\Eloquent\Builder|Product lowStock()
- * @method static \Illuminate\Database\Eloquent\Builder|Product whereCategoryId($value)
  * @mixin \Eloquent
  */
 class Product extends Model

@@ -7,8 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship type
 
 /**
- * 
- *
  * @property int $id
  * @property int $purchase_id
  * @property int $product_id
@@ -18,7 +16,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @property string $unit_cost
  * @property string $total_cost
  * @property string|null $sale_price
+ * @property string|null $sale_price_stocking_unit
  * @property \Illuminate\Support\Carbon|null $expiry_date
+ * @property float|null $cost_per_sellable_unit
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property-read \App\Models\Product $product
@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem query()
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereBatchNumber($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereCostPerSellableUnit($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereCreatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereExpiryDate($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereId($value)
@@ -36,6 +37,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereQuantity($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereRemainingQuantity($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereSalePrice($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereSalePriceStockingUnit($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereTotalCost($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereUnitCost($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereUpdatedAt($value)

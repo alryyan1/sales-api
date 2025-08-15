@@ -5,6 +5,40 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
+/**
+ * @property int $id
+ * @property string $name
+ * @property string $phone_number
+ * @property string $report_type
+ * @property \Illuminate\Support\Carbon $schedule_time
+ * @property bool $is_active
+ * @property array|null $days_of_week
+ * @property string|null $notes
+ * @property \Illuminate\Support\Carbon|null $last_sent_at
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property-read string $formatted_days_of_week
+ * @property-read string $formatted_schedule_time
+ * @property-read string $report_type_label
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler active()
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler forDayOfWeek($dayOfWeek)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler forReportType($reportType)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler query()
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereDaysOfWeek($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereIsActive($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereLastSentAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereName($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereNotes($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler wherePhoneNumber($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereReportType($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereScheduleTime($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|WhatsAppScheduler whereUpdatedAt($value)
+ * @mixin \Eloquent
+ */
 class WhatsAppScheduler extends Model
 {
     use HasFactory;

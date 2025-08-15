@@ -13,7 +13,7 @@ class PaymentResource extends JsonResource {
             'payment_date' => $this->payment_date->format('Y-m-d'),
             'reference_number' => $this->reference_number,
             'notes' => $this->notes,
-            'created_at' => $this->created_at->toISOString(),
+            'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
         ];
     }
 }

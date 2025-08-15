@@ -5,12 +5,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * 
- *
  * @property int $id
  * @property int $sale_id
  * @property int|null $user_id
- * @property string $method
+ * @property string|null $method
  * @property string $amount
  * @property \Illuminate\Support\Carbon $payment_date
  * @property string|null $reference_number

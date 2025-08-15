@@ -12,16 +12,31 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $id
  * @property int $supplier_id
  * @property int $user_id
- * @property decimal $amount
+ * @property string $amount
  * @property string $type
  * @property string $method
  * @property string|null $reference_number
  * @property string|null $notes
- * @property string $payment_date
+ * @property \Illuminate\Support\Carbon $payment_date
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property-read \App\Models\Supplier $supplier
  * @property-read \App\Models\User $user
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment query()
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereAmount($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereMethod($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereNotes($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment wherePaymentDate($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereReferenceNumber($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereSupplierId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereType($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereUpdatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SupplierPayment whereUserId($value)
+ * @mixin \Eloquent
  */
 class SupplierPayment extends Model
 {

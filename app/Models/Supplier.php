@@ -8,8 +8,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany; // Import HasMany
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 /**
- * 
- *
  * @property int $id
  * @property string $name
  * @property string|null $contact_person
@@ -18,6 +16,9 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
  * @property string|null $address
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property-read float $total_owed
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\SupplierPayment> $payments
+ * @property-read int|null $payments_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Purchase> $purchases
  * @property-read int|null $purchases_count
  * @method static \Database\Factories\SupplierFactory factory($count = null, $state = [])

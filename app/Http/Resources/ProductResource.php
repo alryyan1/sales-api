@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Http\Resources\PurchaseItemResource;
 
 class ProductResource extends JsonResource
 {
@@ -30,8 +31,8 @@ class ProductResource extends JsonResource
             'units_per_stocking_unit' => (int) $this->units_per_stocking_unit,
             'stock_quantity' => (int) $this->stock_quantity, // Total in sellable units
             'stock_alert_level' => $this->stock_alert_level, // In sellable units
-            'created_at' => $this->created_at->toISOString(),
-            'updated_at' => $this->updated_at->toISOString(),
+            'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
+            'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null,
             
             'latest_cost_per_sellable_unit' => $this->latest_cost_per_sellable_unit ?? null,
             'suggested_sale_price_per_sellable_unit' => $this->suggested_sale_price_per_sellable_unit ?? null,

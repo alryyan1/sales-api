@@ -7,8 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * 
- *
  * @property int $id
  * @property int $sale_id
  * @property int $product_id
@@ -17,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $quantity
  * @property string $unit_price
  * @property string $total_price
+ * @property string $cost_price_at_sale
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property-read \App\Models\Product $product
@@ -27,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @method static \Illuminate\Database\Eloquent\Builder|SaleItem newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder|SaleItem query()
  * @method static \Illuminate\Database\Eloquent\Builder|SaleItem whereBatchNumberSold($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|SaleItem whereCostPriceAtSale($value)
  * @method static \Illuminate\Database\Eloquent\Builder|SaleItem whereCreatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder|SaleItem whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|SaleItem whereProductId($value)

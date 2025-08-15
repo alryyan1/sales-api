@@ -125,7 +125,7 @@ class PurchaseController extends Controller
 
                     $quantityInStockingUnits = $itemData['quantity'];
                     $unitCostPerStockingUnit = $itemData['unit_cost'];
-                    $totalCostForStockingUnits = $quantityInStockingUnits * $unitCostPerStockingUnit;
+                    $totalCostForStockingUnits = $quantityInStockingUnits * $unitsPerStockingUnit;
 
                     // Calculate values in sellable units
                     $totalSellableUnitsPurchased = $quantityInStockingUnits * $unitsPerStockingUnit;
@@ -136,8 +136,8 @@ class PurchaseController extends Controller
                     $purchase->items()->create([
                         'product_id' => $product->id,
                         'batch_number' => $itemData['batch_number'] ?? null,
-                        'quantity' => $quantityInStockingUnits,          // Store original purchased qty in stocking units
-                        'remaining_quantity' => $totalSellableUnitsPurchased, // Store remaining in SELLABLE units
+                        'quantity' => $quantityInStockingUnits ,          // Store original purchased qty in stocking units
+                        'remaining_quantity' => $totalSellableUnitsPurchased , // Store remaining in SELLABLE units
                         'unit_cost' => $unitCostPerStockingUnit,        // Store cost per STOCKING unit
                         'cost_per_sellable_unit' => $costPerSellableUnit, // Store cost per SELLABLE unit
                         'total_cost' => $totalCostForStockingUnits,     // Total cost for this line
@@ -163,9 +163,19 @@ class PurchaseController extends Controller
         } catch (ValidationException $e) {
             Log::warning("Purchase creation validation failed: " . json_encode($e->errors()));
             return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Check for unique constraint violation error code (MySQL: 1062)
+            $errorCode = $e->errorInfo[1] ?? null;
+            if ($errorCode == 1062 || (str_contains($e->getMessage(), 'Duplicate entry') && str_contains($e->getMessage(), 'purchase_items_purchase_product_unique'))) {
+                Log::warning("Attempted to create purchase with duplicate product items.");
+                return response()->json(['message' => 'Cannot create purchase: One or more products are duplicated. Each product can only be added once per purchase.'], 409); // 409 Conflict
+            }
+            // Log other database errors
+            Log::error("Database error during purchase creation: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to create purchase due to a database error.'], 500);
         } catch (\Throwable $e) {
             Log::error("Purchase creation critical error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-            return response()->json(['message' => 'Failed to create purchase. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+            return response()->json(['message' => 'An unexpected error occurred while creating the purchase.'], 500);
         }
     }
 
@@ -290,17 +300,34 @@ class PurchaseController extends Controller
 
         try {
             DB::transaction(function () use ($purchase, $validatedData) {
+                // Load product to access units per stocking unit
+                $product = Product::findOrFail($validatedData['product_id']);
+
+                $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
+
+                $quantityInStockingUnits = (int) $validatedData['quantity'];
+                $unitCostPerStockingUnit = (float) $validatedData['unit_cost'];
+                $totalCostForStockingUnits = $quantityInStockingUnits * $unitCostPerStockingUnit;
+
+                // Convert to sellable units for remaining quantity
+                $totalSellableUnitsPurchased = $quantityInStockingUnits * $unitsPerStockingUnit;
+                $costPerSellableUnit = $unitsPerStockingUnit > 0
+                    ? $unitCostPerStockingUnit / $unitsPerStockingUnit
+                    : 0;
+
                 // Create the purchase item
                 $purchaseItem = $purchase->items()->create([
-                    'product_id' => $validatedData['product_id'],
+                    'product_id' => $product->id,
                     'batch_number' => $validatedData['batch_number'] ?? null,
-                    'quantity' => $validatedData['quantity'],
-                    'unit_cost' => $validatedData['unit_cost'],
-                    'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'], // Calculate total cost
+                    'quantity' => $quantityInStockingUnits,
+                    'unit_cost' => $unitCostPerStockingUnit,
+                    'total_cost' => $totalCostForStockingUnits,
+                    'cost_per_sellable_unit' => $costPerSellableUnit,
                     'sale_price' => $validatedData['sale_price'],
                     'sale_price_stocking_unit' => $validatedData['sale_price_stocking_unit'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
-                    'remaining_quantity' => $validatedData['quantity'], // Initially, remaining = total quantity
+                    // Remaining must be in SELLABLE units: stocking qty * units_per_stocking_unit
+                    'remaining_quantity' => $totalSellableUnitsPurchased,
                 ]);
 
                 // Update purchase total amount
@@ -309,9 +336,19 @@ class PurchaseController extends Controller
 
             $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
             return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
-        } catch (\Exception $e) {
-            Log::error('Failed to add purchase item: ' . $e->getMessage());
-            return response()->json(['message' => 'Failed to add purchase item: ' . $e->getMessage()], 500);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Check for unique constraint violation error code (MySQL: 1062)
+            $errorCode = $e->errorInfo[1] ?? null;
+            if ($errorCode == 1062 || (str_contains($e->getMessage(), 'Duplicate entry') && str_contains($e->getMessage(), 'purchase_items_purchase_product_unique'))) {
+                Log::warning("Attempted to add duplicate purchase item for purchase ID {$purchase->id} and product ID {$validatedData['product_id']}.");
+                return response()->json(['message' => 'This product is already added to this purchase. Each product can only be added once per purchase.'], 409); // 409 Conflict
+            }
+            // Log other database errors
+            Log::error("Error adding purchase item for purchase ID {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to add purchase item due to a database error.'], 500);
+        } catch (\Throwable $e) {
+            Log::error("Unexpected error adding purchase item for purchase ID {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'An unexpected error occurred while adding the purchase item.'], 500);
         }
     }
 
@@ -337,7 +374,11 @@ class PurchaseController extends Controller
         try {
             DB::transaction(function () use ($purchase, $purchaseItem, $validatedData) {
                 // Calculate the difference in quantity for stock adjustment
-                $quantityDifference = $validatedData['quantity'] - $purchaseItem->quantity;
+                $quantityDifference = (int)$validatedData['quantity'] - (int)$purchaseItem->quantity;
+                // Recalculate remaining quantity in SELLABLE units based on product units_per_stocking_unit
+                $product = Product::findOrFail($validatedData['product_id']);
+                $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
+                $newRemainingSellable = (int)$validatedData['quantity'] * $unitsPerStockingUnit;
                 
                 // Update the purchase item
                 $purchaseItem->update([
@@ -348,7 +389,8 @@ class PurchaseController extends Controller
                     'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'], // Recalculate total cost
                     'sale_price' => $validatedData['sale_price'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
-                    'remaining_quantity' => $purchaseItem->remaining_quantity + $quantityDifference, // Adjust remaining quantity
+                    // Store remaining in SELLABLE units (stocking qty * units_per_stocking_unit)
+                    'remaining_quantity' => $newRemainingSellable,
                 ]);
 
                 // Update purchase total amount
@@ -357,9 +399,19 @@ class PurchaseController extends Controller
 
             $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
             return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
-        } catch (\Exception $e) {
-            Log::error('Failed to update purchase item: ' . $e->getMessage());
-            return response()->json(['message' => 'Failed to update purchase item: ' . $e->getMessage()], 500);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Check for unique constraint violation error code (MySQL: 1062)
+            $errorCode = $e->errorInfo[1] ?? null;
+            if ($errorCode == 1062 || (str_contains($e->getMessage(), 'Duplicate entry') && str_contains($e->getMessage(), 'purchase_items_purchase_product_unique'))) {
+                Log::warning("Attempted to update purchase item ID {$purchaseItem->id} to duplicate product ID {$validatedData['product_id']} for purchase ID {$purchase->id}.");
+                return response()->json(['message' => 'This product is already added to this purchase. Each product can only be added once per purchase.'], 409); // 409 Conflict
+            }
+            // Log other database errors
+            Log::error("Error updating purchase item ID {$purchaseItem->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to update purchase item due to a database error.'], 500);
+        } catch (\Throwable $e) {
+            Log::error("Unexpected error updating purchase item ID {$purchaseItem->id}: " . $e->getMessage());
+            return response()->json(['message' => 'An unexpected error occurred while updating the purchase item.'], 500);
         }
     }
 
@@ -384,9 +436,20 @@ class PurchaseController extends Controller
 
             $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
             return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
-        } catch (\Exception $e) {
-            Log::error('Failed to delete purchase item: ' . $e->getMessage());
-            return response()->json(['message' => 'Failed to delete purchase item: ' . $e->getMessage()], 500);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Check for foreign key constraint violation error code (varies by DB)
+            // MySQL: 1451, PostgreSQL: 23503, SQLite: 19 (SQLITE_CONSTRAINT)
+            $errorCode = $e->errorInfo[1] ?? null;
+            if ($errorCode == 1451 || $errorCode == 23503 || (str_contains($e->getMessage(), 'FOREIGN KEY constraint failed'))) {
+                Log::warning("Attempted to delete PurchaseItem ID {$purchaseItem->id} with existing sales records.");
+                return response()->json(['message' => 'Cannot delete this purchase item because it is connected to sales records. Please delete the related sales first.'], 409); // 409 Conflict
+            }
+            // Log other database errors
+            Log::error("Error deleting purchase item ID {$purchaseItem->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to delete purchase item due to a database error.'], 500);
+        } catch (\Throwable $e) {
+            Log::error("Unexpected error deleting purchase item ID {$purchaseItem->id}: " . $e->getMessage());
+            return response()->json(['message' => 'An unexpected error occurred while deleting the purchase item.'], 500);
         }
     }
 
@@ -500,6 +563,26 @@ class PurchaseController extends Controller
                 'errorDetails' => $result['errorDetails'] ?? []
             ]);
             
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Check for unique constraint violation error code (MySQL: 1062)
+            $errorCode = $e->errorInfo[1] ?? null;
+            if ($errorCode == 1062 || (str_contains($e->getMessage(), 'Duplicate entry') && str_contains($e->getMessage(), 'purchase_items_purchase_product_unique'))) {
+                \Log::warning("Attempted to import purchase items with duplicate products for purchase ID {$purchaseId}.");
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Import failed: One or more products in the file are already added to this purchase. Each product can only be added once per purchase.'
+                ], 409); // 409 Conflict
+            }
+            // Log other database errors
+            \Log::error('Purchase items import database error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error processing import due to a database error.'
+            ], 500);
         } catch (\Exception $e) {
             \Log::error('Purchase items import failed', [
                 'error' => $e->getMessage(),

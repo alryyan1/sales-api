@@ -34,8 +34,8 @@ class SaleResource extends JsonResource
             'discount_amount' => $this->discount_amount,
             'discount_type' => $this->discount_type,
             'notes' => $this->notes,
-            'created_at' => $this->created_at->toISOString(),
-            'updated_at' => $this->updated_at->toISOString(), // Include if needed
+            'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
+            'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null, // Include if needed
 
             // Conditionally include sale items
             'items' => SaleItemResource::collection($this->whenLoaded('items')),

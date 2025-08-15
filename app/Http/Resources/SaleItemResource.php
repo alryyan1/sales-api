@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Http\Resources\ProductResource;
 
 class SaleItemResource extends JsonResource
 {
@@ -32,8 +33,8 @@ class SaleItemResource extends JsonResource
             'max_returnable_quantity' => $this->when(isset($this->max_returnable_quantity), function () {
                 return $this->max_returnable_quantity;
             }),
-            // If you want to include the full ProductResource when 'product' is loaded:
-            // 'product' => new ProductResource($this->whenLoaded('product')),
+            // Include the full ProductResource when 'product' is loaded:
+            'product' => new ProductResource($this->whenLoaded('product')),
 
             'purchase_item_id' => $this->purchase_item_id, // ID of the batch it was sold from
 
@@ -68,8 +69,8 @@ class SaleItemResource extends JsonResource
             'total_price' => $this->total_price, // quantity * unit_price (already cast in model)
             'cost_price_at_sale' => $this->cost_price_at_sale, // Cost per sellable unit at sale time
 
-            'created_at' => $this->created_at?->toISOString(), // Optional: if needed by frontend
-            'updated_at' => $this->updated_at?->toISOString(), // Optional: if needed by frontend
+            'created_at' => $this->created_at ? $this->created_at->toISOString() : null, // Optional: if needed by frontend
+            'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null, // Optional: if needed by frontend
         ];
     }
 }

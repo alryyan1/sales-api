@@ -32,8 +32,8 @@ Route::middleware('guest.access')->group(function () {
     // Products Excel Export Route
     Route::get('/products/export/excel', [ProductController::class, 'exportExcel']);
 
-    // Purchase PDF Export Route
-    Route::get('/purchases/{purchase}/export/pdf', [PurchaseController::class, 'exportPdf']);
+    // Purchase PDF Export Route (named for inline display in controller)
+    Route::get('/purchases/{purchase}/export/pdf', [PurchaseController::class, 'exportPdf'])->name('purchases.exportPdf');
 
     // Purchase Excel Export Route
     Route::get('/purchases/export/excel', [PurchaseController::class, 'exportExcel']);

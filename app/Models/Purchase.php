@@ -8,8 +8,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
 use Illuminate\Database\Eloquent\Relations\HasMany;   // Import relationship type
 
 /**
- * 
- *
  * @property int $id
  * @property int|null $supplier_id
  * @property int|null $user_id
