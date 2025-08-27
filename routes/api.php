@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{
   AuthController,
   BackupController,
+  ExpenseCategoryController,
+  ExpenseController,
   CategoryController,
   ClientController,
   DashboardController,
@@ -105,6 +107,9 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::middleware(['role:admin'])->prefix('admin')->name('api.admin.')->group(function () {
     Route::apiResource('users', UserController::class);
     Route::apiResource('categories', CategoryController::class);
+    // Expenses Management
+    Route::apiResource('expense-categories', ExpenseCategoryController::class);
+    Route::apiResource('expenses', ExpenseController::class);
     Route::apiResource('roles', RoleController::class);
 
     Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
