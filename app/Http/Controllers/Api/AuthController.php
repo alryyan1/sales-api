@@ -52,17 +52,17 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $request->validate([
-            'email' => ['required', 'string', 'email'],
+            'username' => ['required', 'string'],
             'password' => ['required', 'string'],
         ]);
 
-        // Attempt to find the user by email
-        $user = User::where('email', $request->email)->first();
+        // Attempt to find the user by username
+        $user = User::where('username', $request->username)->first();
 
         // Check if user exists and password is correct
         if (!$user || !Hash::check($request->password, $user->password)) {
             throw ValidationException::withMessages([
-                'email' => [__('auth.failed')],
+                'username' => [__('auth.failed')],
             ]);
         }
 
