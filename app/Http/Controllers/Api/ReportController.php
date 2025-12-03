@@ -287,25 +287,7 @@ class ReportController extends Controller
         $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
         $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
 
-        // --- 1. Get Daily Sales Totals ---
-        $dailySalesQuery = Sale::query()
-            ->select(
-                DB::raw("DATE(COALESCE(sale_date, created_at)) as sale_day"),
-                DB::raw('SUM(total_amount) as daily_total_revenue'),
-                DB::raw('SUM(paid_amount) as daily_total_paid') // Sum of initial paid amounts on Sale record
-            )
-            ->whereBetween(DB::raw("DATE(COALESCE(sale_date, created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
-            ->whereIn('status', ['completed', 'pending', 'draft']); // Include drafts created today
-
-        // if (!empty($validated['client_id'])) { $dailySalesQuery->where('client_id', $validated['client_id']); }
-        // if (!empty($validated['user_id'])) { $dailySalesQuery->where('user_id', $validated['user_id']); }
-
-        $dailySales = $dailySalesQuery->groupBy('sale_day')
-            ->orderBy('sale_day', 'asc')
-            ->get()
-            ->keyBy('sale_day'); // Key by date for easy merging
-
-        // --- 2. Get Daily Payments by Method ---
+        // --- 1. Get Daily Payments by Method (now primary revenue source) ---
         // This query sums payments made ON a specific day, regardless of when the sale was made,
         // but linked to sales within the requested month for context OR sales made by a specific user.
         // For a pure revenue report based on SALE DATE, it's better to sum payments linked to sales *made* in that period.
@@ -321,7 +303,7 @@ class ReportController extends Controller
             ->whereBetween('payments.payment_date', [$startDate, $endDate]) // Payment also in this month
             // Option B: All payments made within the month, regardless of sale date (cash flow focused)
             // ->whereBetween('payments.payment_date', [$startDate, $endDate])
-            ->whereIn('sales.status', ['completed', 'pending', 'draft']);
+            ;
 
 
         // if (!empty($validated['client_id'])) { $dailyPaymentsQuery->where('sales.client_id', $validated['client_id']); }
@@ -341,7 +323,7 @@ class ReportController extends Controller
             });
 
 
-        // --- 3. Combine Data for Each Day of the Month ---
+        // --- 2. Combine Data for Each Day of the Month ---
         $report = [];
         $currentDay = $startDate->copy();
         $monthSummary = [
@@ -352,14 +334,11 @@ class ReportController extends Controller
 
         while ($currentDay->lte($endDate)) {
             $dayStr = $currentDay->toDateString();
-            $saleDataForDay = $dailySales->get($dayStr);
             $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]); // Ensure it's a collection or empty array
-
-            $dailyRevenue = $saleDataForDay ? (float) $saleDataForDay->daily_total_revenue : 0;
-            $dailyPaidOnSale = $saleDataForDay ? (float) $saleDataForDay->daily_total_paid : 0; // From Sale record
-
-            // Sum payments for this day from the payments query
+            // Revenue is now based purely on payments recorded on that day
             $dailyTotalPaymentsFromPaymentsTable = $paymentsForDay->sum();
+            $dailyRevenue = $dailyTotalPaymentsFromPaymentsTable;
+            $dailyPaidOnSale = $dailyTotalPaymentsFromPaymentsTable;
 
             $report[$dayStr] = [
                 'date' => $dayStr,

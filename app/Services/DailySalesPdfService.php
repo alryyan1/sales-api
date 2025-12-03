@@ -98,7 +98,9 @@ class DailySalesPdfService
     private function calculateSummary($sales): array
     {
         $totalSales = $sales->count();
-        $totalAmount = $sales->sum('total_amount');
+        $totalAmount = $sales->sum(function ($sale) {
+            return (float) $sale->items->sum('total_price');
+        });
         $totalPaid = 0;
         $totalDiscount = $sales->sum(function ($sale) {
             return (float) ($sale->discount_amount ?? 0);

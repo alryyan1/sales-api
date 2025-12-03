@@ -183,9 +183,6 @@ public function index(Request $request)
                         'reference_number' => 'REFUND-' . $saleReturnHeader->id,
                         'notes' => "Refund for sale return #{$saleReturnHeader->id}",
                     ]);
-                    
-                    // Update the original sale's paid_amount
-                    $originalSale->increment('paid_amount', -$validatedData['refunded_amount']);
                 }
                 
                 $saleReturnHeader->save();

@@ -28,13 +28,24 @@ class DashboardController extends Controller
         $startOfYear = Carbon::now()->startOfYear();
 
         // --- Calculate Sales Stats ---
-        // Using query builder with sum for performance
-        $salesToday = Sale::whereDate('sale_date', $today)->sum('total_amount');
-        $salesYesterday = Sale::whereDate('sale_date', $yesterday)->sum('total_amount');
-        $salesThisWeek = Sale::whereDate('sale_date', '>=', $startOfWeek)->sum('total_amount');
-        $salesThisMonth = Sale::whereDate('sale_date', '>=', $startOfMonth)->sum('total_amount');
-        $salesThisYear = Sale::whereDate('sale_date', '>=', $startOfYear)->sum('total_amount');
-        $totalSalesAmount = Sale::sum('total_amount'); // Overall total
+        // Sum of item totals (sale_items.total_price) grouped by sale_date ranges
+        $salesToday = Sale::whereDate('sale_date', $today)
+            ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+            ->sum('sale_items.total_price');
+        $salesYesterday = Sale::whereDate('sale_date', $yesterday)
+            ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+            ->sum('sale_items.total_price');
+        $salesThisWeek = Sale::whereDate('sale_date', '>=', $startOfWeek)
+            ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+            ->sum('sale_items.total_price');
+        $salesThisMonth = Sale::whereDate('sale_date', '>=', $startOfMonth)
+            ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+            ->sum('sale_items.total_price');
+        $salesThisYear = Sale::whereDate('sale_date', '>=', $startOfYear)
+            ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+            ->sum('sale_items.total_price');
+        $totalSalesAmount = Sale::join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+            ->sum('sale_items.total_price'); // Overall total
 
         // Count sales records
         $salesTodayCount = Sale::whereDate('sale_date', $today)->count();
@@ -117,10 +128,11 @@ class DashboardController extends Controller
 
         // Sales for the current authenticated user for today
         $salesQuery = Sale::where('user_id', $user->id)
-            ->whereDate('sale_date', $today) // Sales CREATED today
-            ->whereIn('status', ['completed', 'pending']);
+            ->whereDate('sale_date', $today); // Sales CREATED today
 
-        $salesTodayAmount = $salesQuery->clone()->sum('total_amount');
+        $salesTodayAmount = $salesQuery->clone()
+            ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+            ->sum('sale_items.total_price');
         $salesTodayCount = $salesQuery->clone()->count();
 
         // --- New: Payments by Method for Today ---

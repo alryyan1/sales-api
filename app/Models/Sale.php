@@ -14,12 +14,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int|null $user_id
  * @property \Illuminate\Support\Carbon $sale_date
  * @property string|null $invoice_number
- * @property string $total_amount
- * @property string $subtotal
- * @property string $discount_amount
+ * @property string|null $discount_amount
  * @property string|null $discount_type
- * @property string $paid_amount
- * @property string $status
  * @property string|null $notes
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
@@ -61,13 +57,10 @@ class Sale extends Model
     protected $fillable = [
         'client_id',
         'user_id',
+        'shift_id',
         'sale_date',
         'invoice_number',
-        'total_amount', // Usually calculated, but make fillable
-        'paid_amount',
-        'status',
         'notes',
-        'subtotal',
         'discount_amount',
         'discount_type',
         'sale_order_number',
@@ -75,9 +68,6 @@ class Sale extends Model
 
     protected $casts = [
         'sale_date' => 'date',
-        'total_amount' => 'decimal:2',
-        'paid_amount' => 'decimal:2',
-        'subtotal' => 'decimal:2',
         'discount_amount' => 'decimal:2',
     ];
 
@@ -95,6 +85,14 @@ class Sale extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Get the shift associated with this sale.
+     */
+    public function shift(): BelongsTo
+    {
+        return $this->belongsTo(Shift::class);
     }
 
     /**
@@ -125,6 +123,7 @@ class Sale extends Model
 
     /**
      * Boot method to auto-generate sale_order_number
+     * Order numbers are unique per shift (shift_id + sale_order_number)
      */
     protected static function boot()
     {
@@ -132,11 +131,20 @@ class Sale extends Model
 
         static::creating(function ($sale) {
             if (empty($sale->sale_order_number)) {
-                // Get the next order number for today's date
+                // Get the next order number for the current shift
+                // If no shift_id, fall back to date-based numbering for backward compatibility
+                if ($sale->shift_id) {
+                    $maxOrderNumber = static::where('shift_id', $sale->shift_id)
+                        ->max('sale_order_number') ?? 0;
+                    $sale->sale_order_number = $maxOrderNumber + 1;
+                } else {
+                    // Fallback: use date-based numbering if no shift_id
                 $today = $sale->sale_date ?? now()->toDateString();
                 $maxOrderNumber = static::whereDate('sale_date', $today)
+                        ->whereNull('shift_id')
                     ->max('sale_order_number') ?? 0;
                 $sale->sale_order_number = $maxOrderNumber + 1;
+                }
             }
         });
     }
@@ -150,9 +158,10 @@ class Sale extends Model
     // Accessor for due amount
     public function getCalculatedDueAmountAttribute(): float
     {
-        $grossTotal = (float) ($this->total_amount ?? 0);
+        // Gross total is now derived from items
+        $itemsTotal = (float) $this->items()->sum('total_price');
         $discount = (float) ($this->discount_amount ?? 0);
         $paid = $this->getCalculatedPaidAmountAttribute();
-        return (float) ($grossTotal - $discount - $paid);
+        return (float) max(0, $itemsTotal - $discount - $paid);
     }
 }

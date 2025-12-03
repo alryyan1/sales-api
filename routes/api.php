@@ -27,7 +27,8 @@ use App\Http\Controllers\Api\{
   UnitController,
   UserController,
   WhatsAppController,
-  WhatsAppSchedulerController
+  WhatsAppSchedulerController,
+  ShiftController
 };
 use App\Http\Controllers\UpdateController;
 
@@ -45,6 +46,11 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Authentication --
   Route::get('/user', [AuthController::class, 'user'])->name('api.user');
   Route::post('/logout', [AuthController::class, 'logout'])->name('api.logout');
+
+  // -- Shifts (POS) --
+  Route::get('/shifts/current', [ShiftController::class, 'current'])->name('api.shifts.current');
+  Route::post('/shifts/open', [ShiftController::class, 'open'])->name('api.shifts.open');
+  Route::post('/shifts/close', [ShiftController::class, 'close'])->name('api.shifts.close');
 
   // -- Autocomplete Routes --
   Route::get('/products/autocomplete', [ProductController::class, 'autocomplete'])->name('api.products.autocomplete');

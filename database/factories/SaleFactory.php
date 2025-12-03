@@ -39,9 +39,6 @@ class SaleFactory extends Factory
             'user_id' => $user->id,
             'sale_date' => fake()->dateTimeBetween('-1 year', 'now')->format('Y-m-d'),
             'invoice_number' => 'INV-' . Str::upper(Str::random(8)),
-            'status' => fake()->randomElement(['completed', 'pending', 'draft']), // Defaulted to completed in migration
-            'total_amount' => 0.00, // Will be calculated in configure()
-            'paid_amount' => 0.00, // Default to 0, can be adjusted later if needed
             'notes' => fake()->optional(0.4)->sentence(),
         ];
     }
@@ -125,13 +122,7 @@ class SaleFactory extends Factory
                     }
 
 
-                    // Update the total_amount on the sale record
-                    $sale->total_amount = $totalSaleAmount;
-                    // Optionally update paid_amount for realism
-                    if ($sale->status === 'completed') {
-                         $sale->paid_amount = $totalSaleAmount * fake()->randomFloat(2, 0.7, 1.0); // 70-100% paid
-                    }
-                    $sale->save();
+                    // No need to update header totals; totals are now derived from items and payments.
 
                 }); // End DB::transaction
 

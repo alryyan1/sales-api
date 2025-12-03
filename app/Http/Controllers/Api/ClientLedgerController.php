@@ -49,13 +49,17 @@ class ClientLedgerController extends Controller
 
             // Build sale entries
             $saleEntries = $sales->map(function ($sale) {
+                // Compute sale total from items minus discount
+                $itemsTotal = (float) $sale->items->sum('total_price');
+                $discount = (float) ($sale->discount_amount ?? 0);
+                $saleTotal = max(0.0, $itemsTotal - $discount);
                 return [
                     'id' => 'sale_' . $sale->id,
                     'sale_id' => $sale->id,
                     'date' => $sale->sale_date,
                     'type' => 'sale',
                     'description' => 'Sale #' . $sale->id,
-                    'debit' => (float) $sale->total_amount,
+                    'debit' => $saleTotal,
                     'credit' => 0,
                     'balance' => null,
                     'reference' => $sale->invoice_number,
@@ -86,7 +90,11 @@ class ClientLedgerController extends Controller
                 ['created_at', 'desc'],
             ]);
 
-            $totalSales = (float) $sales->sum('total_amount');
+            $totalSales = (float) $sales->sum(function ($sale) {
+                $itemsTotal = (float) $sale->items->sum('total_price');
+                $discount = (float) ($sale->discount_amount ?? 0);
+                return max(0.0, $itemsTotal - $discount);
+            });
             $totalPayments = (float) $payments->sum('credit');
             $balance = $totalSales - $totalPayments;
 
@@ -136,9 +144,8 @@ class ClientLedgerController extends Controller
                 $paymentsCreated = 0;
                 $affectedSales = [];
 
-                // Fetch unpaid sales ordered by oldest first (by sale_date then created_at)
+                // Fetch sales ordered by oldest first (by sale_date then created_at)
                 $sales = Sale::where('client_id', $client->id)
-                    ->whereRaw('(total_amount - paid_amount) > 0')
                     ->orderBy('sale_date', 'asc')
                     ->orderBy('created_at', 'asc')
                     ->lockForUpdate()
@@ -146,7 +153,9 @@ class ClientLedgerController extends Controller
 
                 foreach ($sales as $sale) {
                     if ($remaining <= 0) break;
-                    $due = (float) $sale->total_amount - (float) $sale->paid_amount;
+                    // Load relationships to compute due from items/discount/payments
+                    $sale->loadMissing('items', 'payments');
+                    $due = (float) $sale->calculated_due_amount;
                     if ($due <= 0) continue;
 
                     $apply = min($due, $remaining);

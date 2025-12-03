@@ -97,4 +97,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(Purchase::class); // Assumes user_id foreign key in purchases
     }
+
+    public function shifts(): HasMany
+    {
+        return $this->hasMany(Shift::class);
+    }
+
+    public function shiftsClosed(): HasMany
+    {
+        return $this->hasMany(Shift::class, 'closed_by_user_id');
+    }
 }

@@ -8,6 +8,7 @@ use App\Models\Sale;
 use App\Models\SaleItem; // Though items are created via relationship
 use App\Models\Product;
 use App\Models\PurchaseItem; // Needed for batch selection
+use App\Models\Shift;
 use App\Services\WhatsAppService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -35,11 +36,7 @@ class SaleController extends Controller
                     ->orWhereHas('client', fn($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
             });
         }
-        if ($status = $request->input('status')) {
-            if (in_array($status, ['completed', 'pending', 'draft', 'cancelled'])) {
-                $query->where('status', $status);
-            }
-        }
+        // Status filtering removed because the status column was dropped.
         if ($request->boolean('today_only')) {
             $query->whereDate('sale_date', Carbon::today());
             // For today's sales, load items and payments and return all without pagination
@@ -146,17 +143,26 @@ class SaleController extends Controller
         ]);
 
         try {
-            $sale = DB::transaction(function () use ($validatedData, $request) {
-                // Create sale header with draft status
+            // Check for open shift before transaction
+            $currentShift = Shift::where('user_id', $request->user()->id)
+                ->whereNull('closed_at')
+                ->orderBy('id', 'desc')
+                ->first();
+            
+            if (!$currentShift) {
+                return response()->json([
+                    'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
+                ], Response::HTTP_BAD_REQUEST);
+            }
+
+            $sale = DB::transaction(function () use ($validatedData, $request, $currentShift) {
+                // Create sale header (status column was removed)
                 $saleHeader = Sale::create([
                     'client_id' => $validatedData['client_id'],
                     'user_id' => $request->user()->id,
+                    'shift_id' => $currentShift->id,
                     'sale_date' => $validatedData['sale_date'],
                     'invoice_number' => null, // Will be generated when completed
-                    'status' => 'draft',
-                    'total_amount' => 0,
-                    'paid_amount' => 0,
-                    'due_amount' => 0,
                     'notes' => $validatedData['notes'] ?? null,
                 ]);
 
@@ -174,7 +180,25 @@ class SaleController extends Controller
             return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
         } catch (\Throwable $e) {
             Log::error("Empty sale creation error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-            return response()->json(['message' => 'Failed to create empty sale. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+            $payload = [
+                'message' => 'Failed to create empty sale. ' . $e->getMessage(),
+            ];
+            
+            if (config('app.debug')) {
+                $payload['exception'] = class_basename($e);
+                $payload['file'] = $e->getFile();
+                $payload['line'] = $e->getLine();
+                $payload['trace'] = collect($e->getTrace())->take(5)->map(function ($trace) {
+                    return [
+                        'file' => $trace['file'] ?? null,
+                        'line' => $trace['line'] ?? null,
+                        'function' => $trace['function'] ?? null,
+                        'class' => $trace['class'] ?? null,
+                    ];
+                })->toArray();
+            }
+            
+            return response()->json($payload, Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -199,16 +223,7 @@ class SaleController extends Controller
                 // --- Calculate Total Sale Amount from items in THIS request ---
                 $newTotalSaleAmount = 0;
                 $this->processSaleItems($validatedData, $saleHeader, $newTotalSaleAmount);
-                // 3. Final Update/Verification of Sale Header Total
-                // The $saleHeader->total_amount was already set using $calculatedTotalSaleAmountFromItems.
-                // $newTotalSaleAmount (sum of created sale_items.total_price) should match this.
-                // If they don't match, it indicates a potential issue in calculation logic.
-                if (abs($saleHeader->total_amount - $newTotalSaleAmount) > 0.001) { // Check with a small tolerance for float comparisons
-                    Log::error("SaleController@store: Discrepancy between initial total calculation and sum of sale items. Initial: {$saleHeader->total_amount}, Sum of Items: {$newTotalSaleAmount}. Sale ID: {$saleHeader->id}");
-                    // Optionally, you could update $saleHeader->total_amount to $newTotalSaleAmount here if you trust the item sum more,
-                    // or throw an exception. For now, we'll trust the initial calculation based on request data.
-                    // $saleHeader->total_amount = $newTotalSaleAmount; // If choosing to update
-                }
+                // 3. Final verification can compare against item totals if needed.
                 $this->createPaymentRecords($validatedData, $saleHeader, $request);
 
                 return $saleHeader;
@@ -241,7 +256,6 @@ class SaleController extends Controller
             'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
             'sale_date' => 'required|date_format:Y-m-d',
             'invoice_number' => 'nullable|string|max:255|unique:sales,invoice_number',
-            'status' => ['required', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'notes' => 'nullable|string|max:65535',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
@@ -272,12 +286,10 @@ class SaleController extends Controller
             return response()->json(['message' => 'Unauthenticated.'], Response::HTTP_UNAUTHORIZED);
         }
 
-        // Find the latest sale by this user with a 'completed' status
-        // Order by 'created_at' or 'id' to get the most recent. 'updated_at' if sales can be completed later.
+        // Find the latest sale by this user.
         $lastSale = Sale::where('user_id', $user->id)
-                        ->where('status', 'completed')
-                        ->orderBy('updated_at', 'desc') // Or 'created_at' or 'id'
-                        ->select('id') // Only need the ID
+                        ->orderBy('updated_at', 'desc')
+                        ->select('id')
                         ->first();
 
         if ($lastSale) {
@@ -310,7 +322,7 @@ class SaleController extends Controller
 
     private function calculateTotals(array $validatedData)
     {
-        // Calculate subtotal from items
+        // Calculate subtotal from items (not stored in DB anymore)
         $subtotal = 0;
         foreach ($validatedData['items'] as $itemData) {
             $subtotal += ($itemData['quantity'] * $itemData['unit_price']);
@@ -326,12 +338,8 @@ class SaleController extends Controller
             }
         }
 
-        // Calculate amount after discount
+        // Calculate amount after discount (net amount)
         $amountAfterDiscount = $subtotal - $discountAmount;
-
-        // Calculate final total to STORE in DB as GROSS (pre-discount)
-        // Note: We keep gross in total_amount and use discount_amount to derive net
-        $calculatedTotalSaleAmount = $subtotal;
 
         // Calculate total paid amount
         $calculatedTotalPaidAmount = 0;
@@ -347,7 +355,6 @@ class SaleController extends Controller
             'subtotal' => $subtotal,
             'discountAmount' => $discountAmount,
             'amountAfterDiscount' => $amountAfterDiscount,
-            'totalSaleAmount' => $calculatedTotalSaleAmount,
             'totalPaidAmount' => $calculatedTotalPaidAmount,
         ];
     }
@@ -363,19 +370,21 @@ class SaleController extends Controller
 
     private function createSaleHeader(array $validatedData, Request $request, array $calculatedTotals)
     {
+        // Get current user's open shift
+        $currentShift = Shift::where('user_id', $request->user()->id)
+            ->whereNull('closed_at')
+            ->orderBy('id', 'desc')
+            ->first();
+
         return Sale::create([
             'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
+            'shift_id' => $currentShift?->id,
             'sale_date' => $validatedData['sale_date'],
             'invoice_number' => $validatedData['invoice_number'] ?? null,
-            'status' => $validatedData['status'],
             'notes' => $validatedData['notes'] ?? null,
-            'subtotal' => $calculatedTotals['subtotal'],
             'discount_amount' => $calculatedTotals['discountAmount'],
             'discount_type' => $validatedData['discount_type'] ?? null,
-
-            'total_amount' => $calculatedTotals['totalSaleAmount'],
-            'paid_amount' => $calculatedTotals['totalPaidAmount'],
         ]);
     }
 
@@ -576,10 +585,11 @@ class SaleController extends Controller
         // For this simplified version, we only update header fields.
         // The frontend form should also restrict item editing for completed/non-draft sales.
         // Paid amount should not exceed net amount (gross - discount)
-        $currentNet = max(0, (float)($sale->total_amount ?? 0) - (float)($sale->discount_amount ?? 0));
+        // Calculate totals from items since they're no longer stored
+        $currentTotal = (float)$sale->items()->sum('total_price');
+        $discountAmount = (float)($sale->discount_amount ?? 0);
+        $currentNet = max(0, $currentTotal - $discountAmount);
         if (isset($validatedData['paid_amount']) && $validatedData['paid_amount'] > $currentNet) {
-            // If items are not editable, total_amount doesn't change.
-            // If total_amount could change, this check needs to be against the new net.
             throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed the net sale amount after discount.']]);
         }
 
@@ -605,10 +615,12 @@ class SaleController extends Controller
     public function destroy(Sale $sale)
     {
         try {
-            // Check if sale can be deleted (only draft or pending sales)
-            if ($sale->status === 'completed') {
+            // Note: status column no longer exists, so we can't check it
+            // Sales can be deleted if they have no payments or if business logic allows
+            // For now, allow deletion but warn if there are payments
+            if ($sale->payments()->count() > 0) {
                 return response()->json([
-                    'message' => 'Cannot delete completed sales. Consider creating a return instead.'
+                    'message' => 'Cannot delete sales with payments. Consider creating a return instead.'
                 ], Response::HTTP_FORBIDDEN);
             }
 
@@ -873,13 +885,11 @@ class SaleController extends Controller
 
                 $totalAfterDiscount = $subtotal - $discountValue;
 
-                // Persist changes
+                // Persist changes (only discount fields, totals computed from items)
                 $sale->update([
-                    'subtotal' => $subtotal,              // store the computed subtotal from items
                     'discount_amount' => $discountValue,  // absolute discount value
                     'discount_type' => $validated['discount_type'],
-                    'total_amount' => $subtotal,          // keep GROSS in DB
-                    // paid_amount unchanged; due = gross - discount - paid (via accessor)
+                    // total_amount, subtotal, paid_amount are computed, not stored
                 ]);
             });
 
@@ -976,10 +986,15 @@ class SaleController extends Controller
                 
                 if ($existingSaleItem) {
                     // Product already exists - do nothing
+                    // Calculate totals from items/payments
+                    $currentTotal = (float)$sale->items()->sum('total_price');
+                    $discountAmount = (float)($sale->discount_amount ?? 0);
+                    $paidAmount = (float)$sale->payments()->sum('amount');
+                    $dueAmount = max(0, $currentTotal - $discountAmount - $paidAmount);
                     return [
                         'sale_items' => [],
-                        'new_total' => $sale->total_amount,
-                        'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount),
+                        'new_total' => $currentTotal,
+                        'new_due_amount' => $dueAmount,
                         'product_already_exists' => true
                     ];
                 }
@@ -1107,14 +1122,16 @@ class SaleController extends Controller
                 $product->stock_quantity -= $validatedData['quantity'];
                 $product->save();
 
-                // Update sale totals
-                $sale->total_amount += ($validatedData['quantity'] * $resolvedUnitPrice);
-                $sale->save();
+                // Calculate totals from items (no longer stored in DB)
+                $newTotal = $sale->items()->sum('total_price');
+                $discountAmount = (float)($sale->discount_amount ?? 0);
+                $paidAmount = (float)$sale->payments()->sum('amount');
+                $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
 
                 return [
                     'sale_items' => $saleItems,
-                    'new_total' => $sale->total_amount,
-                    'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount)
+                    'new_total' => $newTotal,
+                    'new_due_amount' => $newDueAmount
                 ];
             });
 
@@ -1152,11 +1169,19 @@ class SaleController extends Controller
             Log::error('Failed to add sale item', [
                 'sale_id' => $sale->id,
                 'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString()
             ]);
-            return response()->json([
-                'message' => 'Failed to add sale item. Please try again.', 'error' => $e->getMessage()
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+            $payload = [
+                'message' => 'Failed to add sale item. Please try again.',
+                'error' => $e->getMessage()
+            ];
+            if (config('app.debug')) {
+                $payload['file'] = $e->getFile();
+                $payload['line'] = $e->getLine();
+            }
+            return response()->json($payload, Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -1284,14 +1309,16 @@ class SaleController extends Controller
                 $saleItem->total_price = $newQuantity * $validatedData['unit_price'];
                 $saleItem->save();
 
-                // Update sale totals
-                $sale->total_amount = $sale->items()->sum('total_price');
-                $sale->save();
+                // Calculate totals from items (no longer stored in DB)
+                $newTotal = $sale->items()->sum('total_price');
+                $discountAmount = (float)($sale->discount_amount ?? 0);
+                $paidAmount = (float)$sale->payments()->sum('amount');
+                $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
 
                 return [
                     'updated_item' => $saleItem,
-                    'new_total' => $sale->total_amount,
-                    'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount)
+                    'new_total' => $newTotal,
+                    'new_due_amount' => $newDueAmount
                 ];
             });
 
@@ -1384,11 +1411,8 @@ class SaleController extends Controller
                 $newSubtotal = $remainingItems->sum('total_price');
                 $newTotalAmount = $newSubtotal; // No tax calculation for now
                 
-                // Update sale totals (gross)
-                $sale->total_amount = $newTotalAmount;
-                $sale->paid_amount = $sale->payments->sum('amount');
-                // due_amount is calculated, not stored in database
-                $sale->save();
+                // Totals are calculated from items/payments, not stored in DB
+                // No need to update sale record
 
                 // Note: Sale status is not automatically changed when items are deleted
                 // The sale will maintain its current status regardless of item count
@@ -1404,8 +1428,7 @@ class SaleController extends Controller
                     'product_name' => $productName,
                     'returned_to_batch' => $purchaseItem ? $purchaseItem->batch_number : null,
                     'new_sale_total' => $newTotalAmount,
-                    'remaining_items_count' => $remainingItems->count(),
-                    'sale_status' => $sale->status
+                    'remaining_items_count' => $remainingItems->count()
                 ], Response::HTTP_OK);
 
             } catch (\Exception $e) {
@@ -1578,11 +1601,11 @@ class SaleController extends Controller
         $col1Width = array_sum($w_items) - $w_items[0]; // Width for labels
         $col2Width = $w_items[0]; // Width for amounts
 
-        // Compute totals using gross (total_amount) and discount
-        $subtotalValue = (float) ($sale->total_amount ?? 0);
+        // Compute totals from items and payments (no longer stored in DB)
+        $subtotalValue = (float) ($sale->items?->sum('total_price') ?? 0);
         $discountValue = (float) ($sale->discount_amount ?? 0);
         $netTotal = max(0, $subtotalValue - $discountValue);
-        $paidValue = (float) ($sale->paid_amount ?? 0);
+        $paidValue = (float) ($sale->payments?->sum('amount') ?? 0);
         $due = max(0, $netTotal - $paidValue);
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
@@ -1768,11 +1791,13 @@ class SaleController extends Controller
         $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
         $pdf->Ln(1);
 
-        // --- Totals --- (with discount) using gross total_amount and discount_amount
+        // --- Totals --- (with discount) computed from items and payments
         $itemsSubtotal = (float) ($sale->items?->sum('total_price') ?? 0);
-        $gross = (float) ($sale->total_amount ?? $itemsSubtotal);
+        $gross = $itemsSubtotal;
         $discountAmount = (float) ($sale->discount_amount ?? 0);
         $finalTotal = max(0, $gross - $discountAmount);
+        $paidAmount = (float) ($sale->payments?->sum('amount') ?? 0);
+        $due = max(0, $finalTotal - $paidAmount);
 
         $pdf->SetFont('dejavusans', 'B', 8);
         $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
@@ -1788,9 +1813,7 @@ class SaleController extends Controller
 
         $pdf->SetFont('dejavusans', '', 8);
         $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
-        $pdf->Cell(26, 5, number_format((float)$sale->paid_amount, 0), 0, 1, 'R');
-
-        $due = (float)$finalTotal - (float)$sale->paid_amount;
+        $pdf->Cell(26, 5, number_format($paidAmount, 0), 0, 1, 'R');
         $pdf->SetFont('dejavusans', 'B', 8);
         $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
         $pdf->Cell(26, 5, number_format($due, 0), 0, 1, 'R');
@@ -1857,7 +1880,6 @@ class SaleController extends Controller
         $userId = $request->input('user_id');
 
         $query = Sale::whereDate('sale_date', $date)
-            ->whereIn('status', ['completed', 'pending', 'draft']) // Include all relevant statuses
             ->with(['payments', 'user:id,name']);
 
         if ($userId) {
@@ -1871,12 +1893,11 @@ class SaleController extends Controller
             'date' => $date,
             'user_id' => $userId,
             'total_sales_found' => $sales->count(),
-            'sales_by_status' => $sales->groupBy('status')->map->count(),
             'sales_details' => $sales->map(function($sale) {
+                $totalAmount = (float)($sale->items?->sum('total_price') ?? 0);
                 return [
                     'id' => $sale->id,
-                    'status' => $sale->status,
-                    'total_amount' => $sale->total_amount,
+                    'total_amount' => $totalAmount,
                     'user_id' => $sale->user_id,
                     'user_name' => $sale->user?->name,
                     'payments_count' => $sale->payments->count(),
@@ -2039,9 +2060,6 @@ class SaleController extends Controller
                         // Update product stock
                         $product->stock_quantity -= $itemData['quantity'];
                         $product->save();
-
-                        // Update sale totals
-                        $sale->total_amount += ($itemData['quantity'] * $resolvedUnitPrice);
                         
                         $addedItems = array_merge($addedItems, $saleItems);
                         $totalAdded++;
@@ -2051,15 +2069,18 @@ class SaleController extends Controller
                     }
                 }
 
-                // Save the updated sale totals
-                $sale->save();
+                // Calculate totals from items (no longer stored in DB)
+                $newTotal = $sale->items()->sum('total_price');
+                $discountAmount = (float)($sale->discount_amount ?? 0);
+                $paidAmount = (float)$sale->payments()->sum('amount');
+                $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
 
                 return [
                     'added_items' => $addedItems,
                     'total_added' => $totalAdded,
                     'errors' => $errors,
-                    'new_total' => $sale->total_amount,
-                    'new_due_amount' => max(0, ($sale->total_amount - ($sale->discount_amount ?? 0)) - $sale->paid_amount)
+                    'new_total' => $newTotal,
+                    'new_due_amount' => $newDueAmount
                 ];
             });
 

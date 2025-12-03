@@ -29,8 +29,10 @@ class SaleResource extends JsonResource
 
             'sale_date' => $this->sale_date->format('Y-m-d'),
             'invoice_number' => $this->invoice_number,
-            'status' => $this->status,
-            'total_amount' => $this->total_amount, // Cast in model
+
+            // Computed financial fields
+            // total_amount is now derived from items (sum of total_price) for backward compatibility
+            'total_amount' => $this->items->sum('total_price'),
             'discount_amount' => $this->discount_amount,
             'discount_type' => $this->discount_type,
             'notes' => $this->notes,
@@ -39,8 +41,8 @@ class SaleResource extends JsonResource
 
             // Conditionally include sale items
             'items' => SaleItemResource::collection($this->whenLoaded('items')),
-            'paid_amount' => $this->getCalculatedPaidAmountAttribute(), // Use accessor
-            'due_amount' => $this->getCalculatedDueAmountAttribute(),   // Use accessor
+            'paid_amount' => $this->getCalculatedPaidAmountAttribute(), // computed from payments
+            'due_amount' => $this->getCalculatedDueAmountAttribute(),   // computed from items, discount, and payments
             'payments' => PaymentResource::collection($this->whenLoaded('payments')),
         ];
     }
