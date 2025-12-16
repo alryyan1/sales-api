@@ -34,7 +34,7 @@ class UserController extends Controller
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('username', 'like', "%{$search}%");
             });
         }
 
@@ -60,7 +60,7 @@ class UserController extends Controller
 
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users,email',
+            'username' => 'required|string|max:255|unique:users,username',
             'password' => ['required', 'string', Password::defaults(), 'confirmed'],
             'roles' => 'required|array', // Roles are required on creation
             'roles.*' => ['required', 'string', Rule::exists('roles', 'name')], // Validate each role name exists
@@ -71,9 +71,8 @@ class UserController extends Controller
                 // Create user
                 $user = User::create([
                     'name' => $validatedData['name'],
-                    'email' => $validatedData['email'],
+                    'username' => $validatedData['username'],
                     'password' => Hash::make($validatedData['password']),
-                    'email_verified_at' => now(), // Optionally verify immediately
                 ]);
 
 
@@ -115,11 +114,10 @@ class UserController extends Controller
 
         $validatedData = $request->validate([
             'name' => 'sometimes|required|string|max:255',
-            'email' => [
+            'username' => [
                 'sometimes',
                 'required',
                 'string',
-                'email',
                 'max:255',
                 Rule::unique('users')->ignore($user->id), // Ignore self for unique check
             ],
@@ -129,14 +127,8 @@ class UserController extends Controller
 
         try {
             $user = DB::transaction(function () use ($validatedData, $user, $request) {
-                $emailChanged = isset($validatedData['email']) && $user->email !== $validatedData['email'];
-
                 // Update basic fields
-                $user->fill(Arr::only($validatedData, ['name', 'email']));
-
-                if ($emailChanged) {
-                    $user->email_verified_at = null; // Mark as unverified if email changes
-                }
+                $user->fill(Arr::only($validatedData, ['name', 'username']));
                 // Prevent assigning roles if 'admin' is missing, but only for user with ID 1
                 if ($user->id === 1 && !in_array('admin', $validatedData['roles'])) {
                     throw new \Exception('The "admin" role cannot be removed for this user.');

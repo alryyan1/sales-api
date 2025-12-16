@@ -34,7 +34,7 @@ class DatabaseSeeder extends Seeder
             // Add other seeders here if needed
         ]);
         // Assign 'admin' role to the admin user AFTER roles are created
-        $adminUser = User::where('email', env('ADMIN_EMAIL', 'admin@example.com'))->first();
+        $adminUser = User::where('username', env('ADMIN_USERNAME', 'superadmin'))->first();
         if ($adminUser && !$adminUser->hasRole('admin')) {
             $adminUser->assignRole('admin');
             $this->command->info('Admin role assigned to admin user.');

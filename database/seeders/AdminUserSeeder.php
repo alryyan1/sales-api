@@ -20,16 +20,13 @@ class AdminUserSeeder extends Seeder
         // Superadmin user credentials
         $superadminName = 'Super Admin';
         $superadminUsername = 'superadmin';
-        $superadminEmail = 'superadmin@example.com';
         $superadminPassword = '12345678';
 
-        // Check if superadmin user already exists by username or email
-        $existingSuperadmin = User::where('username', $superadminUsername)
-            ->orWhere('email', $superadminEmail)
-            ->first();
+        // Check if superadmin user already exists by username
+        $existingSuperadmin = User::where('username', $superadminUsername)->first();
 
         if ($existingSuperadmin) {
-            $identifier = $existingSuperadmin->username ?? $existingSuperadmin->email;
+            $identifier = $existingSuperadmin->username;
             $this->command->warn("Superadmin user already exists ({$identifier}). Skipping creation.");
             Log::info("AdminUserSeeder: Superadmin user already exists ({$identifier}).");
             
@@ -51,8 +48,6 @@ class AdminUserSeeder extends Seeder
             $superadminUser = User::create([
                 'name' => $superadminName,
                 'username' => $superadminUsername,
-                'email' => $superadminEmail,
-                'email_verified_at' => now(),
                 'password' => Hash::make($superadminPassword),
             ]);
 
@@ -76,13 +71,11 @@ class AdminUserSeeder extends Seeder
 
             $this->command->info("✓ Superadmin user created successfully!");
             $this->command->line("  Username: {$superadminUsername}");
-            $this->command->line("  Email: {$superadminEmail}");
             $this->command->line("  Name: {$superadminName}");
             $this->command->line("  Password: {$superadminPassword}");
             
             Log::info("AdminUserSeeder: Superadmin user created successfully", [
                 'username' => $superadminUsername,
-                'email' => $superadminEmail,
             ]);
 
         } catch (\Exception $e) {

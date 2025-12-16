@@ -14,11 +14,89 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * @OA\Tag(
+ *     name="Products",
+ *     description="Product management endpoints"
+ * )
+ */
 class ProductController extends Controller
 {
     /**
-     * Display a listing of the products.
-     * Includes search, sorting, and pagination.
+     * @OA\Get(
+     *     path="/api/products",
+     *     summary="List all products",
+     *     description="Get a paginated list of products with optional filtering, searching, and sorting",
+     *     operationId="getProducts",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="search",
+     *         in="query",
+     *         description="Search by name, SKU, scientific name, or description",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="category_id",
+     *         in="query",
+     *         description="Filter by category ID",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="in_stock_only",
+     *         in="query",
+     *         description="Show only products with stock > 0",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Parameter(
+     *         name="low_stock_only",
+     *         in="query",
+     *         description="Show only products with stock at or below alert level",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Parameter(
+     *         name="out_of_stock_only",
+     *         in="query",
+     *         description="Show only products with stock <= 0",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Parameter(
+     *         name="sort_by",
+     *         in="query",
+     *         description="Sort field (name, sku, stock_quantity, created_at, updated_at)",
+     *         required=false,
+     *         @OA\Schema(type="string", default="created_at")
+     *     ),
+     *     @OA\Parameter(
+     *         name="sort_direction",
+     *         in="query",
+     *         description="Sort direction (asc, desc)",
+     *         required=false,
+     *         @OA\Schema(type="string", default="desc")
+     *     ),
+     *     @OA\Parameter(
+     *         name="per_page",
+     *         in="query",
+     *         description="Items per page",
+     *         required=false,
+     *         @OA\Schema(type="integer", default=15)
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Products retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="array", @OA\Items(type="object")),
+     *             @OA\Property(property="current_page", type="integer"),
+     *             @OA\Property(property="per_page", type="integer"),
+     *             @OA\Property(property="total", type="integer")
+     *         )
+     *     )
+     * )
      */
     public function index(Request $request)
     {
@@ -79,8 +157,45 @@ class ProductController extends Controller
     }
 
     /**
-     * Store a newly created product in storage.
-     * Purchase_price and sale_price are no longer stored directly on the product.
+     * @OA\Post(
+     *     path="/api/products",
+     *     summary="Create a new product",
+     *     description="Create a new product in the system",
+     *     operationId="createProduct",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"name", "stock_quantity"},
+     *             @OA\Property(property="name", type="string", example="Product Name", description="Product name"),
+     *             @OA\Property(property="scientific_name", type="string", nullable=true, example="Scientific Name", description="Scientific name"),
+     *             @OA\Property(property="sku", type="string", nullable=true, example="SKU123", description="Stock Keeping Unit (must be unique)"),
+     *             @OA\Property(property="description", type="string", nullable=true, example="Product description", description="Product description"),
+     *             @OA\Property(property="stock_quantity", type="integer", example=100, description="Initial stock quantity"),
+     *             @OA\Property(property="stock_alert_level", type="integer", nullable=true, example=10, description="Stock alert level"),
+     *             @OA\Property(property="category_id", type="integer", nullable=true, example=1, description="Category ID"),
+     *             @OA\Property(property="stocking_unit_id", type="integer", nullable=true, example=1, description="Stocking unit ID"),
+     *             @OA\Property(property="sellable_unit_id", type="integer", nullable=true, example=2, description="Sellable unit ID"),
+     *             @OA\Property(property="units_per_stocking_unit", type="integer", nullable=true, example=10, description="Units per stocking unit")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Product created successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="product", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="errors", type="object")
+     *         )
+     *     )
+     * )
      */
     public function store(Request $request)
     {
@@ -107,7 +222,32 @@ class ProductController extends Controller
     }
 
     /**
-     * Display the specified product.
+     * @OA\Get(
+     *     path="/api/products/{id}",
+     *     summary="Get a single product",
+     *     description="Retrieve details of a specific product by ID",
+     *     operationId="getProduct",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Product ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Product retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="product", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Product not found"
+     *     )
+     * )
      */
     public function show(Product $product) // Route model binding
     {
@@ -118,9 +258,53 @@ class ProductController extends Controller
     }
 
     /**
-     * Update the specified product in storage.
-     * Purchase_price and sale_price are not updated here.
-     * Stock_quantity is typically managed via Purchases/Sales/Adjustments, not direct edit.
+     * @OA\Put(
+     *     path="/api/products/{id}",
+     *     summary="Update a product",
+     *     description="Update an existing product. SKU cannot be changed after creation.",
+     *     operationId="updateProduct",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Product ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="name", type="string", example="Updated Product Name", description="Product name"),
+     *             @OA\Property(property="scientific_name", type="string", nullable=true, example="Updated Scientific Name"),
+     *             @OA\Property(property="description", type="string", nullable=true, example="Updated description"),
+     *             @OA\Property(property="stock_alert_level", type="integer", nullable=true, example=15),
+     *             @OA\Property(property="category_id", type="integer", nullable=true, example=1),
+     *             @OA\Property(property="stocking_unit_id", type="integer", nullable=true, example=1),
+     *             @OA\Property(property="sellable_unit_id", type="integer", nullable=true, example=2),
+     *             @OA\Property(property="units_per_stocking_unit", type="integer", nullable=true, example=10)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Product updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="product", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Product not found"
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation error or SKU change attempt",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="errors", type="object")
+     *         )
+     *     )
+     * )
      */
     public function update(Request $request, Product $product) // Route model binding
     {
@@ -164,7 +348,39 @@ class ProductController extends Controller
     }
 
     /**
-     * Remove the specified product from storage.
+     * @OA\Delete(
+     *     path="/api/products/{id}",
+     *     summary="Delete a product",
+     *     description="Delete a product. Cannot delete if product has associated purchases or sales.",
+     *     operationId="deleteProduct",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Product ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Product deleted successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string", example="Product deleted successfully.")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Product not found"
+     *     ),
+     *     @OA\Response(
+     *         response=409,
+     *         description="Cannot delete product with associated records",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string", example="Cannot delete product. It is associated with existing purchases or sales records.")
+     *         )
+     *     )
+     * )
      */
     public function destroy(Product $product)
     {
@@ -197,8 +413,42 @@ class ProductController extends Controller
 
 
     /**
-     * Autocomplete endpoint for products (example).
-     * Returns a lightweight list of products for select dropdowns.
+     * @OA\Get(
+     *     path="/api/products/autocomplete",
+     *     summary="Product autocomplete",
+     *     description="Get a lightweight list of products for autocomplete/search dropdowns",
+     *     operationId="autocompleteProducts",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="search",
+     *         in="query",
+     *         description="Search term (name, SKU, or scientific name)",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="limit",
+     *         in="query",
+     *         description="Maximum number of results",
+     *         required=false,
+     *         @OA\Schema(type="integer", default=15)
+     *     ),
+     *     @OA\Parameter(
+     *         name="show_all_for_empty_search",
+     *         in="query",
+     *         description="Show all products if search is empty",
+     *         required=false,
+     *         @OA\Schema(type="boolean", default=false)
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Products retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="array", @OA\Items(type="object"))
+     *         )
+     *     )
+     * )
      */
     public function autocomplete(Request $request)
     {
@@ -234,9 +484,42 @@ class ProductController extends Controller
 
 
     /**
-     * Fetch multiple products by their IDs.
-     * Useful for populating form selects/displays when editing related records.
-     * Accepts POST request with 'ids' array in request body.
+     * @OA\Post(
+     *     path="/api/product/by-ids",
+     *     summary="Get products by IDs",
+     *     description="Fetch multiple products by their IDs. Useful for populating form selects/displays.",
+     *     operationId="getProductsByIds",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"ids"},
+     *             @OA\Property(
+     *                 property="ids",
+     *                 type="array",
+     *                 @OA\Items(type="integer"),
+     *                 example={1, 2, 3},
+     *                 description="Array of product IDs"
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Products retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="array", @OA\Items(type="object"))
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="errors", type="object")
+     *         )
+     *     )
+     * )
      */
     public function getByIds(Request $request)
     {
@@ -252,7 +535,46 @@ class ProductController extends Controller
         return ProductResource::collection($products);
     }
 
-    // In ProductController.php (or a new BatchController)
+    /**
+     * @OA\Get(
+     *     path="/api/products/{id}/available-batches",
+     *     summary="Get available batches for a product",
+     *     description="Get all available batches (with remaining quantity > 0) for a specific product, ordered by expiry date (FIFO)",
+     *     operationId="getAvailableBatches",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Product ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Batches retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="array",
+     *                 @OA\Items(
+     *                     type="object",
+     *                     @OA\Property(property="id", type="integer"),
+     *                     @OA\Property(property="batch_number", type="string", nullable=true),
+     *                     @OA\Property(property="remaining_quantity", type="integer"),
+     *                     @OA\Property(property="expiry_date", type="string", format="date", nullable=true),
+     *                     @OA\Property(property="sale_price", type="number", format="float"),
+     *                     @OA\Property(property="unit_cost", type="number", format="float")
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Product not found"
+     *     )
+     * )
+     */
     public function getAvailableBatches(Product $product) // Route model binding for product
     {
         $batches = PurchaseItem::where('product_id', $product->id)
@@ -265,7 +587,50 @@ class ProductController extends Controller
     }
 
     /**
-     * Export products to PDF.
+     * @OA\Get(
+     *     path="/api/products/export/pdf",
+     *     summary="Export products to PDF",
+     *     description="Generate and download a PDF report of products with optional filters",
+     *     operationId="exportProductsPdf",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="search",
+     *         in="query",
+     *         description="Search filter",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="category_id",
+     *         in="query",
+     *         description="Category filter",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="in_stock_only",
+     *         in="query",
+     *         description="Show only in-stock products",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Parameter(
+     *         name="low_stock_only",
+     *         in="query",
+     *         description="Show only low stock products",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="PDF file generated successfully",
+     *         @OA\MediaType(
+     *             mediaType="application/pdf",
+     *             @OA\Schema(type="string", format="binary")
+     *         )
+     *     )
+     * )
      */
     public function exportPdf(Request $request)
     {
@@ -296,7 +661,50 @@ class ProductController extends Controller
     }
 
     /**
-     * Export products to Excel.
+     * @OA\Get(
+     *     path="/api/products/export/excel",
+     *     summary="Export products to Excel",
+     *     description="Generate and download an Excel file of products with optional filters",
+     *     operationId="exportProductsExcel",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="search",
+     *         in="query",
+     *         description="Search filter",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="category_id",
+     *         in="query",
+     *         description="Category filter",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="in_stock_only",
+     *         in="query",
+     *         description="Show only in-stock products",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Parameter(
+     *         name="low_stock_only",
+     *         in="query",
+     *         description="Show only low stock products",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Excel file generated successfully",
+     *         @OA\MediaType(
+     *             mediaType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+     *             @OA\Schema(type="string", format="binary")
+     *         )
+     *     )
+     * )
      */
     public function exportExcel(Request $request)
     {
@@ -327,7 +735,46 @@ class ProductController extends Controller
     }
 
     /**
-     * Import products from Excel file.
+     * @OA\Post(
+     *     path="/api/products/import",
+     *     summary="Upload Excel file for import",
+     *     description="Upload an Excel file to get column headers for mapping. First step in the import process.",
+     *     operationId="importProductsExcel",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\MediaType(
+     *             mediaType="multipart/form-data",
+     *             @OA\Schema(
+     *                 required={"file"},
+     *                 @OA\Property(
+     *                     property="file",
+     *                     type="string",
+     *                     format="binary",
+     *                     description="Excel file (xlsx, xls) - max 10MB"
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="File uploaded successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="headers", type="array", @OA\Items(type="string")),
+     *             @OA\Property(property="message", type="string", example="Excel file uploaded successfully. Please map the columns.")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Error reading file",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="message", type="string")
+     *         )
+     *     )
+     * )
      */
     public function importExcel(Request $request)
     {
@@ -357,7 +804,56 @@ class ProductController extends Controller
     }
 
     /**
-     * Preview the imported Excel data with column mapping.
+     * @OA\Post(
+     *     path="/api/products/preview-import",
+     *     summary="Preview imported Excel data",
+     *     description="Preview the imported Excel data with column mapping before processing. Second step in the import process.",
+     *     operationId="previewProductsImport",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\MediaType(
+     *             mediaType="multipart/form-data",
+     *             @OA\Schema(
+     *                 required={"file", "columnMapping"},
+     *                 @OA\Property(
+     *                     property="file",
+     *                     type="string",
+     *                     format="binary",
+     *                     description="Excel file"
+     *                 ),
+     *                 @OA\Property(
+     *                     property="columnMapping",
+     *                     type="object",
+     *                     description="Column mapping object (e.g., {'A': 'name', 'B': 'sku'})"
+     *                 ),
+     *                 @OA\Property(
+     *                     property="skipHeader",
+     *                     type="boolean",
+     *                     description="Skip first row (header)",
+     *                     default=true
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Preview generated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="preview", type="array", @OA\Items(type="object"))
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Error previewing import",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="message", type="string")
+     *         )
+     *     )
+     * )
      */
     public function previewImport(Request $request)
     {
@@ -395,7 +891,59 @@ class ProductController extends Controller
     }
 
     /**
-     * Process the imported Excel data with column mapping.
+     * @OA\Post(
+     *     path="/api/products/process-import",
+     *     summary="Process imported Excel data",
+     *     description="Process and import products from Excel file with column mapping. Final step in the import process.",
+     *     operationId="processProductsImport",
+     *     tags={"Products"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\MediaType(
+     *             mediaType="multipart/form-data",
+     *             @OA\Schema(
+     *                 required={"file", "columnMapping"},
+     *                 @OA\Property(
+     *                     property="file",
+     *                     type="string",
+     *                     format="binary",
+     *                     description="Excel file"
+     *                 ),
+     *                 @OA\Property(
+     *                     property="columnMapping",
+     *                     type="object",
+     *                     description="Column mapping object"
+     *                 ),
+     *                 @OA\Property(
+     *                     property="skipHeader",
+     *                     type="boolean",
+     *                     description="Skip first row (header)",
+     *                     default=true
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Import completed successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Import completed successfully. 10 products imported, 0 errors."),
+     *             @OA\Property(property="imported", type="integer", example=10),
+     *             @OA\Property(property="errors", type="integer", example=0),
+     *             @OA\Property(property="errorDetails", type="array", @OA\Items(type="string"))
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Error processing import",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="message", type="string")
+     *         )
+     *     )
+     * )
      */
     public function processImport(Request $request)
     {

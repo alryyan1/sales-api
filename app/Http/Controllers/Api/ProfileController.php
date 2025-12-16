@@ -4,12 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth; // To get authenticated user
 use Illuminate\Support\Facades\Hash; // For password hashing and checking
-use Illuminate\Validation\Rule;       // For unique email validation
+use Illuminate\Validation\Rule;       // For unique username validation
 use Illuminate\Validation\Rules\Password; // For strong password validation rules
 use Illuminate\Validation\ValidationException;
 use App\Models\User; // Use User model for type hinting if not using resource
+use App\Http\Resources\UserResource;
 
 class ProfileController extends Controller
 {
@@ -47,7 +47,7 @@ class ProfileController extends Controller
     }
 
     /**
-     * Update the authenticated user's profile information (name and email).
+     * Update the authenticated user's profile information (name and username).
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse | UserResource
@@ -58,26 +58,16 @@ class ProfileController extends Controller
 
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
-            'email' => [
+            'username' => [
                 'required',
                 'string',
-                'email',
                 'max:255',
-                Rule::unique('users')->ignore($user->id), // Email must be unique, ignoring the current user
+                Rule::unique('users')->ignore($user->id), // Username must be unique, ignoring the current user
             ],
         ]);
 
-        $emailChanged = $user->email !== $validatedData['email'];
-
         // Update the user model
         $user->fill($validatedData);
-
-        // If email changed, mark email as unverified (optional but recommended)
-        if ($emailChanged) {
-            $user->email_verified_at = null;
-            // Optionally trigger email verification process here
-            // $user->sendEmailVerificationNotification();
-        }
 
         $user->save();
 

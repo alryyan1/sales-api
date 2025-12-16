@@ -72,10 +72,8 @@ Route::middleware('auth:sanctum')->group(function () {
   });
 
   // -- Stock Adjustments --
-  Route::middleware(['permission:adjust-stock|view-stock-adjustments'])->group(function () {
-    Route::get('/stock-adjustments', [StockAdjustmentController::class, 'index'])->name('api.stock-adjustments.index')->middleware('permission:view-stock-adjustments');
-    Route::post('/stock-adjustments', [StockAdjustmentController::class, 'store'])->name('api.stock-adjustments.store')->middleware('permission:adjust-stock');
-  });
+  Route::get('/stock-adjustments', [StockAdjustmentController::class, 'index'])->name('api.stock-adjustments.index');
+  Route::post('/stock-adjustments', [StockAdjustmentController::class, 'store'])->name('api.stock-adjustments.store');
   // -- Settings Management --
 
   Route::get('admin/settings', [SettingController::class, 'index'])->name('settings.index');
@@ -117,8 +115,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('expense-categories', ExpenseCategoryController::class);
     Route::apiResource('expenses', ExpenseController::class);
     Route::apiResource('roles', RoleController::class);
-
-    Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
     
     // -- System Management Routes --
     Route::prefix('system')->name('system.')->group(function () {
