@@ -1022,10 +1022,23 @@ class SaleController extends Controller
                 // Determine unit price (fallback to product defaults if request sent 0)
                 $resolvedUnitPrice = (float)($validatedData['unit_price'] ?? 0);
                 if ($resolvedUnitPrice <= 0) {
-                    $fallback = $product->last_sale_price_per_sellable_unit
-                        ?? $product->suggested_sale_price_per_sellable_unit
-                        ?? 0;
-                    $resolvedUnitPrice = (float)$fallback;
+                    // Use last sale price if > 0
+                    if ($product->last_sale_price_per_sellable_unit > 0) {
+                        $resolvedUnitPrice = (float)$product->last_sale_price_per_sellable_unit;
+                    } 
+                    // Otherwise use suggested price if > 0
+                    elseif ($product->suggested_sale_price_per_sellable_unit > 0) {
+                        $resolvedUnitPrice = (float)$product->suggested_sale_price_per_sellable_unit;
+                    } 
+                    // Otherwise try to find a price from available batches
+                    else {
+                        $firstBatch = $product->purchaseItemsWithStock()->where('remaining_quantity', '>', 0)->orderBy('expiry_date')->first();
+                        if ($firstBatch && $firstBatch->sale_price > 0) {
+                            $resolvedUnitPrice = (float)$firstBatch->sale_price;
+                        } else {
+                            $resolvedUnitPrice = 0;
+                        }
+                    }
                 }
 
                 // Check if specific batch is selected

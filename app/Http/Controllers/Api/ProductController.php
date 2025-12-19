@@ -103,8 +103,10 @@ class ProductController extends Controller
         $query = Product::query();
 
         // Load relationships needed for the ProductResource
-        $query->with(['category', 'stockingUnit', 'sellableUnit']);
-        
+        $query->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem'])
+            ->withSum('purchaseItems', 'quantity')
+            ->withSum('saleItems', 'quantity');
+
         // Search by name, SKU, or description
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
@@ -129,7 +131,7 @@ class ProductController extends Controller
         if ($request->boolean('low_stock_only')) {
             $query->where(function ($q) {
                 $q->whereNotNull('stock_alert_level')
-                  ->where('stock_quantity', '<=', \DB::raw('stock_alert_level'));
+                    ->where('stock_quantity', '<=', \DB::raw('stock_alert_level'));
             });
         }
 
@@ -253,7 +255,7 @@ class ProductController extends Controller
     {
         // Load relationships needed for the ProductResource
         $product->load(['category', 'stockingUnit', 'sellableUnit']);
-        
+
         return response()->json(['product' => new ProductResource($product)]);
     }
 
@@ -460,7 +462,7 @@ class ProductController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $query = Product::select('*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name']); // Include relations for names
+        $query = Product::select('*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem']); // Include relations for names
 
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
@@ -529,7 +531,9 @@ class ProductController extends Controller
         ]);
 
         $products = Product::whereIn('id', $validated['ids'])
-            ->with(['category', 'stockingUnit', 'sellableUnit'])
+            ->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem'])
+            ->withSum('purchaseItems', 'quantity')
+            ->withSum('saleItems', 'quantity')
             ->get();
 
         return ProductResource::collection($products);
@@ -647,7 +651,7 @@ class ProductController extends Controller
 
         // Check if this is a web route by checking the URL path
         $isWebRoute = str_contains($request->path(), 'products/export/pdf');
-        
+
         if ($isWebRoute) {
             return response($pdfContent)
                 ->header('Content-Type', 'application/pdf')
@@ -721,7 +725,7 @@ class ProductController extends Controller
 
         // Check if this is a web route by checking the URL path
         $isWebRoute = str_contains($request->path(), 'products/export/excel');
-        
+
         if ($isWebRoute) {
             return response($excelContent)
                 ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -785,16 +789,15 @@ class ProductController extends Controller
         try {
             $file = $request->file('file');
             $excelService = new ProductExcelService();
-            
+
             // Read the Excel file and get column headers
             $headers = $excelService->getExcelHeaders($file);
-            
+
             return response()->json([
                 'success' => true,
                 'headers' => $headers,
                 'message' => 'Excel file uploaded successfully. Please map the columns.'
             ]);
-            
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -868,21 +871,20 @@ class ProductController extends Controller
             $file = $request->file('file');
             $columnMapping = $request->input('columnMapping');
             $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
-            
+
             $excelService = new ProductExcelService();
             $previewData = $excelService->previewProducts($file, $columnMapping, $skipHeader);
-            
+
             return response()->json([
                 'success' => true,
                 'preview' => $previewData
             ]);
-            
         } catch (\Exception $e) {
             \Log::error('Product preview failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error previewing import: ' . $e->getMessage()
@@ -950,7 +952,7 @@ class ProductController extends Controller
         // Set timeout and memory limits for large imports
         set_time_limit(300); // 5 minutes
         ini_set('memory_limit', '512M');
-        
+
         $request->validate([
             'file' => 'required|file|mimes:xlsx,xls|max:10240',
             'columnMapping' => 'required|array',
@@ -962,23 +964,23 @@ class ProductController extends Controller
             $file = $request->file('file');
             $columnMapping = $request->input('columnMapping');
             $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
-            
+
             // Log import start
             \Log::info('Starting product import', [
                 'file_size' => $file->getSize(),
                 'file_name' => $file->getClientOriginalName(),
                 'mapping' => $columnMapping
             ]);
-            
+
             $excelService = new ProductExcelService();
             $result = $excelService->importProducts($file, $columnMapping, $skipHeader);
-            
+
             // Log import completion
             \Log::info('Product import completed', [
                 'imported' => $result['imported'],
                 'errors' => $result['errors']
             ]);
-            
+
             return response()->json([
                 'success' => true,
                 'message' => "Import completed successfully. {$result['imported']} products imported, {$result['errors']} errors.",
@@ -986,22 +988,21 @@ class ProductController extends Controller
                 'errors' => $result['errors'],
                 'errorDetails' => $result['errorDetails'] ?? []
             ]);
-            
         } catch (\Exception $e) {
             \Log::error('Product import failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             $errorMessage = 'Error processing import: ' . $e->getMessage();
-            
+
             // Provide more specific error messages
             if (str_contains($e->getMessage(), 'memory')) {
                 $errorMessage = 'Import failed due to memory limitations. Please try with a smaller file.';
             } elseif (str_contains($e->getMessage(), 'timeout')) {
                 $errorMessage = 'Import timed out. Please try with a smaller file.';
             }
-            
+
             return response()->json([
                 'success' => false,
                 'message' => $errorMessage

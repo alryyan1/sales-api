@@ -138,10 +138,19 @@ class Product extends Model
     // Example: Get the latest purchase cost for this product
     public function getLatestPurchaseCostAttribute(): ?float // Accessor: $product->latest_purchase_cost
     {
+        if ($this->relationLoaded('latestPurchaseItem')) {
+            return $this->latestPurchaseItem ? (float) $this->latestPurchaseItem->unit_cost : null;
+        }
+
         $latestItem = $this->purchaseItems()
             ->latest('created_at') // Or by purchase_date on the Purchase model
             ->first();
         return $latestItem ? (float) $latestItem->unit_cost : null;
+    }
+
+    public function latestPurchaseItem(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(PurchaseItem::class)->latestOfMany();
     }
 
     // Example: Suggest a sale price based on latest cost + markup
@@ -213,9 +222,14 @@ class Product extends Model
     // Accessor to get the latest cost PER SELLABLE UNIT
     public function getLatestCostPerSellableUnitAttribute(): ?float
     {
-        $latestBatch = $this->purchaseItems()
-                           ->orderBy('created_at', 'desc')
-                           ->first();
+        if ($this->relationLoaded('latestPurchaseItem')) {
+            $latestBatch = $this->latestPurchaseItem;
+        } else {
+            $latestBatch = $this->purchaseItems()
+                ->orderBy('created_at', 'desc')
+                ->first();
+        }
+
         if ($latestBatch && $this->units_per_stocking_unit > 0) {
             // Assuming latestBatch->unit_cost is the cost of the 'stocking_unit_name'
             return round((float) $latestBatch->unit_cost / $this->units_per_stocking_unit, 2);
@@ -225,7 +239,12 @@ class Product extends Model
     // Accessor for a suggested sale price PER SELLABLE UNIT
     public function getSuggestedSalePricePerSellableUnitAttribute(?float $markupPercentage = null): ?float
     {
-        $settings = (new \App\Services\SettingsService())->getAll();
+        static $settingsCache = null;
+        if ($settingsCache === null) {
+            $settingsCache = (new \App\Services\SettingsService())->getAll();
+        }
+        $settings = $settingsCache;
+
         $markupToUse = $markupPercentage ?? ($settings['default_profit_rate'] ?? 25.0);
         $latestCostPerSellable = $this->latest_cost_per_sellable_unit;
 
@@ -273,6 +292,9 @@ class Product extends Model
      */
     public function getTotalItemsPurchasedAttribute(): int
     {
+        if ($this->getAttribute('purchase_items_sum_quantity') !== null) {
+            return (int) $this->getAttribute('purchase_items_sum_quantity');
+        }
         return (int) $this->purchaseItems()->sum('quantity');
     }
 
@@ -281,6 +303,9 @@ class Product extends Model
      */
     public function getTotalItemsSoldAttribute(): int
     {
+        if ($this->getAttribute('sale_items_sum_quantity') !== null) {
+            return (int) $this->getAttribute('sale_items_sum_quantity');
+        }
         return (int) $this->saleItems()->sum('quantity');
     }
 }
