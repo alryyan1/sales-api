@@ -478,7 +478,17 @@ class ProductController extends Controller
 
 
         $products = $query->orderBy('name')->limit($limit)->get();
-        $products->each->append(['suggested_sale_price_per_sellable_unit', 'latest_cost_per_sellable_unit']);
+
+        $warehouseId = $request->input('warehouse_id'); // Get warehouse_id
+
+        $products->each(function ($product) use ($warehouseId) {
+            $product->append(['suggested_sale_price_per_sellable_unit', 'latest_cost_per_sellable_unit']);
+
+            if ($warehouseId) {
+                // Override total stock with warehouse specific stock
+                $product->stock_quantity = $product->countStock($warehouseId);
+            }
+        });
 
 
         return response()->json(['data' => ProductResource::collection($products)]);
@@ -579,14 +589,24 @@ class ProductController extends Controller
      *     )
      * )
      */
-    public function getAvailableBatches(Product $product) // Route model binding for product
+    public function getAvailableBatches(Request $request, Product $product) // Route model binding for product
     {
-        $batches = PurchaseItem::where('product_id', $product->id)
-            ->where('remaining_quantity', '>', 0)
-            ->orderBy('expiry_date', 'asc') // FIFO by expiry
-            ->orderBy('created_at', 'asc')   // Then by purchase date
+        $warehouseId = $request->query('warehouse_id');
+
+        $query = PurchaseItem::where('product_id', $product->id)
+            ->where('remaining_quantity', '>', 0);
+
+        if ($warehouseId) {
+            $query->whereHas('purchase', function ($q) use ($warehouseId) {
+                $q->where('warehouse_id', $warehouseId);
+            });
+        }
+
+        $batches = $query->orderBy('expiry_date', 'asc') // FIFO by expiry
+            ->orderBy('id', 'asc')   // Then by purchase date (proxy via ID for stability)
             ->select(['id', 'batch_number', 'remaining_quantity', 'expiry_date', 'sale_price', 'unit_cost']) // Select necessary fields
             ->get();
+
         return response()->json(['data' => $batches]);
     }
 

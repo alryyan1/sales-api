@@ -55,6 +55,7 @@ class Sale extends Model
     use HasFactory;
 
     protected $fillable = [
+        'warehouse_id',
         'client_id',
         'user_id',
         'shift_id',
@@ -95,6 +96,11 @@ class Sale extends Model
         return $this->belongsTo(Shift::class);
     }
 
+    public function warehouse(): BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class);
+    }
+
     /**
      * Get the items included in this sale.
      */
@@ -102,9 +108,12 @@ class Sale extends Model
     {
         return $this->hasMany(SaleItem::class);
     }
-    
-    public function payments(): HasMany { return $this->hasMany(Payment::class); }
-    
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
     /**
      * Get the sale returns associated with this sale.
      */
@@ -112,7 +121,7 @@ class Sale extends Model
     {
         return $this->hasMany(SaleReturn::class, 'original_sale_id');
     }
-    
+
     /**
      * Check if this sale has any returns.
      */
@@ -139,11 +148,11 @@ class Sale extends Model
                     $sale->sale_order_number = $maxOrderNumber + 1;
                 } else {
                     // Fallback: use date-based numbering if no shift_id
-                $today = $sale->sale_date ?? now()->toDateString();
-                $maxOrderNumber = static::whereDate('sale_date', $today)
+                    $today = $sale->sale_date ?? now()->toDateString();
+                    $maxOrderNumber = static::whereDate('sale_date', $today)
                         ->whereNull('shift_id')
-                    ->max('sale_order_number') ?? 0;
-                $sale->sale_order_number = $maxOrderNumber + 1;
+                        ->max('sale_order_number') ?? 0;
+                    $sale->sale_order_number = $maxOrderNumber + 1;
                 }
             }
         });

@@ -43,6 +43,7 @@ class Purchase extends Model
     use HasFactory;
 
     protected $fillable = [
+        'warehouse_id',
         'supplier_id',
         'user_id', // Added user_id
         'purchase_date',
@@ -79,5 +80,10 @@ class Purchase extends Model
     public function items(): HasMany // Renamed from purchaseItems for clarity if preferred
     {
         return $this->hasMany(PurchaseItem::class);
+    }
+
+    public function warehouse(): BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class);
     }
 }

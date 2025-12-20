@@ -31,6 +31,7 @@ class PurchaseResource extends JsonResource
             'total_amount' => $this->total_amount, // Already cast in model
             'notes' => $this->notes,
             'created_at' => $this->created_at->toISOString(),
+            'currency' => $this->currency,
 
             // Conditionally include purchase items (usually for the 'show' endpoint)
             // Use PurchaseItemResource::collection to format each item

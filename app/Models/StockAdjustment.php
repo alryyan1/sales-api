@@ -42,6 +42,7 @@ class StockAdjustment extends Model
     use HasFactory; // Add factory later if needed for testing
 
     protected $fillable = [
+        'warehouse_id',
         'product_id',
         'purchase_item_id', // If adjusting a specific batch
         'user_id',
@@ -71,5 +72,10 @@ class StockAdjustment extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function warehouse(): BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class);
     }
 }

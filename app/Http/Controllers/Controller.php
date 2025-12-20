@@ -17,19 +17,8 @@ namespace App\Http\Controllers;
  * )
  *
  * @OA\Server(
- *     url="{protocol}://{host}",
- *     description="API Server",
- *     variables={
- *         @OA\ServerVariable(
- *             serverVariable="protocol",
- *             enum={"http", "https"},
- *             default="http"
- *         ),
- *         @OA\ServerVariable(
- *             serverVariable="host",
- *             default="localhost:8000"
- *         )
- *     }
+ *     url=L5_SWAGGER_CONST_HOST,
+ *     description="API Server"
  * )
  *
  * @OA\SecurityScheme(

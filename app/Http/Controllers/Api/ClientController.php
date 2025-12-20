@@ -8,22 +8,51 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\ClientResource;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Validation\Rule; 
-use PharIo\Manifest\Author;// Import Rule for unique validation on update
+use Illuminate\Validation\Rule;
+use PharIo\Manifest\Author; // Import Rule for unique validation on update
 
 class ClientController extends Controller
 {
+    /**
+     * @OA\Tag(
+     *     name="Clients",
+     *     description="Client management endpoints"
+     * )
+     */
     use AuthorizesRequests;
     /**
-     * Display a listing of the resource.
-     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     * @OA\Get(
+     *     path="/api/clients",
+     *     summary="List all clients",
+     *     description="Get a paginated list of clients",
+     *     operationId="getClients",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="per_page",
+     *         in="query",
+     *         description="Items per page",
+     *         required=false,
+     *         @OA\Schema(type="integer", default=15)
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Clients retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="array", @OA\Items(type="object")),
+     *             @OA\Property(property="current_page", type="integer"),
+     *             @OA\Property(property="per_page", type="integer"),
+     *             @OA\Property(property="total", type="integer")
+     *         )
+     *     )
+     * )
      */
     public function index(Request $request) // Added Request for potential filtering/searching later
     {
 
         // Basic pagination
         $clients = Client::latest()->paginate($request->input('per_page', 15)); // Default 15 per page
-    
+
         // Consider adding search/filtering capabilities later based on query parameters
         // e.g., if ($request->has('search')) { ... }
 
@@ -31,9 +60,39 @@ class ClientController extends Controller
     }
 
     /**
-     * Store a newly created resource in storage.
-     * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * @OA\Post(
+     *     path="/api/clients",
+     *     summary="Create a new client",
+     *     description="Create a new client record",
+     *     operationId="createClient",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"name"},
+     *             @OA\Property(property="name", type="string", example="John Doe", description="Client name"),
+     *             @OA\Property(property="email", type="string", format="email", nullable=true, example="john@example.com", description="Client email (unique)"),
+     *             @OA\Property(property="phone", type="string", nullable=true, example="+1234567890", description="Client phone number"),
+     *             @OA\Property(property="address", type="string", nullable=true, example="123 Main St", description="Client address")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Client created successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="client", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string"),
+     *             @OA\Property(property="errors", type="object")
+     *         )
+     *     )
+     * )
      */
     public function store(Request $request)
     {
@@ -59,9 +118,32 @@ class ClientController extends Controller
     }
 
     /**
-     * Display the specified resource.
-     * @param \App\Models\Client $client (Route model binding)
-     * @return \Illuminate\Http\JsonResponse
+     * @OA\Get(
+     *     path="/api/clients/{id}",
+     *     summary="Get a single client",
+     *     description="Retrieve details of a specific client by ID",
+     *     operationId="getClient",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Client ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Client retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="client", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Client not found"
+     *     )
+     * )
      */
     public function show(Client $client)
     {
@@ -75,10 +157,45 @@ class ClientController extends Controller
     }
 
     /**
-     * Update the specified resource in storage.
-     * @param \Illuminate\Http\Request $request
-     * @param \App\Models\Client $client (Route model binding)
-     * @return \Illuminate\Http\JsonResponse
+     * @OA\Put(
+     *     path="/api/clients/{id}",
+     *     summary="Update a client",
+     *     description="Update existing client details",
+     *     operationId="updateClient",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Client ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="name", type="string", example="John Doe Updated"),
+     *             @OA\Property(property="email", type="string", format="email", nullable=true, example="john_updated@example.com"),
+     *             @OA\Property(property="phone", type="string", nullable=true, example="+0987654321"),
+     *             @OA\Property(property="address", type="string", nullable=true, example="456 Other St")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Client updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="client", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Client not found"
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation error"
+     *     )
+     * )
      */
     public function update(Request $request, Client $client)
     {
@@ -105,14 +222,37 @@ class ClientController extends Controller
 
         // Return the updated resource
         return response()->json(['client' => new ClientResource($client->fresh())]); // Use fresh() to get updated timestamps etc.
-         // Or return directly:
-         // return new ClientResource($client->fresh());
+        // Or return directly:
+        // return new ClientResource($client->fresh());
     }
 
     /**
-     * Remove the specified resource from storage.
-     * @param \App\Models\Client $client (Route model binding)
-     * @return \Illuminate\Http\JsonResponse
+     * @OA\Delete(
+     *     path="/api/clients/{id}",
+     *     summary="Delete a client",
+     *     description="Remove a client record",
+     *     operationId="deleteClient",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Client ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Client deleted successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="message", type="string", example="Client deleted successfully.")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Client not found"
+     *     )
+     * )
      */
     public function destroy(Client $client)
     {
@@ -127,26 +267,57 @@ class ClientController extends Controller
         // Or:
         // return response()->noContent(); // Returns 204
     }
+    /**
+     * @OA\Get(
+     *     path="/api/clients/autocomplete",
+     *     summary="Client autocomplete",
+     *     description="Get a list of clients for search/autocomplete",
+     *     operationId="autocompleteClients",
+     *     tags={"Clients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="search",
+     *         in="query",
+     *         description="Search term (name or email)",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="limit",
+     *         in="query",
+     *         description="Maximum number of results",
+     *         required=false,
+     *         @OA\Schema(type="integer", default=15)
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Clients retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="array", @OA\Items(type="object"))
+     *         )
+     *     )
+     * )
+     */
     public function autocomplete(Request $request)
-{
-    $search = $request->input('search', '');
-    $limit = $request->input('limit', 15);
+    {
+        $search = $request->input('search', '');
+        $limit = $request->input('limit', 15);
 
-    if (empty($search)) {
-        return response()->json(['data' => []]); // Return empty if no search term
+        if (empty($search)) {
+            return response()->json(['data' => []]); // Return empty if no search term
+        }
+
+        $clients = Client::select(['id', 'name', 'email']) // Select only needed fields
+            ->where(function ($query) use ($search) {
+                $query->where('name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
+                // Add phone search if needed
+                // ->orWhere('phone', 'like', "%{$search}%");
+            })
+            ->orderBy('name')
+            ->limit($limit)
+            ->get();
+
+        return response()->json(['data' => $clients]);
     }
-
-    $clients = Client::select(['id', 'name', 'email']) // Select only needed fields
-        ->where(function ($query) use ($search) {
-            $query->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
-                  // Add phone search if needed
-                  // ->orWhere('phone', 'like', "%{$search}%");
-        })
-         ->orderBy('name')
-         ->limit($limit)
-         ->get();
-
-    return response()->json(['data' => $clients]);
-}
 }

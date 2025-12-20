@@ -28,7 +28,8 @@ use App\Http\Controllers\Api\{
   UserController,
   WhatsAppController,
   WhatsAppSchedulerController,
-  ShiftController
+  ShiftController,
+  WarehouseController
 };
 use App\Http\Controllers\UpdateController;
 
@@ -96,15 +97,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profit-loss', [ReportController::class, 'profitLossReport'])->name('profit-loss');
     Route::get('/near-expiry', [ReportController::class, 'nearExpiryReport'])->name('near-expiry'); // <-- Add this line
     Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue');
-  Route::get('/monthly-purchases', [ReportController::class, 'monthlyPurchasesReport'])->name('monthly-purchases');
-  Route::get('/top-products', [ReportController::class, 'topSellingProducts'])->name('top-products');
+    Route::get('/monthly-purchases', [ReportController::class, 'monthlyPurchasesReport'])->name('monthly-purchases');
+    Route::get('/top-products', [ReportController::class, 'topSellingProducts'])->name('top-products');
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
     Route::get('/sales-pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('sales-pdf');
     Route::get('/inventory-pdf', [ReportController::class, 'inventoryPdf'])->name('inventory-pdf');
     Route::get('/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('inventory-log');
     Route::get('/inventory-log/pdf', [App\Http\Controllers\Api\InventoryLogController::class, 'generatePdf'])->name('inventory-log.pdf');
-
-
   });
 
   // -- Admin Only Routes --
@@ -115,7 +114,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('expense-categories', ExpenseCategoryController::class);
     Route::apiResource('expenses', ExpenseController::class);
     Route::apiResource('roles', RoleController::class);
-    
+
     // -- System Management Routes --
     Route::prefix('system')->name('system.')->group(function () {
       Route::get('/version', [SystemController::class, 'getVersion'])->name('version');
@@ -125,24 +124,24 @@ Route::middleware('auth:sanctum')->group(function () {
       Route::post('/update-both', [SystemController::class, 'updateBoth'])->name('update-both');
       Route::get('/frontend-instructions', [SystemController::class, 'getFrontendUpdateInstructions'])->name('frontend-instructions');
     });
-    
+
     // -- WhatsApp Scheduler Routes --
     Route::get('/whatsapp-schedulers/options', [WhatsAppSchedulerController::class, 'options'])->name('whatsapp-schedulers.options');
     Route::apiResource('whatsapp-schedulers', WhatsAppSchedulerController::class);
     Route::patch('/whatsapp-schedulers/{whatsapp_scheduler}/toggle', [WhatsAppSchedulerController::class, 'toggle'])->name('whatsapp-schedulers.toggle');
-    
+
     // -- WhatsApp API Routes --
     Route::prefix('whatsapp')->group(function () {
-        Route::post('/send-message', [WhatsAppController::class, 'sendMessage']);
-        Route::post('/test', [WhatsAppController::class, 'test']);
-        Route::get('/status', [WhatsAppController::class, 'getStatus']);
-        Route::post('/send-sale-notification', [WhatsAppController::class, 'sendSaleNotification']);
+      Route::post('/send-message', [WhatsAppController::class, 'sendMessage']);
+      Route::post('/test', [WhatsAppController::class, 'test']);
+      Route::get('/status', [WhatsAppController::class, 'getStatus']);
+      Route::post('/send-sale-notification', [WhatsAppController::class, 'sendSaleNotification']);
     });
   });
 
   // -- Suppliers Management --
   Route::apiResource('suppliers', SupplierController::class);
-  
+
   // -- Supplier Payments & Ledger --
   Route::prefix('suppliers/{supplier}')->group(function () {
     Route::get('/ledger', [SupplierPaymentController::class, 'getLedger']);
@@ -161,8 +160,11 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/product/by-ids', [ProductController::class, 'getByIds']);
   Route::post('/products/import', [ProductController::class, 'importExcel']);
   Route::post('/products/preview-import', [ProductController::class, 'previewImport']);
-Route::post('/products/process-import', [ProductController::class, 'processImport']);
+  Route::post('/products/process-import', [ProductController::class, 'processImport']);
   Route::apiResource('products', ProductController::class);
+
+  // -- Warehouses Management --
+  Route::apiResource('warehouses', WarehouseController::class);
 
   // -- Units Management --
   Route::get('/units/stocking', [UnitController::class, 'stocking'])->name('api.units.stocking');
@@ -170,13 +172,13 @@ Route::post('/products/process-import', [ProductController::class, 'processImpor
   Route::apiResource('units', UnitController::class);
 
   // -- Purchases Management --
-Route::apiResource('purchases', PurchaseController::class);
-Route::post('/purchases/import-items', [PurchaseController::class, 'importPurchaseItems']);
-Route::post('/purchases/preview-import-items', [PurchaseController::class, 'previewImportPurchaseItems']);
-Route::post('/purchases/process-import-items', [PurchaseController::class, 'processImportPurchaseItems']);
-Route::post('/purchases/{purchase}/items', [PurchaseController::class, 'addPurchaseItem'])->name('api.purchases.addPurchaseItem');
-Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updatePurchaseItem');
-Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'deletePurchaseItem'])->name('api.purchases.deletePurchaseItem');
+  Route::apiResource('purchases', PurchaseController::class);
+  Route::post('/purchases/import-items', [PurchaseController::class, 'importPurchaseItems']);
+  Route::post('/purchases/preview-import-items', [PurchaseController::class, 'previewImportPurchaseItems']);
+  Route::post('/purchases/process-import-items', [PurchaseController::class, 'processImportPurchaseItems']);
+  Route::post('/purchases/{purchase}/items', [PurchaseController::class, 'addPurchaseItem'])->name('api.purchases.addPurchaseItem');
+  Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updatePurchaseItem');
+  Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'deletePurchaseItem'])->name('api.purchases.deletePurchaseItem');
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
   Route::get('/sales/today-by-created-at', [SaleController::class, 'getTodaySalesByCreatedAt'])->name('api.sales.todayByCreatedAt');
   // -- Sales Management --
@@ -202,7 +204,7 @@ Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController:
   // -- Dashboard Data --
   Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
   Route::get('/dashboard/sales-terminal-summary', [DashboardController::class, 'salesTerminalSummary'])->name('api.dashboard.salesTerminalSummary'); //
-  
+
   // -- Public Users Route for Filters --
   Route::get('/users/list', [UserController::class, 'listForFilters'])->name('api.users.list');
 });

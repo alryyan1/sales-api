@@ -308,4 +308,36 @@ class Product extends Model
         }
         return (int) $this->saleItems()->sum('quantity');
     }
+
+    /**
+     * Calculate stock quantity, optionally filtered by warehouse.
+     *
+     * @param int|null $warehouseId
+     * @return int
+     */
+    public function countStock(?int $warehouseId = null): int
+    {
+        if ($warehouseId) {
+            return (int) $this->purchaseItems()
+                ->whereHas('purchase', function ($q) use ($warehouseId) {
+                    $q->where('warehouse_id', $warehouseId);
+                })
+                ->sum('remaining_quantity');
+        }
+
+        return $this->total_stock_quantity;
+    }
+
+    /**
+     * Scope a query to include stock from a specific warehouse.
+     */
+    public function scopeInStockAt($query, int $warehouseId)
+    {
+        return $query->whereHas('purchaseItems', function ($q) use ($warehouseId) {
+            $q->where('remaining_quantity', '>', 0)
+                ->whereHas('purchase', function ($pq) use ($warehouseId) {
+                    $pq->where('warehouse_id', $warehouseId);
+                });
+        });
+    }
 }

@@ -41,7 +41,7 @@ class SaleController extends Controller
             $query->whereDate('sale_date', Carbon::today());
             // For today's sales, load items and payments and return all without pagination
             $query->with([
-                'items.product' => function($query) {
+                'items.product' => function ($query) {
                     $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost']);
                 },
                 'payments' // Load payments for today's sales
@@ -69,7 +69,7 @@ class SaleController extends Controller
             $query->where('id', $saleId);
         }
         if ($productId = $request->input('product_id')) {
-            $query->whereHas('items', function($q) use ($productId) {
+            $query->whereHas('items', function ($q) use ($productId) {
                 $q->where('product_id', $productId);
             });
         }
@@ -81,7 +81,7 @@ class SaleController extends Controller
         }
 
         $sales = $query->latest('id')->paginate($request->input('per_page', 15));
-        
+
         // Add return information to each sale
         if ($sales instanceof \Illuminate\Pagination\LengthAwarePaginator) {
             $sales->getCollection()->transform(function ($sale) {
@@ -89,7 +89,7 @@ class SaleController extends Controller
                 return $sale;
             });
         }
-        
+
         return SaleResource::collection($sales);
     }
 
@@ -102,12 +102,12 @@ class SaleController extends Controller
             // Load full client timestamps to avoid null created_at in ClientResource
             'client:id,name,email,phone,address,created_at,updated_at',
             'user:id,name',
-            'items.product' => function($query) {
+            'items.product' => function ($query) {
                 $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost']);
             },
             'payments'
         ])
-        ->whereDate('created_at', Carbon::today());
+            ->whereDate('created_at', Carbon::today());
 
         $sales = $query->latest('created_at')->latest('id')->get();
         return response()->json(['data' => SaleResource::collection($sales)]);
@@ -148,7 +148,7 @@ class SaleController extends Controller
                 ->whereNull('closed_at')
                 ->orderBy('id', 'desc')
                 ->first();
-            
+
             if (!$currentShift) {
                 return response()->json([
                     'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
@@ -183,7 +183,7 @@ class SaleController extends Controller
             $payload = [
                 'message' => 'Failed to create empty sale. ' . $e->getMessage(),
             ];
-            
+
             if (config('app.debug')) {
                 $payload['exception'] = class_basename($e);
                 $payload['file'] = $e->getFile();
@@ -197,7 +197,7 @@ class SaleController extends Controller
                     ];
                 })->toArray();
             }
-            
+
             return response()->json($payload, Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -288,9 +288,9 @@ class SaleController extends Controller
 
         // Find the latest sale by this user.
         $lastSale = Sale::where('user_id', $user->id)
-                        ->orderBy('updated_at', 'desc')
-                        ->select('id')
-                        ->first();
+            ->orderBy('updated_at', 'desc')
+            ->select('id')
+            ->first();
 
         if ($lastSale) {
             return response()->json(['data' => ['last_sale_id' => $lastSale->id]]);
@@ -377,6 +377,7 @@ class SaleController extends Controller
             ->first();
 
         return Sale::create([
+            'warehouse_id' => $validatedData['warehouse_id'] ?? 1,
             'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
             'shift_id' => $currentShift?->id,
@@ -388,8 +389,10 @@ class SaleController extends Controller
         ]);
     }
 
-    private function processSaleItems(array $validatedData, Sale $saleHeader, $newTotalSaleAmount)
+    private function processSaleItems(array $validatedData, Sale $saleHeader, &$newTotalSaleAmount)
     {
+        $warehouseId = $validatedData['warehouse_id'] ?? 1;
+
         // 2. Process Sale Items and Stock (Total stock check, FIFO allocation or direct stock decrement)
         foreach ($validatedData['items'] as $itemData) {
             $product = Product::findOrFail($itemData['product_id']); // Ensure product exists
@@ -398,27 +401,30 @@ class SaleController extends Controller
             $quantityFulfilledInSellableUnits = 0;
 
             // --- Total Stock Check (already done in performStockPreCheck, but double-check here) ---
-            // Refresh product to get latest stock_quantity
-            $product->refresh();
-            
+            // Refresh product to get latest status (though countStock does a fresh query usually)
+            $availableStock = $product->countStock($warehouseId);
+
             // Check if product has any stock
-            if ($product->stock_quantity <= 0) {
+            if ($availableStock <= 0) {
                 throw ValidationException::withMessages([
-                    'items' => ["Product '{$product->name}' is out of stock. Available quantity: 0"]
-                ]);
-            }
-            
-            if ($product->stock_quantity < $requestedSellableUnits) {
-                throw ValidationException::withMessages([
-                    'items' => ["Insufficient stock for product '{$product->name}'. Available: {$product->stock_quantity} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
+                    'items' => ["Product '{$product->name}' is out of stock in this warehouse. Available quantity: 0"]
                 ]);
             }
 
-            // Fetch available batches for this product, ordered for FIFO allocation
+            if ($availableStock < $requestedSellableUnits) {
+                throw ValidationException::withMessages([
+                    'items' => ["Insufficient stock for product '{$product->name}' in this warehouse. Available: {$availableStock} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
+                ]);
+            }
+
+            // Fetch available batches for this product in the specified warehouse, ordered for FIFO allocation
             // (e.g., oldest expiry first, then oldest purchase_item created_at)
             // and lock them for update to prevent race conditions during concurrent sales.
             $availableBatches = PurchaseItem::where('product_id', $product->id)
                 ->where('remaining_quantity', '>', 0) // remaining_quantity is in SELLABLE UNITS
+                ->whereHas('purchase', function ($q) use ($warehouseId) {
+                    $q->where('warehouse_id', $warehouseId);
+                })
                 ->orderBy('expiry_date', 'asc')        // Prioritize expiring soonest
                 ->orderBy('created_at', 'asc')         // Then oldest purchase batch
                 ->lockForUpdate()                      // CRITICAL for concurrent stock updates
@@ -467,7 +473,7 @@ class SaleController extends Controller
                 // Check if we still need to fulfill more quantity (batch allocation was insufficient)
                 if ($quantityFulfilledInSellableUnits < $requestedSellableUnits) {
                     $remainingQuantity = $requestedSellableUnits - $quantityFulfilledInSellableUnits;
-                    
+
                     // Create a sale item for the remaining quantity without batch tracking
                     $saleHeader->items()->create([
                         'product_id'         => $product->id,
@@ -481,7 +487,7 @@ class SaleController extends Controller
 
                     // Decrement directly from product stock
                     $product->decrement('stock_quantity', $remainingQuantity);
-                    
+
                     // Update totals for the current sale
                     $newTotalSaleAmount += $remainingQuantity * $unitSalePrice;
                     $quantityFulfilledInSellableUnits += $remainingQuantity;
@@ -502,7 +508,7 @@ class SaleController extends Controller
 
                 // Decrement directly from product stock
                 $product->decrement('stock_quantity', $requestedSellableUnits);
-                
+
                 // Update totals for the current sale
                 $newTotalSaleAmount += $requestedSellableUnits * $unitSalePrice;
                 $quantityFulfilledInSellableUnits = $requestedSellableUnits;
@@ -595,16 +601,16 @@ class SaleController extends Controller
 
         $sale->update($validatedData);
 
-                    $sale->load([
-                'client:id,name',
-                'user:id,name',
-                'items',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
-                'items.product.sellableUnit:id,name',
-                'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
-                'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date'
-            ]);
-            return response()->json(['sale' => new SaleResource($sale->fresh())]);
+        $sale->load([
+            'client:id,name',
+            'user:id,name',
+            'items',
+            'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+            'items.product.sellableUnit:id,name',
+            'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date'
+        ]);
+        return response()->json(['sale' => new SaleResource($sale->fresh())]);
     }
 
 
@@ -629,7 +635,7 @@ class SaleController extends Controller
                 foreach ($sale->items as $saleItem) {
                     $product = $saleItem->product;
                     $quantity = $saleItem->quantity;
-                    
+
                     // If the sale item has a specific batch, return to that batch
                     if ($saleItem->purchase_item_id) {
                         $purchaseItem = PurchaseItem::find($saleItem->purchase_item_id);
@@ -648,10 +654,10 @@ class SaleController extends Controller
 
                 // Delete all payments for this sale
                 $sale->payments()->delete();
-                
+
                 // Delete all sale items
                 $sale->items()->delete();
-                
+
                 // Delete the sale header
                 $sale->delete();
             });
@@ -659,7 +665,6 @@ class SaleController extends Controller
             return response()->json([
                 'message' => 'Sale deleted successfully. Stock has been returned to inventory.'
             ], Response::HTTP_OK);
-
         } catch (\Exception $e) {
             Log::error('Error deleting sale: ' . $e->getMessage(), [
                 'sale_id' => $sale->id,
@@ -692,7 +697,7 @@ class SaleController extends Controller
             DB::transaction(function () use ($validatedData, $sale, $request) {
                 // Delete existing payments for this sale (to replace them all)
                 $sale->payments()->delete();
-                
+
                 // Create new payment records only if payments array is not empty
                 if (!empty($validatedData['payments'])) {
                     foreach ($validatedData['payments'] as $paymentData) {
@@ -725,14 +730,13 @@ class SaleController extends Controller
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
                 'payments'
             ]);
-            
+
             $message = empty($validatedData['payments']) ? 'All payments cleared successfully' : 'Payment(s) added successfully';
-            
+
             return response()->json([
                 'message' => $message,
                 'sale' => new SaleResource($sale->fresh())
             ], Response::HTTP_OK);
-
         } catch (\Exception $e) {
             Log::error('Error adding payment to sale: ' . $e->getMessage(), [
                 'sale_id' => $sale->id,
@@ -756,7 +760,7 @@ class SaleController extends Controller
             DB::transaction(function () use ($sale) {
                 // Delete all existing payments for this sale
                 $sale->payments()->delete();
-                
+
                 // Update the sale's paid_amount to 0
                 $sale->update(['paid_amount' => 0]);
             });
@@ -771,12 +775,11 @@ class SaleController extends Controller
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
                 'payments'
             ]);
-            
+
             return response()->json([
                 'message' => 'All payments deleted successfully',
                 'sale' => new SaleResource($sale->fresh())
             ], Response::HTTP_OK);
-
         } catch (\Exception $e) {
             Log::error('Error deleting payments from sale: ' . $e->getMessage(), [
                 'sale_id' => $sale->id,
@@ -823,7 +826,6 @@ class SaleController extends Controller
             return response()->json([
                 'message' => 'Payment added successfully',
             ], Response::HTTP_CREATED);
-
         } catch (\Exception $e) {
             Log::error('Error adding single payment to sale: ' . $e->getMessage(), [
                 'sale_id' => $sale->id,
@@ -934,7 +936,7 @@ class SaleController extends Controller
                 // Find and delete the specific payment
                 $payment = $sale->payments()->findOrFail($paymentId);
                 $payment->delete();
-                
+
                 // Update the sale's paid_amount
                 $totalPaid = $sale->payments()->sum('amount');
                 $sale->update(['paid_amount' => $totalPaid]);
@@ -943,7 +945,6 @@ class SaleController extends Controller
             return response()->json([
                 'message' => 'Payment deleted successfully',
             ], Response::HTTP_OK);
-
         } catch (\Exception $e) {
             Log::error('Error deleting single payment from sale: ' . $e->getMessage(), [
                 'sale_id' => $sale->id,
@@ -959,7 +960,7 @@ class SaleController extends Controller
         }
     }
 
-        /**
+    /**
      * Add a new item to an existing sale.
      * 
      * @param Request $request
@@ -978,12 +979,12 @@ class SaleController extends Controller
         try {
             $result = DB::transaction(function () use ($validatedData, $sale) {
                 $product = Product::findOrFail($validatedData['product_id']);
-                
+
                 // Check if product already exists in the sale
                 $existingSaleItem = $sale->items()
                     ->where('product_id', $validatedData['product_id'])
                     ->first();
-                
+
                 if ($existingSaleItem) {
                     // Product already exists - do nothing
                     // Calculate totals from items/payments
@@ -998,21 +999,21 @@ class SaleController extends Controller
                         'product_already_exists' => true
                     ];
                 }
-                
+
                 // Check if product has any stock
                 if ($product->stock_quantity <= 0) {
                     throw ValidationException::withMessages([
                         'product_id' => "Product '{$product->name}' is out of stock. Available quantity: 0"
                     ]);
                 }
-                
+
                 // Check stock availability - consider current sale items
                 $currentQuantityInThisSale = $sale->items()
                     ->where('product_id', $product->id)
                     ->sum('quantity');
                 $totalQuantityAfterAdd = $currentQuantityInThisSale + $validatedData['quantity'];
                 $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
-                
+
                 if ($totalQuantityAfterAdd > $originalStockQuantity) {
                     throw ValidationException::withMessages([
                         'quantity' => "Insufficient stock. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterAdd}"
@@ -1025,11 +1026,11 @@ class SaleController extends Controller
                     // Use last sale price if > 0
                     if ($product->last_sale_price_per_sellable_unit > 0) {
                         $resolvedUnitPrice = (float)$product->last_sale_price_per_sellable_unit;
-                    } 
+                    }
                     // Otherwise use suggested price if > 0
                     elseif ($product->suggested_sale_price_per_sellable_unit > 0) {
                         $resolvedUnitPrice = (float)$product->suggested_sale_price_per_sellable_unit;
-                    } 
+                    }
                     // Otherwise try to find a price from available batches
                     else {
                         $firstBatch = $product->purchaseItemsWithStock()->where('remaining_quantity', '>', 0)->orderBy('expiry_date')->first();
@@ -1047,19 +1048,19 @@ class SaleController extends Controller
                         ->where('product_id', $product->id)
                         ->where('remaining_quantity', '>', 0)
                         ->first();
-                    
+
                     if (!$selectedBatch) {
                         throw ValidationException::withMessages([
                             'purchase_item_id' => 'Selected batch not found or has insufficient stock.'
                         ]);
                     }
-                    
+
                     if ($selectedBatch->remaining_quantity < $validatedData['quantity']) {
                         throw ValidationException::withMessages([
                             'purchase_item_id' => "Insufficient stock in selected batch. Available: {$selectedBatch->remaining_quantity}, requested: {$validatedData['quantity']}"
                         ]);
                     }
-                    
+
                     // Create sale item for the selected batch
                     $saleItem = $sale->items()->create([
                         'product_id' => $product->id,
@@ -1070,14 +1071,14 @@ class SaleController extends Controller
                         'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
                         'cost_price_at_sale' => $selectedBatch->unit_cost,
                     ]);
-                    
+
                     $saleItems[] = $saleItem;
                     $totalCost = $validatedData['quantity'] * $selectedBatch->unit_cost;
-                    
+
                     // Update batch remaining quantity
                     $selectedBatch->remaining_quantity -= $validatedData['quantity'];
                     $selectedBatch->save();
-                    
+
                     $remainingQuantity = 0; // All quantity allocated from selected batch
                 } else {
                     // Auto-allocate from available batches (FIFO)
@@ -1095,7 +1096,7 @@ class SaleController extends Controller
                         if ($remainingQuantity <= 0) break;
 
                         $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
-                        
+
                         // Create sale item for this batch
                         $saleItem = $sale->items()->create([
                             'product_id' => $product->id,
@@ -1172,7 +1173,6 @@ class SaleController extends Controller
                 'sale' => new SaleResource($sale),
                 'added_items' => SaleItemResource::collection($result['sale_items'])
             ], Response::HTTP_CREATED);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
@@ -1219,7 +1219,7 @@ class SaleController extends Controller
                 $saleItem = $sale->items()->findOrFail($saleItemId);
                 $product = $saleItem->product;
                 $batch = $saleItem->purchaseItemBatch; // May be null when no specific batch was used
-                
+
                 $oldQuantity = $saleItem->quantity;
                 $newQuantity = $validatedData['quantity'];
                 $quantityDifference = $newQuantity - $oldQuantity;
@@ -1275,7 +1275,7 @@ class SaleController extends Controller
                 if (isset($validatedData['purchase_item_id'])) {
                     $newBatchId = $validatedData['purchase_item_id'];
                     $oldBatchId = $saleItem->purchase_item_id;
-                    
+
                     // If batch is changing, we need to handle stock adjustments
                     if ($oldBatchId !== $newBatchId) {
                         // Return stock to old batch if it exists
@@ -1286,7 +1286,7 @@ class SaleController extends Controller
                                 $oldBatch->save();
                             }
                         }
-                        
+
                         // Deduct stock from new batch if provided
                         if ($newBatchId) {
                             $newBatch = PurchaseItem::whereKey($newBatchId)->lockForUpdate()->first();
@@ -1295,16 +1295,16 @@ class SaleController extends Controller
                                     'purchase_item_id' => 'Selected batch not found.'
                                 ]);
                             }
-                            
+
                             if ($newBatch->remaining_quantity < $newQuantity) {
                                 throw ValidationException::withMessages([
                                     'purchase_item_id' => "Insufficient stock in selected batch. Available: {$newBatch->remaining_quantity}, requested: {$newQuantity}"
                                 ]);
                             }
-                            
+
                             $newBatch->remaining_quantity -= $newQuantity;
                             $newBatch->save();
-                            
+
                             // Update batch information
                             $saleItem->purchase_item_id = $newBatchId;
                             $saleItem->batch_number_sold = $newBatch->batch_number;
@@ -1315,7 +1315,7 @@ class SaleController extends Controller
                         }
                     }
                 }
-                
+
                 // Update the sale item after stock adjustments
                 $saleItem->quantity = $newQuantity;
                 $saleItem->unit_price = $validatedData['unit_price'];
@@ -1349,7 +1349,6 @@ class SaleController extends Controller
                 'message' => 'Sale item updated successfully',
                 'sale' => new SaleResource($sale)
             ], Response::HTTP_OK);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
@@ -1381,8 +1380,8 @@ class SaleController extends Controller
         try {
             // Find the sale item
             $saleItem = $sale->items()->findOrFail($saleItemId);
-            
-         
+
+
             // Start transaction
             DB::beginTransaction();
 
@@ -1396,7 +1395,7 @@ class SaleController extends Controller
                     // Return to the specific batch
                     $purchaseItem->remaining_quantity += $saleItem->quantity;
                     $purchaseItem->save();
-                    
+
                     Log::info("Returned {$saleItem->quantity} units to batch {$purchaseItem->batch_number} for product " . ($product ? $product->name : 'Unknown'));
                 } else {
                     // If no specific batch, we need to handle this case
@@ -1410,20 +1409,20 @@ class SaleController extends Controller
                 // Delete the sale item first
                 $deletedQuantity = $saleItem->quantity;
                 $productName = $product ? $product->name : 'Unknown Product';
-                
 
-                
+
+
                 $saleItem->delete();
 
                 // Recalculate sale totals after deletion
                 $sale->refresh(); // Refresh to get updated items
                 $remainingItems = $sale->items()->get(); // Always fresh from DB
-                
 
-                
+
+
                 $newSubtotal = $remainingItems->sum('total_price');
                 $newTotalAmount = $newSubtotal; // No tax calculation for now
-                
+
                 // Totals are calculated from items/payments, not stored in DB
                 // No need to update sale record
 
@@ -1443,12 +1442,10 @@ class SaleController extends Controller
                     'new_sale_total' => $newTotalAmount,
                     'remaining_items_count' => $remainingItems->count()
                 ], Response::HTTP_OK);
-
             } catch (\Exception $e) {
                 DB::rollBack();
                 throw $e;
             }
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'message' => 'Sale item not found.',
@@ -1595,8 +1592,8 @@ class SaleController extends Controller
             $lineHeight = $pdf->getStringHeight($w_items[3], $productDescription); // Calculate height needed for description
             $lineHeight = max(6, $lineHeight); // Minimum height of 6
 
-                    $pdf->Cell($w_items[0], $lineHeight, number_format((float)$item->total_price, 0), 'LRB', 0, 'R', $fill);
-        $pdf->Cell($w_items[1], $lineHeight, number_format((float)$item->unit_price, 0), 'LRB', 0, 'R', $fill);
+            $pdf->Cell($w_items[0], $lineHeight, number_format((float)$item->total_price, 0), 'LRB', 0, 'R', $fill);
+            $pdf->Cell($w_items[1], $lineHeight, number_format((float)$item->unit_price, 0), 'LRB', 0, 'R', $fill);
             $pdf->Cell($w_items[2], $lineHeight, $item->quantity, 'LRB', 0, 'C', $fill);
 
             $x = $pdf->GetX();
@@ -1734,7 +1731,7 @@ class SaleController extends Controller
                 $w = 20; // mm
                 $x = ($pdf->getPageWidth() - $w) / 2;
                 $y = 5;
-                @$pdf->Image($logoPath, $x +20, $y, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+                @$pdf->Image($logoPath, $x + 20, $y, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
                 $pdf->Ln(h: 20);
             } catch (\Throwable $e) {
                 // ignore logo errors on thermal
@@ -1787,8 +1784,8 @@ class SaleController extends Controller
                 $productName = mb_substr($productName, 0, 18) . '..';
             }
 
-                    $itemTotal = number_format((float)$item->total_price, 0);
-        $itemPrice = number_format((float)$item->unit_price, 0);
+            $itemTotal = number_format((float)$item->total_price, 0);
+            $itemPrice = number_format((float)$item->unit_price, 0);
             $itemQty = (string)$item->quantity;
 
             // Using MultiCell for name to handle potential (though short) wrapping
@@ -1900,13 +1897,13 @@ class SaleController extends Controller
         }
 
         $sales = $query->get();
-        
+
         // Debug logging
         \Log::info('Calculator API Debug', [
             'date' => $date,
             'user_id' => $userId,
             'total_sales_found' => $sales->count(),
-            'sales_details' => $sales->map(function($sale) {
+            'sales_details' => $sales->map(function ($sale) {
                 $totalAmount = (float)($sale->items?->sum('total_price') ?? 0);
                 return [
                     'id' => $sale->id,
@@ -1920,7 +1917,7 @@ class SaleController extends Controller
         ]);
 
         // Calculate total income based on actual payments received
-        $totalIncome = $sales->sum(function($sale) {
+        $totalIncome = $sales->sum(function ($sale) {
             return $sale->payments->sum('amount');
         });
         $totalSales = $sales->count();
@@ -1928,7 +1925,7 @@ class SaleController extends Controller
         // Payment breakdown
         $paymentBreakdown = [];
         $paymentMethods = $sales->flatMap->payments->groupBy('method');
-        
+
         foreach ($paymentMethods as $method => $payments) {
             $paymentBreakdown[] = [
                 'method' => $method,
@@ -1943,7 +1940,7 @@ class SaleController extends Controller
             return [
                 'user_id' => (int) $userId,
                 'user_name' => $user ? $user->name : 'Unknown User',
-                'total_amount' => (float) $userSales->sum(function($sale) {
+                'total_amount' => (float) $userSales->sum(function ($sale) {
                     return $sale->payments->sum('amount');
                 }),
                 'payment_count' => $userSales->count(),
@@ -1983,30 +1980,30 @@ class SaleController extends Controller
                 foreach ($validatedData['items'] as $index => $itemData) {
                     try {
                         $product = Product::findOrFail($itemData['product_id']);
-                        
+
                         // Check if product already exists in the sale
                         $existingSaleItem = $sale->items()
                             ->where('product_id', $itemData['product_id'])
                             ->first();
-                        
+
                         if ($existingSaleItem) {
                             $errors[] = "Product '{$product->name}' already exists in sale";
                             continue;
                         }
-                        
+
                         // Check if product has any stock
                         if ($product->stock_quantity <= 0) {
                             $errors[] = "Product '{$product->name}' is out of stock. Available quantity: 0";
                             continue;
                         }
-                        
+
                         // Check stock availability - consider current sale items
                         $currentQuantityInThisSale = $sale->items()
                             ->where('product_id', $product->id)
                             ->sum('quantity');
                         $totalQuantityAfterAdd = $currentQuantityInThisSale + $itemData['quantity'];
                         $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
-                        
+
                         if ($totalQuantityAfterAdd > $originalStockQuantity) {
                             $errors[] = "Insufficient stock for '{$product->name}'. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterAdd}";
                             continue;
@@ -2036,7 +2033,7 @@ class SaleController extends Controller
                             if ($remainingQuantity <= 0) break;
 
                             $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
-                            
+
                             // Create sale item for this batch
                             $saleItem = $sale->items()->create([
                                 'product_id' => $product->id,
@@ -2073,10 +2070,9 @@ class SaleController extends Controller
                         // Update product stock
                         $product->stock_quantity -= $itemData['quantity'];
                         $product->save();
-                        
+
                         $addedItems = array_merge($addedItems, $saleItems);
                         $totalAdded++;
-
                     } catch (\Exception $e) {
                         $errors[] = "Failed to add product at index {$index}: " . $e->getMessage();
                     }
@@ -2107,8 +2103,8 @@ class SaleController extends Controller
                 'payments.user:id,name'
             ]);
 
-            $message = $result['total_added'] > 0 
-                ? "Successfully added {$result['total_added']} item(s)" 
+            $message = $result['total_added'] > 0
+                ? "Successfully added {$result['total_added']} item(s)"
                 : "No items were added";
 
             if (!empty($result['errors'])) {
@@ -2122,7 +2118,6 @@ class SaleController extends Controller
                 'total_added' => $result['total_added'],
                 'errors' => $result['errors']
             ], Response::HTTP_CREATED);
-
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),

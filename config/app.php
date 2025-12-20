@@ -55,9 +55,9 @@ return [
     |
     */
 
-    'url' => env('APP_URL', 'http://localhost'),
+    'url' => 'http://alroomy.a.pinggy.link/sales-api/public',
 
-    'asset_url' => env('ASSET_URL'),
+    'asset_url' => 'http://alroomy.a.pinggy.link/sales-api/public',
 
     /*
     |--------------------------------------------------------------------------

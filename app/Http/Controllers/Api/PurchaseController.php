@@ -86,6 +86,7 @@ class PurchaseController extends Controller
     public function store(Request $request)
     {
         $validatedData = $request->validate([
+            'warehouse_id' => 'sometimes|exists:warehouses,id',
             'supplier_id' => 'required|exists:suppliers,id',
             'purchase_date' => 'required|date_format:Y-m-d',
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
@@ -105,6 +106,7 @@ class PurchaseController extends Controller
             $purchase = DB::transaction(function () use ($validatedData, $request) {
                 // 1. Create the Purchase header record
                 $purchaseHeaderData = [
+                    'warehouse_id' => $validatedData['warehouse_id'] ?? 1, // Default to Main Warehouse
                     'supplier_id' => $validatedData['supplier_id'],
                     'user_id' => $request->user()->id,
                     'purchase_date' => $validatedData['purchase_date'],
@@ -120,32 +122,32 @@ class PurchaseController extends Controller
                 // 2. Loop through items, create PurchaseItem, and set remaining_quantity
                 if (!empty($validatedData['items'])) {
                     foreach ($validatedData['items'] as $itemData) {
-                    $product = Product::findOrFail($itemData['product_id']); // Load the product
-                    $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
+                        $product = Product::findOrFail($itemData['product_id']); // Load the product
+                        $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
 
-                    $quantityInStockingUnits = $itemData['quantity'];
-                    $unitCostPerStockingUnit = $itemData['unit_cost'];
-                    $totalCostForStockingUnits = $quantityInStockingUnits * $unitsPerStockingUnit;
+                        $quantityInStockingUnits = $itemData['quantity'];
+                        $unitCostPerStockingUnit = $itemData['unit_cost'];
+                        $totalCostForStockingUnits = $quantityInStockingUnits * $unitsPerStockingUnit;
 
-                    // Calculate values in sellable units
-                    $totalSellableUnitsPurchased = $quantityInStockingUnits * $unitsPerStockingUnit;
-                    $costPerSellableUnit = ($unitsPerStockingUnit > 0) ? ($unitCostPerStockingUnit / $unitsPerStockingUnit) : 0;
+                        // Calculate values in sellable units
+                        $totalSellableUnitsPurchased = $quantityInStockingUnits * $unitsPerStockingUnit;
+                        $costPerSellableUnit = ($unitsPerStockingUnit > 0) ? ($unitCostPerStockingUnit / $unitsPerStockingUnit) : 0;
 
-                    $calculatedTotalAmount += $totalCostForStockingUnits; // Overall purchase total
+                        $calculatedTotalAmount += $totalCostForStockingUnits; // Overall purchase total
 
-                    $purchase->items()->create([
-                        'product_id' => $product->id,
-                        'batch_number' => $itemData['batch_number'] ?? null,
-                        'quantity' => $quantityInStockingUnits ,          // Store original purchased qty in stocking units
-                        'remaining_quantity' => $totalSellableUnitsPurchased , // Store remaining in SELLABLE units
-                        'unit_cost' => $unitCostPerStockingUnit,        // Store cost per STOCKING unit
-                        'cost_per_sellable_unit' => $costPerSellableUnit, // Store cost per SELLABLE unit
-                        'total_cost' => $totalCostForStockingUnits,     // Total cost for this line
-                        'sale_price' => $itemData['sale_price'], // Required intended sale price per SELLABLE UNIT
-                        'sale_price_stocking_unit' => $itemData['sale_price_stocking_unit'] ?? null,
-                        'expiry_date' => $itemData['expiry_date'] ?? null,
-                    ]);
-                    // Product.stock_quantity (total sellable units) is updated by PurchaseItemObserver
+                        $purchase->items()->create([
+                            'product_id' => $product->id,
+                            'batch_number' => $itemData['batch_number'] ?? null,
+                            'quantity' => $quantityInStockingUnits,          // Store original purchased qty in stocking units
+                            'remaining_quantity' => $totalSellableUnitsPurchased, // Store remaining in SELLABLE units
+                            'unit_cost' => $unitCostPerStockingUnit,        // Store cost per STOCKING unit
+                            'cost_per_sellable_unit' => $costPerSellableUnit, // Store cost per SELLABLE unit
+                            'total_cost' => $totalCostForStockingUnits,     // Total cost for this line
+                            'sale_price' => $itemData['sale_price'], // Required intended sale price per SELLABLE UNIT
+                            'sale_price_stocking_unit' => $itemData['sale_price_stocking_unit'] ?? null,
+                            'expiry_date' => $itemData['expiry_date'] ?? null,
+                        ]);
+                        // Product.stock_quantity (total sellable units) is updated by PurchaseItemObserver
                     }
                 }
 
@@ -270,7 +272,7 @@ class PurchaseController extends Controller
 
         // For web routes, we want to display in browser, not download
         $isWebRoute = request()->route()->getName() === 'purchases.exportPdf';
-        
+
         if ($isWebRoute) {
             return response($pdfContent)
                 ->header('Content-Type', 'application/pdf')
@@ -379,7 +381,7 @@ class PurchaseController extends Controller
                 $product = Product::findOrFail($validatedData['product_id']);
                 $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
                 $newRemainingSellable = (int)$validatedData['quantity'] * $unitsPerStockingUnit;
-                
+
                 // Update the purchase item
                 $purchaseItem->update([
                     'product_id' => $validatedData['product_id'],
@@ -475,19 +477,18 @@ class PurchaseController extends Controller
             $file = $request->file('file');
             $excelService = new PurchaseExcelService();
             $headers = $excelService->getExcelHeaders($file);
-            
+
             return response()->json([
                 'success' => true,
                 'headers' => $headers,
                 'message' => 'File uploaded successfully. Headers extracted.'
             ]);
-            
         } catch (\Exception $e) {
             \Log::error('Purchase items import failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error uploading file: ' . $e->getMessage()
@@ -511,21 +512,20 @@ class PurchaseController extends Controller
             $file = $request->file('file');
             $columnMapping = $request->input('columnMapping');
             $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
-            
+
             $excelService = new PurchaseExcelService();
             $previewData = $excelService->previewPurchaseItems($file, $columnMapping, $skipHeader);
-            
+
             return response()->json([
                 'success' => true,
                 'preview' => $previewData
             ]);
-            
         } catch (\Exception $e) {
             \Log::error('Purchase items preview failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error previewing import: ' . $e->getMessage()
@@ -551,10 +551,10 @@ class PurchaseController extends Controller
             $columnMapping = $request->input('columnMapping');
             $skipHeader = filter_var($request->input('skipHeader', '1'), FILTER_VALIDATE_BOOLEAN);
             $purchaseId = $request->input('purchase_id');
-            
+
             $excelService = new PurchaseExcelService();
             $result = $excelService->importPurchaseItems($file, $columnMapping, $skipHeader, $purchaseId);
-            
+
             return response()->json([
                 'success' => true,
                 'imported' => $result['imported'],
@@ -562,7 +562,6 @@ class PurchaseController extends Controller
                 'message' => $result['message'],
                 'errorDetails' => $result['errorDetails'] ?? []
             ]);
-            
         } catch (\Illuminate\Database\QueryException $e) {
             // Check for unique constraint violation error code (MySQL: 1062)
             $errorCode = $e->errorInfo[1] ?? null;
@@ -578,7 +577,7 @@ class PurchaseController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error processing import due to a database error.'
@@ -588,7 +587,7 @@ class PurchaseController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Error processing import: ' . $e->getMessage()
@@ -649,7 +648,7 @@ class PurchaseController extends Controller
 
         // For web routes, we want to display in browser, not download
         $isWebRoute = $request->route()->getName() === 'purchases.exportExcel';
-        
+
         if ($isWebRoute) {
             return response($excelContent)
                 ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
