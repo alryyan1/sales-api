@@ -38,6 +38,26 @@ use Illuminate\Database\Eloquent\Relations\HasMany;   // Import relationship typ
  * @method static \Illuminate\Database\Eloquent\Builder|Purchase whereUserId($value)
  * @mixin \Eloquent
  */
+/**
+ * @OA\Schema(
+ *     schema="Purchase",
+ *     title="Purchase",
+ *     description="Purchase model",
+ *     @OA\Property(property="id", type="integer", example=1),
+ *     @OA\Property(property="supplier_id", type="integer", example=1),
+ *     @OA\Property(property="user_id", type="integer", example=1),
+ *     @OA\Property(property="warehouse_id", type="integer", example=1),
+ *     @OA\Property(property="purchase_date", type="string", format="date", example="2023-10-27"),
+ *     @OA\Property(property="reference_number", type="string", example="PO-12345"),
+ *     @OA\Property(property="status", type="string", enum={"received", "pending", "ordered"}, example="received"),
+ *     @OA\Property(property="total_amount", type="number", format="float", example=150.00),
+ *     @OA\Property(property="notes", type="string", example="Notes here"),
+ *     @OA\Property(property="created_at", type="string", format="date-time"),
+ *     @OA\Property(property="updated_at", type="string", format="date-time"),
+ *     @OA\Property(property="supplier", ref="#/components/schemas/Supplier"),
+ *     @OA\Property(property="items", type="array", @OA\Items(ref="#/components/schemas/PurchaseItem"))
+ * )
+ */
 class Purchase extends Model
 {
     use HasFactory;

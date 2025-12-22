@@ -35,6 +35,21 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
  * @method static \Illuminate\Database\Eloquent\Builder|Supplier whereUpdatedAt($value)
  * @mixin \Eloquent
  */
+/**
+ * @OA\Schema(
+ *     schema="Supplier",
+ *     title="Supplier",
+ *     description="Supplier model",
+ *     @OA\Property(property="id", type="integer", example=1),
+ *     @OA\Property(property="name", type="string", example="ABC Supplies"),
+ *     @OA\Property(property="contact_person", type="string", example="John Doe"),
+ *     @OA\Property(property="email", type="string", format="email", example="john@abc.com"),
+ *     @OA\Property(property="phone", type="string", example="123456789"),
+ *     @OA\Property(property="address", type="string", example="123 Street, City"),
+ *     @OA\Property(property="created_at", type="string", format="date-time"),
+ *     @OA\Property(property="updated_at", type="string", format="date-time")
+ * )
+ */
 class Supplier extends Model
 {
     use HasFactory;

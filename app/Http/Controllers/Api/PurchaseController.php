@@ -20,7 +20,79 @@ use App\Services\PurchaseExcelService;
 class PurchaseController extends Controller
 {
     /**
-     * Display a listing of the purchases.
+     * @OA\Tag(
+     *     name="Purchases",
+     *     description="API Endpoints for managing Purchases"
+     * )
+     */
+
+    /**
+     * @OA\Get(
+     *     path="/api/purchases",
+     *     summary="List all purchases",
+     *     description="Retrieve a paginated list of purchases with optional filters.",
+     *     tags={"Purchases"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="supplier_id",
+     *         in="query",
+     *         description="Filter by Supplier ID",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="reference_number",
+     *         in="query",
+     *         description="Filter by Reference Number",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="status",
+     *         in="query",
+     *         description="Filter by Status (received, pending, ordered)",
+     *         required=false,
+     *         @OA\Schema(type="string", enum={"received", "pending", "ordered"})
+     *     ),
+     *     @OA\Parameter(
+     *         name="purchase_date",
+     *         in="query",
+     *         description="Filter by Purchase Date (Y-m-d)",
+     *         required=false,
+     *         @OA\Schema(type="string", format="date")
+     *     ),
+     *     @OA\Parameter(
+     *         name="created_at",
+     *         in="query",
+     *         description="Filter by Creation Date (Y-m-d)",
+     *         required=false,
+     *         @OA\Schema(type="string", format="date")
+     *     ),
+     *     @OA\Parameter(
+     *         name="product_id",
+     *         in="query",
+     *         description="Filter by Product ID present in purchase items",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="include_items",
+     *         in="query",
+     *         description="Include purchase items in the response",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Successful operation",
+     *         @OA\JsonContent(
+     *             type="object",
+     *             @OA\Property(property="data", type="array", @OA\Items(ref="#/components/schemas/Purchase")),
+     *             @OA\Property(property="links", type="object"),
+     *             @OA\Property(property="meta", type="object")
+     *         )
+     *     )
+     * )
      */
     public function index(Request $request)
     {
@@ -80,8 +152,50 @@ class PurchaseController extends Controller
     }
 
     /**
-     * Store a newly created purchase in storage.
-     * Handles creating purchase header, items, setting remaining_quantity, and updating stock via observer.
+     * @OA\Post(
+     *     path="/api/purchases",
+     *     summary="Create a new purchase",
+     *     description="Store a newly created purchase in storage.",
+     *     tags={"Purchases"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"supplier_id", "purchase_date", "status"},
+     *             @OA\Property(property="supplier_id", type="integer", example=1),
+     *             @OA\Property(property="warehouse_id", type="integer", example=1, description="Optional, defaults to 1"),
+     *             @OA\Property(property="purchase_date", type="string", format="date", example="2023-10-27"),
+     *             @OA\Property(property="reference_number", type="string", example="PO-2023-001"),
+     *             @OA\Property(property="status", type="string", enum={"received", "pending", "ordered"}, example="received"),
+     *             @OA\Property(property="notes", type="string", example="Urgent order"),
+     *             @OA\Property(
+     *                 property="items",
+     *                 type="array",
+     *                 @OA\Items(
+     *                     required={"product_id", "quantity", "unit_cost", "sale_price"},
+     *                     @OA\Property(property="product_id", type="integer", example=10),
+     *                     @OA\Property(property="batch_number", type="string", example="BATCH-001"),
+     *                     @OA\Property(property="quantity", type="integer", example=100, description="Quantity in stocking units"),
+     *                     @OA\Property(property="unit_cost", type="number", format="float", example=10.50, description="Cost per stocking unit"),
+     *                     @OA\Property(property="sale_price", type="number", format="float", example=15.00, description="Sale price per sellable unit"),
+     *                     @OA\Property(property="sale_price_stocking_unit", type="number", format="float", example=150.00, description="Optional sale price per stocking unit"),
+     *                     @OA\Property(property="expiry_date", type="string", format="date", example="2024-10-27")
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Purchase created successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="purchase", ref="#/components/schemas/Purchase")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Validation error"
+     *     )
+     * )
      */
     public function store(Request $request)
     {
@@ -182,7 +296,31 @@ class PurchaseController extends Controller
     }
 
     /**
-     * Display the specified purchase.
+     * @OA\Get(
+     *     path="/api/purchases/{purchase}",
+     *     summary="Get purchase details",
+     *     description="Display the specified purchase with items and supplier details.",
+     *     tags={"Purchases"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="purchase",
+     *         in="path",
+     *         description="Purchase ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Successful operation",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="purchase", ref="#/components/schemas/Purchase")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Purchase not found"
+     *     )
+     * )
      */
     public function show(Purchase $purchase)
     {
@@ -197,10 +335,35 @@ class PurchaseController extends Controller
     }
 
     /**
-     * Update the specified purchase in storage.
-     * Typically, purchases are not updated once finalized due to stock and accounting implications.
-     * If updates are allowed, they must handle stock reversal and re-application carefully.
-     * This example only allows updating non-item related fields like notes or status if it doesn't affect stock.
+     * @OA\Put(
+     *     path="/api/purchases/{purchase}",
+     *     summary="Update purchase details",
+     *     description="Update the specified purchase. Note: Updating items is restricted here.",
+     *     tags={"Purchases"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="purchase",
+     *         in="path",
+     *         description="Purchase ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="reference_number", type="string", example="PO-2023-001-UPD"),
+     *             @OA\Property(property="status", type="string", enum={"received", "pending", "ordered"}),
+     *             @OA\Property(property="notes", type="string")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Purchase updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="purchase", ref="#/components/schemas/Purchase")
+     *         )
+     *     )
+     * )
      */
     public function update(Request $request, Purchase $purchase)
     {
@@ -225,9 +388,28 @@ class PurchaseController extends Controller
     }
 
     /**
-     * Remove the specified purchase from storage.
-     * CAUTION: This is highly discouraged for completed purchases due to stock and accounting.
-     * If implemented, stock quantities for all items in the purchase MUST be reversed.
+     * @OA\Delete(
+     *     path="/api/purchases/{purchase}",
+     *     summary="Delete a purchase",
+     *     description="Remove the specified purchase from storage. CAUTION: Use with care.",
+     *     tags={"Purchases"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="purchase",
+     *         in="path",
+     *         description="Purchase ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=403,
+     *         description="Deletion forbidden (default behavior)"
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Purchase deleted"
+     *     )
+     * )
      */
     public function destroy(Purchase $purchase)
     {

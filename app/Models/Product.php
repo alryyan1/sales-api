@@ -63,6 +63,19 @@ use Illuminate\Database\Eloquent\Relations\HasMany; // For relationships
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereUpdatedAt($value)
  * @mixin \Eloquent
  */
+/**
+ * @OA\Schema(
+ *     schema="Product",
+ *     title="Product",
+ *     description="Product model",
+ *     @OA\Property(property="id", type="integer", example=20),
+ *     @OA\Property(property="name", type="string", example="Tylenol"),
+ *     @OA\Property(property="sku", type="string", example="MED-001"),
+ *     @OA\Property(property="stock_quantity", type="integer", example=100),
+ *     @OA\Property(property="description", type="string", example="Pain reliever"),
+ *     @OA\Property(property="price", type="number", format="float", example=12.50)
+ * )
+ */
 class Product extends Model
 {
     use HasFactory;

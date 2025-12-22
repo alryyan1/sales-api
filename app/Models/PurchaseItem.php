@@ -43,6 +43,28 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereUpdatedAt($value)
  * @mixin \Eloquent
  */
+/**
+ * @OA\Schema(
+ *     schema="PurchaseItem",
+ *     title="Purchase Item",
+ *     description="Purchase Item model",
+ *     @OA\Property(property="id", type="integer", example=10),
+ *     @OA\Property(property="purchase_id", type="integer", example=1),
+ *     @OA\Property(property="product_id", type="integer", example=20),
+ *     @OA\Property(property="batch_number", type="string", example="BATCH-123"),
+ *     @OA\Property(property="quantity", type="integer", example=50, description="In stocking units"),
+ *     @OA\Property(property="remaining_quantity", type="integer", example=500, description="In sellable units"),
+ *     @OA\Property(property="unit_cost", type="number", format="float", example=10.00),
+ *     @OA\Property(property="total_cost", type="number", format="float", example=500.00),
+ *     @OA\Property(property="sale_price", type="number", format="float", example=15.00),
+ *     @OA\Property(property="sale_price_stocking_unit", type="number", format="float", example=150.00),
+ *     @OA\Property(property="expiry_date", type="string", format="date", example="2024-12-31"),
+ *     @OA\Property(property="cost_per_sellable_unit", type="number", format="float", example=1.00),
+ *     @OA\Property(property="created_at", type="string", format="date-time"),
+ *     @OA\Property(property="updated_at", type="string", format="date-time"),
+ *     @OA\Property(property="product", ref="#/components/schemas/Product")
+ * )
+ */
 class PurchaseItem extends Model
 {
     use HasFactory;
@@ -84,7 +106,7 @@ class PurchaseItem extends Model
     {
         return $this->belongsTo(Product::class);
     }
-      // Accessor for cost per sellable unit from this batch
+    // Accessor for cost per sellable unit from this batch
     public function getCostPerSellableUnitAttribute(): ?float
     {
         if ($this->product && $this->product->units_per_stocking_unit > 0) {

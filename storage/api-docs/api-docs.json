@@ -1793,9 +1793,1585 @@
                     }
                 ]
             }
+        },
+        "/api/purchases": {
+            "get": {
+                "tags": [
+                    "Purchases"
+                ],
+                "summary": "List all purchases",
+                "description": "Retrieve a paginated list of purchases with optional filters.",
+                "operationId": "f9e4d207618ed5d420eacbf76284cb61",
+                "parameters": [
+                    {
+                        "name": "supplier_id",
+                        "in": "query",
+                        "description": "Filter by Supplier ID",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "reference_number",
+                        "in": "query",
+                        "description": "Filter by Reference Number",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Filter by Status (received, pending, ordered)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "received",
+                                "pending",
+                                "ordered"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "purchase_date",
+                        "in": "query",
+                        "description": "Filter by Purchase Date (Y-m-d)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "created_at",
+                        "in": "query",
+                        "description": "Filter by Creation Date (Y-m-d)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "product_id",
+                        "in": "query",
+                        "description": "Filter by Product ID present in purchase items",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "include_items",
+                        "in": "query",
+                        "description": "Include purchase items in the response",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/Purchase"
+                                            }
+                                        },
+                                        "links": {
+                                            "type": "object"
+                                        },
+                                        "meta": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Purchases"
+                ],
+                "summary": "Create a new purchase",
+                "description": "Store a newly created purchase in storage.",
+                "operationId": "922a81d8425c9994dd7983b5e2606e13",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "supplier_id",
+                                    "purchase_date",
+                                    "status"
+                                ],
+                                "properties": {
+                                    "supplier_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "warehouse_id": {
+                                        "description": "Optional, defaults to 1",
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "purchase_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2023-10-27"
+                                    },
+                                    "reference_number": {
+                                        "type": "string",
+                                        "example": "PO-2023-001"
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "received",
+                                            "pending",
+                                            "ordered"
+                                        ],
+                                        "example": "received"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Urgent order"
+                                    },
+                                    "items": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "product_id",
+                                                "quantity",
+                                                "unit_cost",
+                                                "sale_price"
+                                            ],
+                                            "properties": {
+                                                "product_id": {
+                                                    "type": "integer",
+                                                    "example": 10
+                                                },
+                                                "batch_number": {
+                                                    "type": "string",
+                                                    "example": "BATCH-001"
+                                                },
+                                                "quantity": {
+                                                    "description": "Quantity in stocking units",
+                                                    "type": "integer",
+                                                    "example": 100
+                                                },
+                                                "unit_cost": {
+                                                    "description": "Cost per stocking unit",
+                                                    "type": "number",
+                                                    "format": "float",
+                                                    "example": 10.5
+                                                },
+                                                "sale_price": {
+                                                    "description": "Sale price per sellable unit",
+                                                    "type": "number",
+                                                    "format": "float",
+                                                    "example": 15
+                                                },
+                                                "sale_price_stocking_unit": {
+                                                    "description": "Optional sale price per stocking unit",
+                                                    "type": "number",
+                                                    "format": "float",
+                                                    "example": 150
+                                                },
+                                                "expiry_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2024-10-27"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Purchase created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "purchase": {
+                                            "$ref": "#/components/schemas/Purchase"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/purchases/{purchase}": {
+            "get": {
+                "tags": [
+                    "Purchases"
+                ],
+                "summary": "Get purchase details",
+                "description": "Display the specified purchase with items and supplier details.",
+                "operationId": "5418fb51c2296e04e0c69b139a965237",
+                "parameters": [
+                    {
+                        "name": "purchase",
+                        "in": "path",
+                        "description": "Purchase ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "purchase": {
+                                            "$ref": "#/components/schemas/Purchase"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Purchase not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Purchases"
+                ],
+                "summary": "Update purchase details",
+                "description": "Update the specified purchase. Note: Updating items is restricted here.",
+                "operationId": "03b69a2006d1df821d4ddd67b19463f3",
+                "parameters": [
+                    {
+                        "name": "purchase",
+                        "in": "path",
+                        "description": "Purchase ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "reference_number": {
+                                        "type": "string",
+                                        "example": "PO-2023-001-UPD"
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "received",
+                                            "pending",
+                                            "ordered"
+                                        ]
+                                    },
+                                    "notes": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Purchase updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "purchase": {
+                                            "$ref": "#/components/schemas/Purchase"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Purchases"
+                ],
+                "summary": "Delete a purchase",
+                "description": "Remove the specified purchase from storage. CAUTION: Use with care.",
+                "operationId": "5d705cc7993eefecb87769cdbaad1096",
+                "parameters": [
+                    {
+                        "name": "purchase",
+                        "in": "path",
+                        "description": "Purchase ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "403": {
+                        "description": "Deletion forbidden (default behavior)"
+                    },
+                    "200": {
+                        "description": "Purchase deleted"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/sales": {
+            "get": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "List all sales",
+                "description": "Get a paginated list of sales with optional filtering.",
+                "operationId": "getSales",
+                "parameters": [
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sales retrieved successfully"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Create a new sale (Complete)",
+                "description": "Create a new completed sale with items and payments in one request.",
+                "operationId": "storeSale",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "sale_date",
+                                    "items",
+                                    "payments"
+                                ],
+                                "properties": {
+                                    "client_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "sale_date": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "items": {
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "product_id": {
+                                                    "type": "integer"
+                                                },
+                                                "quantity": {
+                                                    "type": "integer"
+                                                },
+                                                "unit_price": {
+                                                    "type": "number",
+                                                    "format": "float"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "payments": {
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "method": {
+                                                    "type": "string"
+                                                },
+                                                "amount": {
+                                                    "type": "number",
+                                                    "format": "float"
+                                                },
+                                                "payment_date": {
+                                                    "type": "string",
+                                                    "format": "date"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Sale created"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/sales/create-empty": {
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Create an empty sale (draft)",
+                "description": "Creates a new sale record with no items, effectively a draft/cart for POS.",
+                "operationId": "createEmptySale",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "client_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "sale_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2023-10-25"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Sale created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "sale": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/sales/{sale}/payments/single": {
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Add a payment",
+                "description": "Add a single payment transaction to the sale.",
+                "operationId": "addSinglePayment",
+                "parameters": [
+                    {
+                        "name": "sale",
+                        "in": "path",
+                        "description": "Sale ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "method",
+                                    "amount"
+                                ],
+                                "properties": {
+                                    "method": {
+                                        "type": "string",
+                                        "enum": [
+                                            "cash",
+                                            "visa",
+                                            "mastercard",
+                                            "bank_transfer",
+                                            "mada",
+                                            "store_credit",
+                                            "other",
+                                            "refund"
+                                        ]
+                                    },
+                                    "amount": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 100
+                                    },
+                                    "reference_number": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Payment added"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/sales/{sale}/discount": {
+            "put": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Update sale discount",
+                "description": "Update the discount amount and type for a sale. Recalculates totals.",
+                "operationId": "updateSaleDiscount",
+                "parameters": [
+                    {
+                        "name": "sale",
+                        "in": "path",
+                        "description": "Sale ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "discount_amount",
+                                    "discount_type"
+                                ],
+                                "properties": {
+                                    "discount_amount": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 10
+                                    },
+                                    "discount_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "percentage",
+                                            "fixed"
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Discount updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "sale": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/sales/{sale}/payments/{payment}": {
+            "delete": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Delete a payment",
+                "description": "Delete a specific payment from a sale.",
+                "operationId": "deleteSalePayment",
+                "parameters": [
+                    {
+                        "name": "sale",
+                        "in": "path",
+                        "description": "Sale ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "payment",
+                        "in": "path",
+                        "description": "Payment ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Payment deleted"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/sales/{sale}/items": {
+            "post": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Add item to sale",
+                "description": "Add a product item to an existing sale. Handles stock validation.",
+                "operationId": "addSaleItem",
+                "parameters": [
+                    {
+                        "name": "sale",
+                        "in": "path",
+                        "description": "Sale ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "product_id",
+                                    "quantity",
+                                    "unit_price"
+                                ],
+                                "properties": {
+                                    "product_id": {
+                                        "type": "integer",
+                                        "example": 10
+                                    },
+                                    "quantity": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "unit_price": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 50
+                                    },
+                                    "purchase_item_id": {
+                                        "description": "Optional specific batch ID",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Item added",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "sale": {
+                                            "type": "object"
+                                        },
+                                        "added_items": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/sales/{sale}/items/{saleItem}": {
+            "put": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Update sale item quantity/price",
+                "description": "Update the quantity or price of a sale item. Stock is adjusted automatically.",
+                "operationId": "updateSaleItem",
+                "parameters": [
+                    {
+                        "name": "sale",
+                        "in": "path",
+                        "description": "Sale ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "saleItem",
+                        "in": "path",
+                        "description": "Sale Item ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "quantity",
+                                    "unit_price"
+                                ],
+                                "properties": {
+                                    "quantity": {
+                                        "type": "integer",
+                                        "example": 2
+                                    },
+                                    "unit_price": {
+                                        "type": "number",
+                                        "format": "float",
+                                        "example": 50
+                                    },
+                                    "purchase_item_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Item updated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "updated_item": {
+                                            "type": "object"
+                                        },
+                                        "sale": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Sales"
+                ],
+                "summary": "Delete sale item",
+                "description": "Remove an item from the sale and return stock to inventory.",
+                "operationId": "deleteSaleItem",
+                "parameters": [
+                    {
+                        "name": "sale",
+                        "in": "path",
+                        "description": "Sale ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "saleItem",
+                        "in": "path",
+                        "description": "Sale Item ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Item deleted"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/shifts/current": {
+            "get": {
+                "tags": [
+                    "Shifts"
+                ],
+                "summary": "Get current shift",
+                "description": "Retrieve the current active shift for the authenticated user.",
+                "operationId": "getCurrentShift",
+                "responses": {
+                    "200": {
+                        "description": "Current shift details",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer"
+                                                },
+                                                "user_id": {
+                                                    "type": "integer"
+                                                },
+                                                "opened_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                },
+                                                "closed_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "nullable": true
+                                                },
+                                                "is_open": {
+                                                    "type": "boolean"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "204": {
+                        "description": "No active shift found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/shifts/open": {
+            "post": {
+                "tags": [
+                    "Shifts"
+                ],
+                "summary": "Open new shift",
+                "description": "Open a new shift for the authenticated user if one isn't already open.",
+                "operationId": "openShift",
+                "responses": {
+                    "201": {
+                        "description": "Shift opened",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Shift already open"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/shifts/close": {
+            "post": {
+                "tags": [
+                    "Shifts"
+                ],
+                "summary": "Close current shift",
+                "description": "Close the currently active shift for the authenticated user.",
+                "operationId": "closeShift",
+                "responses": {
+                    "200": {
+                        "description": "Shift closed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "No open shift to close"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/suppliers": {
+            "get": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "List all suppliers",
+                "description": "Retrieve a paginated list of suppliers with optional search.",
+                "operationId": "6207e57dd1dcd1d6e7125fe144607196",
+                "parameters": [
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Search by name, email, or contact person",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/Supplier"
+                                            }
+                                        },
+                                        "links": {
+                                            "type": "object"
+                                        },
+                                        "meta": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Create a new supplier",
+                "description": "Store a newly created supplier in storage.",
+                "operationId": "dc5dc7ccb140cd5b81cab6f42b396691",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "ABC Supplies"
+                                    },
+                                    "contact_person": {
+                                        "type": "string",
+                                        "example": "John Doe"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "contact@abc.com"
+                                    },
+                                    "phone": {
+                                        "type": "string",
+                                        "example": "1234567890"
+                                    },
+                                    "address": {
+                                        "type": "string",
+                                        "example": "123 Main St"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Supplier created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "supplier": {
+                                            "$ref": "#/components/schemas/Supplier"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/suppliers/{supplier}": {
+            "get": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Get supplier details",
+                "description": "Display the specified supplier.",
+                "operationId": "6618a92d29f29f583bd6025e607161f4",
+                "parameters": [
+                    {
+                        "name": "supplier",
+                        "in": "path",
+                        "description": "Supplier ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "supplier": {
+                                            "$ref": "#/components/schemas/Supplier"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Supplier not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Update supplier details",
+                "description": "Update the specified supplier in storage.",
+                "operationId": "38983e8d987b175dc56c15f64191fbdc",
+                "parameters": [
+                    {
+                        "name": "supplier",
+                        "in": "path",
+                        "description": "Supplier ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "ABC Supplies Updated"
+                                    },
+                                    "contact_person": {
+                                        "type": "string"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email"
+                                    },
+                                    "phone": {
+                                        "type": "string"
+                                    },
+                                    "address": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Supplier updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "supplier": {
+                                            "$ref": "#/components/schemas/Supplier"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Suppliers"
+                ],
+                "summary": "Delete a supplier",
+                "description": "Remove the specified supplier from storage.",
+                "operationId": "bf1fd345bb41f583930c12eb78c3bdd7",
+                "parameters": [
+                    {
+                        "name": "supplier",
+                        "in": "path",
+                        "description": "Supplier ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Supplier deleted successfully"
+                    },
+                    "409": {
+                        "description": "Conflict (e.g. existing purchases)"
+                    },
+                    "500": {
+                        "description": "Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "components": {
+        "schemas": {
+            "Product": {
+                "title": "Product",
+                "description": "Product model",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 20
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "Tylenol"
+                    },
+                    "sku": {
+                        "type": "string",
+                        "example": "MED-001"
+                    },
+                    "stock_quantity": {
+                        "type": "integer",
+                        "example": 100
+                    },
+                    "description": {
+                        "type": "string",
+                        "example": "Pain reliever"
+                    },
+                    "price": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 12.5
+                    }
+                },
+                "type": "object"
+            },
+            "Purchase": {
+                "title": "Purchase",
+                "description": "Purchase model",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "supplier_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "user_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "warehouse_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "purchase_date": {
+                        "type": "string",
+                        "format": "date",
+                        "example": "2023-10-27"
+                    },
+                    "reference_number": {
+                        "type": "string",
+                        "example": "PO-12345"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "received",
+                            "pending",
+                            "ordered"
+                        ],
+                        "example": "received"
+                    },
+                    "total_amount": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 150
+                    },
+                    "notes": {
+                        "type": "string",
+                        "example": "Notes here"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "supplier": {
+                        "$ref": "#/components/schemas/Supplier"
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PurchaseItem"
+                        }
+                    }
+                },
+                "type": "object"
+            },
+            "PurchaseItem": {
+                "title": "Purchase Item",
+                "description": "Purchase Item model",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 10
+                    },
+                    "purchase_id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "product_id": {
+                        "type": "integer",
+                        "example": 20
+                    },
+                    "batch_number": {
+                        "type": "string",
+                        "example": "BATCH-123"
+                    },
+                    "quantity": {
+                        "description": "In stocking units",
+                        "type": "integer",
+                        "example": 50
+                    },
+                    "remaining_quantity": {
+                        "description": "In sellable units",
+                        "type": "integer",
+                        "example": 500
+                    },
+                    "unit_cost": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 10
+                    },
+                    "total_cost": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 500
+                    },
+                    "sale_price": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 15
+                    },
+                    "sale_price_stocking_unit": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 150
+                    },
+                    "expiry_date": {
+                        "type": "string",
+                        "format": "date",
+                        "example": "2024-12-31"
+                    },
+                    "cost_per_sellable_unit": {
+                        "type": "number",
+                        "format": "float",
+                        "example": 1
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "product": {
+                        "$ref": "#/components/schemas/Product"
+                    }
+                },
+                "type": "object"
+            },
+            "Supplier": {
+                "title": "Supplier",
+                "description": "Supplier model",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "ABC Supplies"
+                    },
+                    "contact_person": {
+                        "type": "string",
+                        "example": "John Doe"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "example": "john@abc.com"
+                    },
+                    "phone": {
+                        "type": "string",
+                        "example": "123456789"
+                    },
+                    "address": {
+                        "type": "string",
+                        "example": "123 Street, City"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "type": "object"
+            }
+        },
         "securitySchemes": {
             "bearerAuth": {
                 "type": "http",
@@ -1815,8 +3391,24 @@
             "description": "Product management endpoints"
         },
         {
+            "name": "Sales",
+            "description": "Sales management endpoints"
+        },
+        {
+            "name": "Shifts",
+            "description": "User shift management for POS"
+        },
+        {
             "name": "Clients",
             "description": "Clients"
+        },
+        {
+            "name": "Purchases",
+            "description": "Purchases"
+        },
+        {
+            "name": "Suppliers",
+            "description": "Suppliers"
         }
     ]
 }

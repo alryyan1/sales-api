@@ -8,10 +8,40 @@ use App\Models\Shift;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
+/**
+ * @OA\Tag(
+ *     name="Shifts",
+ *     description="User shift management for POS"
+ * )
+ */
 class ShiftController extends Controller
 {
     /**
-     * Get the current user's active (open) shift, if any.
+     * @OA\Get(
+     *     path="/api/shifts/current",
+     *     summary="Get current shift",
+     *     description="Retrieve the current active shift for the authenticated user.",
+     *     operationId="getCurrentShift",
+     *     tags={"Shifts"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Current shift details",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="id", type="integer"),
+     *                 @OA\Property(property="user_id", type="integer"),
+     *                 @OA\Property(property="opened_at", type="string", format="date-time"),
+     *                 @OA\Property(property="closed_at", type="string", format="date-time", nullable=true),
+     *                 @OA\Property(property="is_open", type="boolean")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=204,
+     *         description="No active shift found"
+     *     )
+     * )
      */
     public function current(Request $request)
     {
@@ -28,7 +58,25 @@ class ShiftController extends Controller
     }
 
     /**
-     * Open a new shift for the current user.
+     * @OA\Post(
+     *     path="/api/shifts/open",
+     *     summary="Open new shift",
+     *     description="Open a new shift for the authenticated user if one isn't already open.",
+     *     operationId="openShift",
+     *     tags={"Shifts"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=201,
+     *         description="Shift opened",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="Shift already open"
+     *     )
+     * )
      */
     public function open(Request $request)
     {
@@ -53,7 +101,25 @@ class ShiftController extends Controller
     }
 
     /**
-     * Close the current user's active shift.
+     * @OA\Post(
+     *     path="/api/shifts/close",
+     *     summary="Close current shift",
+     *     description="Close the currently active shift for the authenticated user.",
+     *     operationId="closeShift",
+     *     tags={"Shifts"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Shift closed",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=422,
+     *         description="No open shift to close"
+     *     )
+     * )
      */
     public function close(Request $request)
     {
@@ -79,5 +145,3 @@ class ShiftController extends Controller
         return new ShiftResource($shift);
     }
 }
-
-

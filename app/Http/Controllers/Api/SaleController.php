@@ -21,10 +21,30 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
+/**
+ * @OA\Tag(
+ *     name="Sales",
+ *     description="Sales management endpoints"
+ * )
+ */
 class SaleController extends Controller
 {
     /**
-     * Display a listing of the sales.
+     * @OA\Get(
+     *     path="/api/sales",
+     *     summary="List all sales",
+     *     description="Get a paginated list of sales with optional filtering.",
+     *     operationId="getSales",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(name="search", in="query", required=false, @OA\Schema(type="string")),
+     *     @OA\Parameter(name="page", in="query", required=false, @OA\Schema(type="integer")),
+     *     @OA\Parameter(name="per_page", in="query", required=false, @OA\Schema(type="integer")),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Sales retrieved successfully"
+     *     )
+     * )
      */
     public function index(Request $request)
     {
@@ -131,8 +151,29 @@ class SaleController extends Controller
     }
 
     /**
-     * Create an empty sale (draft) for POS operations.
-     * This method creates a sale header without any items or payments.
+     * @OA\Post(
+     *     path="/api/sales/create-empty",
+     *     summary="Create an empty sale (draft)",
+     *     description="Creates a new sale record with no items, effectively a draft/cart for POS.",
+     *     operationId="createEmptySale",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
+     *             @OA\Property(property="sale_date", type="string", format="date", example="2023-10-25"),
+     *             @OA\Property(property="notes", type="string", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Sale created",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="sale", type="object")
+     *         )
+     *     )
+     * )
      */
     public function createEmptySale(Request $request)
     {
@@ -203,8 +244,36 @@ class SaleController extends Controller
     }
 
     /**
-     * Store a newly created sale in storage.
-     * Handles creating sale header, items (FIFO from batches), payments, and decrementing stock.
+     * @OA\Post(
+     *     path="/api/sales",
+     *     summary="Create a new sale (Complete)",
+     *     description="Create a new completed sale with items and payments in one request.",
+     *     operationId="storeSale",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"sale_date", "items", "payments"},
+     *             @OA\Property(property="client_id", type="integer", nullable=true),
+     *             @OA\Property(property="sale_date", type="string", format="date"),
+     *             @OA\Property(property="items", type="array", @OA\Items(
+     *                 @OA\Property(property="product_id", type="integer"),
+     *                 @OA\Property(property="quantity", type="integer"),
+     *                 @OA\Property(property="unit_price", type="number", format="float")
+     *             )),
+     *             @OA\Property(property="payments", type="array", @OA\Items(
+     *                 @OA\Property(property="method", type="string"),
+     *                 @OA\Property(property="amount", type="number", format="float"),
+     *                 @OA\Property(property="payment_date", type="string", format="date")
+     *             ))
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Sale created"
+     *     )
+     * )
      */
     public function store(Request $request)
     {
@@ -795,7 +864,35 @@ class SaleController extends Controller
     }
 
     /**
-     * Add a single payment to an existing sale.
+     * @OA\Post(
+     *     path="/api/sales/{sale}/payments/single",
+     *     summary="Add a payment",
+     *     description="Add a single payment transaction to the sale.",
+     *     operationId="addSinglePayment",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="sale",
+     *         in="path",
+     *         description="Sale ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"method", "amount"},
+     *             @OA\Property(property="method", type="string", enum={"cash", "visa", "mastercard", "bank_transfer", "mada", "store_credit", "other", "refund"}),
+     *             @OA\Property(property="amount", type="number", format="float", example=100.0),
+     *             @OA\Property(property="reference_number", type="string", nullable=true),
+     *             @OA\Property(property="notes", type="string", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Payment added"
+     *     )
+     * )
      */
     public function addSinglePayment(Request $request, Sale $sale)
     {
@@ -844,9 +941,36 @@ class SaleController extends Controller
 
 
     /**
-     * Update discount on a sale instantly (amount and type) and recalculate totals.
-     * - discount_amount: numeric value; interpreted as percent when type=percentage, absolute when type=fixed
-     * - discount_type: 'percentage' | 'fixed'
+     * @OA\Put(
+     *     path="/api/sales/{sale}/discount",
+     *     summary="Update sale discount",
+     *     description="Update the discount amount and type for a sale. Recalculates totals.",
+     *     operationId="updateSaleDiscount",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="sale",
+     *         in="path",
+     *         description="Sale ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"discount_amount", "discount_type"},
+     *             @OA\Property(property="discount_amount", type="number", format="float", example=10.0),
+     *             @OA\Property(property="discount_type", type="string", enum={"percentage", "fixed"})
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Discount updated",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="sale", type="object")
+     *         )
+     *     )
+     * )
      */
     public function updateDiscount(Request $request, Sale $sale)
     {
@@ -927,7 +1051,32 @@ class SaleController extends Controller
     }
 
     /**
-     * Delete a single payment from an existing sale.
+     * @OA\Delete(
+     *     path="/api/sales/{sale}/payments/{payment}",
+     *     summary="Delete a payment",
+     *     description="Delete a specific payment from a sale.",
+     *     operationId="deleteSalePayment",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="sale",
+     *         in="path",
+     *         description="Sale ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="payment",
+     *         in="path",
+     *         description="Payment ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Payment deleted"
+     *     )
+     * )
      */
     public function deleteSinglePayment(Sale $sale, $paymentId)
     {
@@ -961,11 +1110,39 @@ class SaleController extends Controller
     }
 
     /**
-     * Add a new item to an existing sale.
-     * 
-     * @param Request $request
-     * @param Sale $sale
-     * @return \Illuminate\Http\JsonResponse
+     * @OA\Post(
+     *     path="/api/sales/{sale}/items",
+     *     summary="Add item to sale",
+     *     description="Add a product item to an existing sale. Handles stock validation.",
+     *     operationId="addSaleItem",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="sale",
+     *         in="path",
+     *         description="Sale ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"product_id", "quantity", "unit_price"},
+     *             @OA\Property(property="product_id", type="integer", example=10),
+     *             @OA\Property(property="quantity", type="integer", example=1),
+     *             @OA\Property(property="unit_price", type="number", format="float", example=50.0),
+     *             @OA\Property(property="purchase_item_id", type="integer", nullable=true, description="Optional specific batch ID")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=201,
+     *         description="Item added",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="sale", type="object"),
+     *             @OA\Property(property="added_items", type="array", @OA\Items(type="object"))
+     *         )
+     *     )
+     * )
      */
     public function addSaleItem(Request $request, Sale $sale)
     {
@@ -1199,12 +1376,45 @@ class SaleController extends Controller
     }
 
     /**
-     * Update an existing sale item.
-     * 
-     * @param Request $request
-     * @param Sale $sale
-     * @param int $saleItemId
-     * @return \Illuminate\Http\JsonResponse
+     * @OA\Put(
+     *     path="/api/sales/{sale}/items/{saleItem}",
+     *     summary="Update sale item quantity/price",
+     *     description="Update the quantity or price of a sale item. Stock is adjusted automatically.",
+     *     operationId="updateSaleItem",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="sale",
+     *         in="path",
+     *         description="Sale ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="saleItem",
+     *         in="path",
+     *         description="Sale Item ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"quantity", "unit_price"},
+     *             @OA\Property(property="quantity", type="integer", example=2),
+     *             @OA\Property(property="unit_price", type="number", format="float", example=50.0),
+     *             @OA\Property(property="purchase_item_id", type="integer", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Item updated",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="updated_item", type="object"),
+     *             @OA\Property(property="sale", type="object")
+     *         )
+     *     )
+     * )
      */
     public function updateSaleItem(Request $request, Sale $sale, $saleItemId)
     {
@@ -1368,12 +1578,32 @@ class SaleController extends Controller
     }
 
     /**
-     * Delete a specific sale item and return inventory quantity.
-     * 
-     * @param Request $request
-     * @param Sale $sale
-     * @param int $saleItemId
-     * @return \Illuminate\Http\JsonResponse
+     * @OA\Delete(
+     *     path="/api/sales/{sale}/items/{saleItem}",
+     *     summary="Delete sale item",
+     *     description="Remove an item from the sale and return stock to inventory.",
+     *     operationId="deleteSaleItem",
+     *     tags={"Sales"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="sale",
+     *         in="path",
+     *         description="Sale ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="saleItem",
+     *         in="path",
+     *         description="Sale Item ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Item deleted"
+     *     )
+     * )
      */
     public function deleteSaleItem(Request $request, Sale $sale, $saleItemId)
     {

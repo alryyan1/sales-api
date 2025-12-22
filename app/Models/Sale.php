@@ -143,6 +143,9 @@ class Sale extends Model
                 // Get the next order number for the current shift
                 // If no shift_id, fall back to date-based numbering for backward compatibility
                 if ($sale->shift_id) {
+                    // Lock the shift record to ensure sequential order numbering and prevent duplicates
+                    Shift::where('id', $sale->shift_id)->lockForUpdate()->first();
+
                     $maxOrderNumber = static::where('shift_id', $sale->shift_id)
                         ->max('sale_order_number') ?? 0;
                     $sale->sale_order_number = $maxOrderNumber + 1;
