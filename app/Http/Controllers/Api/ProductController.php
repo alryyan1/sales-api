@@ -103,7 +103,7 @@ class ProductController extends Controller
         $query = Product::query();
 
         // Load relationships needed for the ProductResource
-        $query->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem'])
+        $query->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem', 'warehouses'])
             ->withSum('purchaseItems', 'quantity')
             ->withSum('saleItems', 'quantity');
 
@@ -254,7 +254,7 @@ class ProductController extends Controller
     public function show(Product $product) // Route model binding
     {
         // Load relationships needed for the ProductResource
-        $product->load(['category', 'stockingUnit', 'sellableUnit']);
+        $product->load(['category', 'stockingUnit', 'sellableUnit', 'warehouses']);
 
         return response()->json(['product' => new ProductResource($product)]);
     }
@@ -541,7 +541,7 @@ class ProductController extends Controller
         ]);
 
         $products = Product::whereIn('id', $validated['ids'])
-            ->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem'])
+            ->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem', 'warehouses'])
             ->withSum('purchaseItems', 'quantity')
             ->withSum('saleItems', 'quantity')
             ->get();
@@ -1028,6 +1028,27 @@ class ProductController extends Controller
                 'message' => $errorMessage
             ], 400);
         }
+    }
+    public function purchaseHistory(Request $request, Product $product)
+    {
+        $limit = $request->input('per_page', 10);
+        $history = $product->purchaseItems()
+            ->with(['purchase.supplier'])
+            ->orderBy('created_at', 'desc')
+            ->paginate($limit);
+
+        return \App\Http\Resources\PurchaseItemResource::collection($history);
+    }
+
+    public function salesHistory(Request $request, Product $product)
+    {
+        $limit = $request->input('per_page', 10);
+        $history = $product->saleItems()
+            ->with(['sale.client', 'sale.user'])
+            ->orderBy('created_at', 'desc')
+            ->paginate($limit);
+
+        return \App\Http\Resources\SaleItemResource::collection($history);
     }
 }
 

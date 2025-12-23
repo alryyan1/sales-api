@@ -29,7 +29,8 @@ use App\Http\Controllers\Api\{
   WhatsAppController,
   WhatsAppSchedulerController,
   ShiftController,
-  WarehouseController
+  WarehouseController,
+  StockTransferController
 };
 use App\Http\Controllers\UpdateController;
 
@@ -161,10 +162,13 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/products/import', [ProductController::class, 'importExcel']);
   Route::post('/products/preview-import', [ProductController::class, 'previewImport']);
   Route::post('/products/process-import', [ProductController::class, 'processImport']);
+  Route::get('/products/{product}/purchase-history', [ProductController::class, 'purchaseHistory']);
+  Route::get('/products/{product}/sales-history', [ProductController::class, 'salesHistory']);
   Route::apiResource('products', ProductController::class);
 
   // -- Warehouses Management --
   Route::apiResource('warehouses', WarehouseController::class);
+  Route::apiResource('stock-transfers', StockTransferController::class)->only(['index', 'store']);
 
   // -- Units Management --
   Route::get('/units/stocking', [UnitController::class, 'stocking'])->name('api.units.stocking');

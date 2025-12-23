@@ -2883,6 +2883,106 @@
                 ]
             }
         },
+        "/api/stock-transfers": {
+            "get": {
+                "tags": [
+                    "Stock Transfers"
+                ],
+                "summary": "List stock transfers",
+                "operationId": "942905c0296853ee95e2c37a98732c9b",
+                "parameters": [
+                    {
+                        "name": "from_warehouse_id",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "to_warehouse_id",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "product_id",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of transfers"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Stock Transfers"
+                ],
+                "summary": "Create stock transfer",
+                "operationId": "f8a07716d8fefac411d9f74d7516dc3f",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "from_warehouse_id",
+                                    "to_warehouse_id",
+                                    "product_id",
+                                    "quantity",
+                                    "transfer_date"
+                                ],
+                                "properties": {
+                                    "from_warehouse_id": {
+                                        "type": "integer"
+                                    },
+                                    "to_warehouse_id": {
+                                        "type": "integer"
+                                    },
+                                    "product_id": {
+                                        "type": "integer"
+                                    },
+                                    "quantity": {
+                                        "type": "number"
+                                    },
+                                    "transfer_date": {
+                                        "type": "string",
+                                        "format": "date"
+                                    },
+                                    "notes": {
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Transfer created"
+                    },
+                    "422": {
+                        "description": "Validation Error or Insufficient Stock"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/suppliers": {
             "get": {
                 "tags": [
@@ -3405,6 +3505,10 @@
         {
             "name": "Purchases",
             "description": "Purchases"
+        },
+        {
+            "name": "Stock Transfers",
+            "description": "Stock Transfers"
         },
         {
             "name": "Suppliers",

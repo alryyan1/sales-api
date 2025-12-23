@@ -62,13 +62,23 @@ class Sale extends Model
         'sale_date',
         'invoice_number',
         'notes',
-        'discount_amount',
+        'total_amount',
+        'tax',
+        'discount',
+        'paid_amount',
+        'discount_amount', // Keep existing
         'discount_type',
         'sale_order_number',
+        'payment_status',
+        'status',
     ];
 
     protected $casts = [
         'sale_date' => 'date',
+        'total_amount' => 'decimal:2',
+        'tax' => 'decimal:2',
+        'discount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
         'discount_amount' => 'decimal:2',
     ];
 

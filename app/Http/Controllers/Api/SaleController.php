@@ -279,6 +279,18 @@ class SaleController extends Controller
     {
         $validatedData = $this->validateSaleRequest($request);
 
+        // Check for open shift before transaction
+        $currentShift = Shift::where('user_id', $request->user()->id)
+            ->whereNull('closed_at')
+            ->orderBy('id', 'desc')
+            ->first();
+
+        if (!$currentShift) {
+            return response()->json([
+                'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
+            ], Response::HTTP_BAD_REQUEST);
+        }
+
         $this->performStockPreCheck($validatedData);
 
         $calculatedTotals = $this->calculateTotals($validatedData);
@@ -286,14 +298,43 @@ class SaleController extends Controller
         $this->validatePaidAmount($calculatedTotals);
 
         try {
-            $sale = DB::transaction(function () use ($validatedData, $request, $calculatedTotals) {
+            $sale = DB::transaction(function () use ($validatedData, $request, $calculatedTotals, $currentShift) {
                 $saleHeader = $this->createSaleHeader($validatedData, $request, $calculatedTotals);
 
                 // --- Calculate Total Sale Amount from items in THIS request ---
                 $newTotalSaleAmount = 0;
                 $this->processSaleItems($validatedData, $saleHeader, $newTotalSaleAmount);
-                // 3. Final verification can compare against item totals if needed.
+
                 $this->createPaymentRecords($validatedData, $saleHeader, $request);
+
+                // Update Sale Header with final totals
+                // Note: total_amount in DB requested by user. We use amountAfterDiscount as the "Total" to pay?
+                // Or total_amount = subtotal? User requested "total_amount, tax, discount, paid_amount".
+                // Usually total_amount is gross.
+                // Let's store:
+                // total_amount = $calculatedTotals['subtotal']
+                // discount = $calculatedTotals['discountAmount']
+                // tax = 0 (for now, unless calculated)
+                // but wait, createSaleHeader already sets discount_amount.
+                // I will update total_amount and paid_amount.
+                // And payment_status.
+
+                $paidAmount = $saleHeader->payments()->sum('amount');
+                $netAmount = $calculatedTotals['subtotal'] - $calculatedTotals['discountAmount']; // + tax if any
+
+                $paymentStatus = 'unpaid';
+                if ($paidAmount >= $netAmount && $netAmount > 0) {
+                    $paymentStatus = 'paid';
+                } elseif ($paidAmount > 0) {
+                    $paymentStatus = 'partial';
+                }
+
+                $saleHeader->update([
+                    'total_amount' => $calculatedTotals['subtotal'], // Gross total
+                    'paid_amount' => $paidAmount,
+                    'payment_status' => $paymentStatus,
+                    // 'tax' => 0, // already defaulted
+                ]);
 
                 return $saleHeader;
             });
@@ -322,6 +363,7 @@ class SaleController extends Controller
     private function validateSaleRequest(Request $request)
     {
         return $request->validate([
+            'warehouse_id' => 'nullable|exists:warehouses,id', // Warehouse for the sale
             'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
             'sale_date' => 'required|date_format:Y-m-d',
             'invoice_number' => 'nullable|string|max:255|unique:sales,invoice_number',
@@ -437,13 +479,15 @@ class SaleController extends Controller
         }
     }
 
-    private function createSaleHeader(array $validatedData, Request $request, array $calculatedTotals)
+    private function createSaleHeader(array $validatedData, Request $request, array $calculatedTotals, ?Shift $currentShift = null)
     {
-        // Get current user's open shift
-        $currentShift = Shift::where('user_id', $request->user()->id)
-            ->whereNull('closed_at')
-            ->orderBy('id', 'desc')
-            ->first();
+        // Get current user's open shift if not provided
+        if (!$currentShift) {
+            $currentShift = Shift::where('user_id', $request->user()->id)
+                ->whereNull('closed_at')
+                ->orderBy('id', 'desc')
+                ->first();
+        }
 
         return Sale::create([
             'warehouse_id' => $validatedData['warehouse_id'] ?? 1,
@@ -528,6 +572,8 @@ class SaleController extends Controller
 
                         // Decrement the remaining quantity of the batch (which is in sellable units)
                         $batch->decrement('remaining_quantity', $canSellFromThisBatchInSellableUnits);
+                        // Also decrement warehouse specific stock
+                        $product->decrementWarehouseStock($warehouseId, $canSellFromThisBatchInSellableUnits);
                         // The PurchaseItemObserver is responsible for listening to this 'saved' event on PurchaseItem
                         // and then recalculating and updating the total Product->stock_quantity (which is also in sellable units).
 
@@ -556,6 +602,8 @@ class SaleController extends Controller
 
                     // Decrement directly from product stock
                     $product->decrement('stock_quantity', $remainingQuantity);
+                    // Also decrement warehouse specific stock
+                    $product->decrementWarehouseStock($warehouseId, $remainingQuantity);
 
                     // Update totals for the current sale
                     $newTotalSaleAmount += $remainingQuantity * $unitSalePrice;
@@ -577,6 +625,8 @@ class SaleController extends Controller
 
                 // Decrement directly from product stock
                 $product->decrement('stock_quantity', $requestedSellableUnits);
+                // Also decrement warehouse specific stock
+                $product->decrementWarehouseStock($warehouseId, $requestedSellableUnits);
 
                 // Update totals for the current sale
                 $newTotalSaleAmount += $requestedSellableUnits * $unitSalePrice;
@@ -1261,6 +1311,9 @@ class SaleController extends Controller
                     // Auto-allocate from available batches (FIFO)
                     $availableBatches = PurchaseItem::where('product_id', $product->id)
                         ->where('remaining_quantity', '>', 0)
+                        ->whereHas('purchase', function ($q) use ($sale) {
+                            $q->where('warehouse_id', $sale->warehouse_id ?? 1); // Filter batches by warehouse
+                        })
                         ->orderBy('expiry_date', 'asc')
                         ->orderBy('created_at', 'asc')
                         ->get();
@@ -1312,6 +1365,17 @@ class SaleController extends Controller
                 // Update product stock
                 $product->stock_quantity -= $validatedData['quantity'];
                 $product->save();
+
+                // UPDATE WAREHOUSE STOCK
+                $warehouseId = $sale->warehouse_id;
+                if ($warehouseId) {
+                    $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+                    if ($pivot) {
+                        $product->warehouses()->updateExistingPivot($warehouseId, [
+                            'quantity' => max(0, $pivot->pivot->quantity - $validatedData['quantity'])
+                        ]);
+                    }
+                }
 
                 // Calculate totals from items (no longer stored in DB)
                 $newTotal = $sale->items()->sum('total_price');

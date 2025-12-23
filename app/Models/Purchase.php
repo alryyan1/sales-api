@@ -71,11 +71,13 @@ class Purchase extends Model
         'status',
         'total_amount', // Although calculated, might be set initially or updated
         'notes',
+        'stock_added_to_warehouse',
     ];
 
     protected $casts = [
         'purchase_date' => 'date',       // Cast to Carbon date object
         'total_amount' => 'decimal:2', // Cast to decimal with 2 places
+        'stock_added_to_warehouse' => 'boolean',
     ];
 
     /**

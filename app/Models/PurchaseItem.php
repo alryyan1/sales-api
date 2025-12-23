@@ -78,6 +78,7 @@ class PurchaseItem extends Model
         'total_cost',               // quantity * unit_cost
         'sale_price',               // Intended sale price PER SELLABLE UNIT for this batch (required)
         'sale_price_stocking_unit', // Optional: Intended sale price per STOCKING UNIT
+        'cost_per_sellable_unit',   // Cost per sellable unit (calculated)
         'expiry_date',
     ];
 

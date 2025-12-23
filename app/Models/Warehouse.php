@@ -36,4 +36,11 @@ class Warehouse extends Model
     {
         return $this->hasMany(StockAdjustment::class);
     }
+
+    public function products(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Product::class, 'product_warehouse')
+            ->withPivot('quantity', 'min_stock_level')
+            ->withTimestamps();
+    }
 }

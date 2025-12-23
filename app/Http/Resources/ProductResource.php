@@ -33,7 +33,7 @@ class ProductResource extends JsonResource
             'stock_alert_level' => $this->stock_alert_level, // In sellable units
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
             'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null,
-            
+
             'latest_cost_per_sellable_unit' => $this->latest_cost_per_sellable_unit ?? null,
             'suggested_sale_price_per_sellable_unit' => $this->suggested_sale_price_per_sellable_unit ?? null,
             'last_sale_price_per_sellable_unit' => $this->last_sale_price_per_sellable_unit ?? null,
@@ -43,8 +43,19 @@ class ProductResource extends JsonResource
             'current_stock_quantity' => $this->current_stock_quantity ?? 0,
             'total_items_purchased' => $this->total_items_purchased ?? 0,
             'total_items_sold' => $this->total_items_sold ?? 0,
-            'available_batches' => $this->whenLoaded('purchaseItemsWithStock', function() {
+            'available_batches' => $this->whenLoaded('purchaseItemsWithStock', function () {
                 return PurchaseItemResource::collection($this->purchaseItemsWithStock);
+            }),
+            'warehouses' => $this->whenLoaded('warehouses', function () {
+                return $this->warehouses->map(function ($warehouse) {
+                    return [
+                        'id' => $warehouse->id,
+                        'name' => $warehouse->name,
+                        'pivot' => [
+                            'quantity' => (int) $warehouse->pivot->quantity,
+                        ],
+                    ];
+                });
             }),
         ];
     }

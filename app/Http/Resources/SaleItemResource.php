@@ -20,6 +20,7 @@ class SaleItemResource extends JsonResource
         return [
             'id' => $this->id,
             'sale_id' => $this->sale_id, // ID of the parent sale
+            'sale' => new SaleResource($this->whenLoaded('sale')),
             'product_id' => $this->product_id,
 
             // Conditionally load product details if the 'product' relationship is eager loaded
@@ -49,7 +50,7 @@ class SaleItemResource extends JsonResource
             'batch_expiry_date' => $this->whenLoaded('purchaseItemBatch', function () {
                 return $this->purchaseItemBatch?->expiry_date?->format('Y-m-d');
             }),
-            
+
             // Current stock information from the product
             'current_stock_quantity' => $this->whenLoaded('product', function () {
                 return $this->product?->stock_quantity ?? 0;

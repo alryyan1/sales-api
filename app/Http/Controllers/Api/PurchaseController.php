@@ -262,11 +262,32 @@ class PurchaseController extends Controller
                             'expiry_date' => $itemData['expiry_date'] ?? null,
                         ]);
                         // Product.stock_quantity (total sellable units) is updated by PurchaseItemObserver
+
+                        // UPDATE WAREHOUSE STOCK
+                        // We must also update the product_warehouse pivot table to reflect this new stock
+                        $warehouseId = $purchase->warehouse_id;
+                        if ($warehouseId && $validatedData['status'] === 'received') {
+                            $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+                            $currentPivotQty = $pivot ? $pivot->pivot->quantity : 0;
+
+                            if ($pivot) {
+                                $product->warehouses()->updateExistingPivot($warehouseId, [
+                                    'quantity' => $currentPivotQty + $totalSellableUnitsPurchased
+                                ]);
+                            } else {
+                                $product->warehouses()->attach($warehouseId, [
+                                    'quantity' => $totalSellableUnitsPurchased
+                                ]);
+                            }
+                        }
                     }
                 }
 
                 // 3. Update the total amount on the Purchase header
                 $purchase->total_amount = $calculatedTotalAmount;
+                if ($purchase->status === 'received') {
+                    $purchase->stock_added_to_warehouse = true;
+                }
                 $purchase->save();
 
                 return $purchase;
@@ -379,9 +400,77 @@ class PurchaseController extends Controller
 
         // Business logic: What happens if status changes from 'pending' to 'received'?
         // If stock was not added on 'pending', it should be added now.
-        // This simplified update does not handle such stock logic changes for status updates.
+        DB::transaction(function () use ($purchase, $validatedData) {
+            $oldStatus = $purchase->status;
+            $newStatus = $validatedData['status'] ?? $oldStatus;
 
-        $purchase->update($validatedData);
+            $purchase->update($validatedData);
+
+            // Case 1: Changing to RECEIVED (and stock not yet added)
+            if ($newStatus === 'received' && !$purchase->stock_added_to_warehouse) {
+                foreach ($purchase->items as $item) {
+                    $product = $item->product;
+                    $warehouseId = $purchase->warehouse_id;
+                    $qtyToAdd = $item->remaining_quantity; // Use remaining_quantity = original sellable qty
+
+                    if ($product && $warehouseId) {
+                        $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+                        if ($pivot) {
+                            $product->warehouses()->updateExistingPivot($warehouseId, [
+                                'quantity' => $pivot->pivot->quantity + $qtyToAdd
+                            ]);
+                        } else {
+                            $product->warehouses()->attach($warehouseId, [
+                                'quantity' => $qtyToAdd
+                            ]);
+                        }
+                    }
+                }
+                $purchase->stock_added_to_warehouse = true;
+                $purchase->save();
+            }
+
+            // Case 2: Changing from RECEIVED to PENDING/ORDERED (revert stock)
+            elseif ($oldStatus === 'received' && $newStatus !== 'received' && $purchase->stock_added_to_warehouse) {
+                // Check if any items have been sold first? 
+                // If items have been sold, we CANNOT revert easily without negative stock or complex logic.
+                // For now, assuming we allow it but check constraint or just deduct.
+
+                foreach ($purchase->items as $item) {
+                    $product = $item->product;
+                    $warehouseId = $purchase->warehouse_id;
+                    $qtyToRemove = $item->remaining_quantity;
+
+                    // If item was sold, remaining_quantity < original. 
+                    // Technically we should remove what we ADDED (which is original).
+                    // But if we remove original, and user sold some, stock goes negative. 
+
+                    // BETTER LOGIC: If we un-receive, we should probably ensure no sales happened.
+                    // But for simple start:
+                    // We deduct the *current* remaining quantity of the batch? 
+                    // No, that leaves 'ghost' stock from sales.
+
+                    // Correct Reversal: Deduct the AMOUNT we added originally.
+                    // If that results in negative stock, so be it (user oversight).
+                    // However, we need to know original add amount.
+                    // The item->quantity is stocking units. 
+                    $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
+                    $originalSellableQty = $item->quantity * $unitsPerStockingUnit;
+
+                    if ($product && $warehouseId) {
+                        $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+                        if ($pivot) {
+                            $newQty = max(0, $pivot->pivot->quantity - $originalSellableQty);
+                            $product->warehouses()->updateExistingPivot($warehouseId, [
+                                'quantity' => $newQty
+                            ]);
+                        }
+                    }
+                }
+                $purchase->stock_added_to_warehouse = false;
+                $purchase->save();
+            }
+        });
 
         $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
         return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
@@ -514,6 +603,23 @@ class PurchaseController extends Controller
                     'remaining_quantity' => $totalSellableUnitsPurchased,
                 ]);
 
+                // UPDATE WAREHOUSE STOCK
+                $warehouseId = $purchase->warehouse_id;
+                if ($warehouseId && $purchase->status === 'received') {
+                    $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+                    $currentPivotQty = $pivot ? $pivot->pivot->quantity : 0;
+
+                    if ($pivot) {
+                        $product->warehouses()->updateExistingPivot($warehouseId, [
+                            'quantity' => $currentPivotQty + $totalSellableUnitsPurchased
+                        ]);
+                    } else {
+                        $product->warehouses()->attach($warehouseId, [
+                            'quantity' => $totalSellableUnitsPurchased
+                        ]);
+                    }
+                }
+
                 // Update purchase total amount
                 $this->updatePurchaseTotal($purchase);
             });
@@ -564,6 +670,27 @@ class PurchaseController extends Controller
                 $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
                 $newRemainingSellable = (int)$validatedData['quantity'] * $unitsPerStockingUnit;
 
+                // UPDATE WAREHOUSE STOCK (Adjust for difference)
+                $quantityDifference = (int)$validatedData['quantity'] - (int)$purchaseItem->quantity;
+                $diffSellable = $quantityDifference * $unitsPerStockingUnit;
+
+                if ($diffSellable != 0 && $purchase->warehouse_id && $purchase->status === 'received') {
+                    $pivot = $product->warehouses()->where('warehouse_id', $purchase->warehouse_id)->first();
+                    if ($pivot) {
+                        $product->warehouses()->updateExistingPivot($purchase->warehouse_id, [
+                            'quantity' => max(0, $pivot->pivot->quantity + $diffSellable)
+                        ]);
+                    }
+                    // If pivot doesn't exist but we are adding stock, maybe attach? 
+                    // But this is update... assume pivot exists if original purchase created it.
+                    // If not, we might need to attach.
+                    elseif ($diffSellable > 0) {
+                        $product->warehouses()->attach($purchase->warehouse_id, [
+                            'quantity' => $diffSellable
+                        ]);
+                    }
+                }
+
                 // Update the purchase item
                 $purchaseItem->update([
                     'product_id' => $validatedData['product_id'],
@@ -611,6 +738,31 @@ class PurchaseController extends Controller
 
         try {
             DB::transaction(function () use ($purchase, $purchaseItem) {
+                // DEDUCT WAREHOUSE STOCK BEFORE DELETION (Since we need the item data)
+                $warehouseId = $purchase->warehouse_id;
+                $product = $purchaseItem->product;
+                // Note: using $purchaseItem->product might fail if it's already soft deleted? No, we are in transaction before delete.
+
+                // We need to calculate how much sellable quantity was added by this item originally.
+                // It was stored in remaining_quantity initially, but might have been sold down. 
+                // However, if we delete a purchase item that has been partially sold... that's dangerous.
+                // The constraint check (lines below) prevents deleting if sales exist. 
+                // So remaining_quantity SHOULD be equal to original quantity (in sellable units).
+
+                if ($product && $warehouseId && $purchase->status === 'received') {
+                    // Recalculate original sellable quantity just to be safe, or trust remaining_quantity?
+                    // If sales exist, we can't delete (due to FK). So remaining_quantity is safe to use.
+                    $qtyToRemove = $purchaseItem->remaining_quantity;
+
+                    $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+                    if ($pivot) {
+                        $newQty = max(0, $pivot->pivot->quantity - $qtyToRemove);
+                        $product->warehouses()->updateExistingPivot($warehouseId, [
+                            'quantity' => $newQty
+                        ]);
+                    }
+                }
+
                 // Delete the purchase item
                 $purchaseItem->delete();
 

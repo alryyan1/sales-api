@@ -148,6 +148,14 @@ class Product extends Model
         return $this->belongsTo(Unit::class, 'sellable_unit_id');
     }
 
+    // Relationship to Warehouses
+    public function warehouses(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Warehouse::class, 'product_warehouse')
+            ->withPivot('quantity', 'min_stock_level')
+            ->withTimestamps();
+    }
+
     // Example: Get the latest purchase cost for this product
     public function getLatestPurchaseCostAttribute(): ?float // Accessor: $product->latest_purchase_cost
     {
@@ -225,6 +233,9 @@ class Product extends Model
     /**
      * Scope a query to only include products that are low on stock.
      */
+    /**
+     * Scope a query to only include products that are low on stock.
+     */
     public function scopeLowStock($query)
     {
         return $query->whereNotNull('stock_alert_level')
@@ -232,6 +243,43 @@ class Product extends Model
         // If stock_quantity is an aggregate, this whereColumn will work if it's updated.
         // Otherwise, you'd need a more complex whereHas with sum.
     }
+
+    /**
+     * Scope a query to include products low on stock in a specific warehouse.
+     */
+    public function scopeLowStockInWarehouse($query, $warehouseId)
+    {
+        return $query->whereHas('warehouses', function ($q) use ($warehouseId) {
+            $q->where('warehouse_id', $warehouseId)
+                ->whereNotNull('product_warehouse.min_stock_level')
+                ->whereColumn('product_warehouse.quantity', '<=', 'product_warehouse.min_stock_level');
+        });
+    }
+
+    public function incrementWarehouseStock($warehouseId, $quantity)
+    {
+        $warehouse = $this->warehouses()->where('warehouse_id', $warehouseId)->first();
+        if ($warehouse) {
+            $this->warehouses()->updateExistingPivot($warehouseId, [
+                'quantity' => $warehouse->pivot->quantity + $quantity
+            ]);
+        } else {
+            $this->warehouses()->attach($warehouseId, ['quantity' => $quantity]);
+        }
+    }
+
+    public function decrementWarehouseStock($warehouseId, $quantity)
+    {
+        $warehouse = $this->warehouses()->where('warehouse_id', $warehouseId)->first();
+        if ($warehouse) {
+            $this->warehouses()->updateExistingPivot($warehouseId, [
+                'quantity' => $warehouse->pivot->quantity - $quantity
+            ]);
+        } else {
+            $this->warehouses()->attach($warehouseId, ['quantity' => -$quantity]);
+        }
+    }
+
     // Accessor to get the latest cost PER SELLABLE UNIT
     public function getLatestCostPerSellableUnitAttribute(): ?float
     {
@@ -331,9 +379,11 @@ class Product extends Model
     public function countStock(?int $warehouseId = null): int
     {
         if ($warehouseId) {
-            return (int) $this->purchaseItems()
+            // Use a fresh query to avoid any relationship caching issues
+            return (int) PurchaseItem::where('product_id', $this->id)
                 ->whereHas('purchase', function ($q) use ($warehouseId) {
-                    $q->where('warehouse_id', $warehouseId);
+                    $q->where('warehouse_id', $warehouseId)
+                      ->where('status', 'received'); // Only count stock from received purchases
                 })
                 ->sum('remaining_quantity');
         }
