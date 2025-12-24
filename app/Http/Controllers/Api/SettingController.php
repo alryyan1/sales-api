@@ -23,7 +23,7 @@ class SettingController extends Controller
      */
     public function index(Request $request)
     {
-        // $this->checkAuthorization('view-settings'); // Policy or Gate check
+        $this->checkAuthorization('view-settings'); // Policy or Gate check
         $service = new SettingsService();
         $settings = $service->getAll();
         return response()->json(['data' => $settings]);
@@ -74,7 +74,7 @@ class SettingController extends Controller
         ]);
     }
 
-     /**
+    /**
      * Helper to authorize based on permission string
      */
     private function checkAuthorization(string $permission): void
