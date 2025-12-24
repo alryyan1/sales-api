@@ -100,6 +100,10 @@ class SaleController extends Controller
             $query->whereTime('created_at', '<=', $endTime);
         }
 
+        if ($shiftId = $request->input('shift_id')) {
+            $query->where('shift_id', $shiftId);
+        }
+
         $sales = $query->latest('id')->paginate($request->input('per_page', 15));
 
         // Add return information to each sale

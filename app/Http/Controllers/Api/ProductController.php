@@ -155,6 +155,13 @@ class ProductController extends Controller
         $perPage = $request->input('per_page', 15); // Default items per page
         $products = $query->paginate($perPage);
 
+        if ($warehouseId = $request->input('warehouse_id')) {
+            $products->getCollection()->transform(function ($product) use ($warehouseId) {
+                $product->current_stock_quantity = $product->countStock($warehouseId);
+                return $product;
+            });
+        }
+
         return ProductResource::collection($products);
     }
 
@@ -478,7 +485,7 @@ class ProductController extends Controller
 
             if ($warehouseId) {
                 // Override total stock with warehouse specific stock
-                $product->stock_quantity = $product->countStock($warehouseId);
+                $product->current_stock_quantity = $product->countStock($warehouseId);
             }
         });
 

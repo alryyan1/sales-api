@@ -38,7 +38,10 @@ class DatabaseSeeder extends Seeder
         if ($adminUser && !$adminUser->hasRole('admin')) {
             $adminUser->assignRole('admin');
             $this->command->info('Admin role assigned to admin user.');
-        }
+            $this->call(CategoriesTableSeeder::class);
+        $this->call(UnitsTableSeeder::class);
+        $this->call(ProductsTableSeeder::class);
+    }
 
         // Optionally create some non-admin users with other roles using factory
         // User::factory()->count(5)->create()->each(function ($user) {

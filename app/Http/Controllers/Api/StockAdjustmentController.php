@@ -20,6 +20,9 @@ class StockAdjustmentController extends Controller
     /**
      * Store a new stock adjustment.
      */
+    /**
+     * Store a new stock adjustment.
+     */
     public function store(Request $request)
     {
         // Authorization
@@ -28,6 +31,7 @@ class StockAdjustmentController extends Controller
         }
 
         $validated = $request->validate([
+            'warehouse_id' => 'required|integer|exists:warehouses,id',
             'product_id' => 'required|integer|exists:products,id',
             'purchase_item_id' => 'nullable|integer|exists:purchase_items,id', // Optional: ID of the batch to adjust
             'quantity_change' => 'required|integer|not_in:0', // Must be non-zero integer (+ or -)
@@ -35,6 +39,7 @@ class StockAdjustmentController extends Controller
             'notes' => 'nullable|string|max:65535',
         ]);
 
+        $warehouseId = $validated['warehouse_id'];
         $productId = $validated['product_id'];
         $batchId = $validated['purchase_item_id'] ?? null;
         $quantityChange = $validated['quantity_change'];
@@ -43,72 +48,98 @@ class StockAdjustmentController extends Controller
         $userId = $request->user()->id;
 
         try {
-            $result = DB::transaction(function () use ($productId, $batchId, $quantityChange, $reason, $notes, $userId) {
+            $result = DB::transaction(function () use ($warehouseId, $productId, $batchId, $quantityChange, $reason, $notes, $userId) {
                 $product = Product::lockForUpdate()->findOrFail($productId);
                 $purchaseItem = null;
-                $quantityBefore = $product->stock_quantity; // Assume total stock before change
+                $quantityBefore = $product->stock_quantity; // Global stock before change (for historical record)
+                // However, for warehouse specific adjustments, we might want to record warehouse stock before?
+                // For now, let's keep standard fields but logic is warehouse specific.
 
-                // Adjusting specific batch OR general product stock
-                if ($batchId) {
-                    $purchaseItem = PurchaseItem::lockForUpdate()->findOrFail($batchId);
-                    // Verify batch belongs to the product
-                    if ($purchaseItem->product_id !== $product->id) {
-                         throw ValidationException::withMessages(['purchase_item_id' => 'Selected batch does not belong to the selected product.']);
-                    }
-                    $quantityBefore = $purchaseItem->remaining_quantity; // Batch quantity before
-                    $newBatchQuantity = $quantityBefore + $quantityChange;
-
-                    if ($newBatchQuantity < 0) {
-                        throw ValidationException::withMessages(['quantity_change' => "Adjustment results in negative stock for batch #{$purchaseItem->batch_number}. Available: {$quantityBefore}."]);
-                    }
-                    // Update batch remaining quantity
-                    $purchaseItem->remaining_quantity = $newBatchQuantity;
-                    $purchaseItem->save(); // The Observer will update Product->stock_quantity
-
-                    $quantityAfter = $newBatchQuantity;
-
-                } else {
-                    // Adjusting general product stock (use observer if possible, otherwise direct update)
-                    $newProductQuantity = $quantityBefore + $quantityChange;
-                    if ($newProductQuantity < 0) {
-                        throw ValidationException::withMessages(['quantity_change' => "Adjustment results in negative total stock for product '{$product->name}'. Available: {$quantityBefore}."]);
-                    }
-
-                    // If using PurchaseItemObserver, this direct update is problematic as it bypasses batch logic.
-                    // It's better to REQUIRE batch selection for adjustments if using batch tracking,
-                    // or create a "dummy" PurchaseItem batch for adjustments if absolutely needed.
-                    // For now, let's assume direct update if no batch ID is given, BUT WARN about inconsistency potential.
-                    Log::warning("Direct stock adjustment on Product ID {$productId} without batch specification. Batch tracking might become inconsistent.");
-                    $product->stock_quantity = $newProductQuantity;
-                    $product->save();
-
-                    $quantityAfter = $newProductQuantity;
+                // 1. Validate Warehouse Connection
+                // Ensure product is attached to this warehouse
+                if (!$product->warehouses()->where('warehouse_id', $warehouseId)->exists()) {
+                    // Auto-attach if missing? Or error? Standard flow implies it should exist if we are adjusting it.
+                    // Let's attach if missing to be safe, starting with 0.
+                    $product->warehouses()->attach($warehouseId, ['quantity' => 0]);
                 }
 
-                // Log the adjustment
+                // Get current warehouse quantity
+                $currentWarehouseStock = $product->warehouses()->where('warehouse_id', $warehouseId)->first()->pivot->quantity;
+                $newWarehouseStock = $currentWarehouseStock + $quantityChange;
+
+                if ($newWarehouseStock < 0) {
+                    throw ValidationException::withMessages(['quantity_change' => "Adjustment results in negative stock for this warehouse. Available: {$currentWarehouseStock}."]);
+                }
+
+                // 2. Adjust Specific Batch (if provided)
+                if ($batchId) {
+                    $purchaseItem = PurchaseItem::lockForUpdate()->findOrFail($batchId);
+
+                    // Verify batch matches product
+                    if ($purchaseItem->product_id !== $product->id) {
+                        throw ValidationException::withMessages(['purchase_item_id' => 'Selected batch does not belong to the selected product.']);
+                    }
+
+                    // Verify batch belongs to the warehouse (if we added warehouse_id to purchase_items/purchases)
+                    // Currently Purchase has warehouse_id. The batch belongs to a Purchase.
+                    if ($purchaseItem->purchase && $purchaseItem->purchase->warehouse_id != $warehouseId) {
+                        throw ValidationException::withMessages(['purchase_item_id' => 'Selected batch belongs to a different warehouse.']);
+                    }
+
+                    $batchQuantityBefore = $purchaseItem->remaining_quantity;
+                    $newBatchQuantity = $batchQuantityBefore + $quantityChange;
+
+                    if ($newBatchQuantity < 0) {
+                        throw ValidationException::withMessages(['quantity_change' => "Adjustment results in negative stock for batch #{$purchaseItem->batch_number}. Available: {$batchQuantityBefore}."]);
+                    }
+
+                    // Update batch
+                    $purchaseItem->remaining_quantity = $newBatchQuantity;
+                    $purchaseItem->save(); // Observer updates global Product stock
+
+                    // We also need to MANUALLY update the warehouse pivot, because the Observer might only update Global stock.
+                    // If PurchaseItem matches Warehouse -> Product Stock (Global) is sum of batches?
+                    // Usually: Global Stock = Sum of all Warehouse Pivot Stocks.
+                    // And Warehouse Pivot Stock = Sum of Batches in that Warehouse.
+
+                    // So we update the pivot:
+                    $product->warehouses()->updateExistingPivot($warehouseId, ['quantity' => $newWarehouseStock]);
+                } else {
+                    // 3. General Warehouse Adjustment (No specific batch)
+                    // This is risky if strict batch tracking is on, but allowed for "found" items or non-batch products.
+
+                    // Update Warehouse Pivot
+                    $product->warehouses()->updateExistingPivot($warehouseId, ['quantity' => $newWarehouseStock]);
+
+                    // Start of Global update (direct or via observer?)
+                    // If we update pivot, we should also update global count to keep in sync.
+                    $product->stock_quantity += $quantityChange;
+                    $product->save();
+                }
+
+                // 4. Create Adjustment Record
                 $adjustment = StockAdjustment::create([
+                    'warehouse_id' => $warehouseId,
                     'product_id' => $productId,
-                    'purchase_item_id' => $batchId, // Null if adjusting general product stock
+                    'purchase_item_id' => $batchId,
                     'user_id' => $userId,
                     'quantity_change' => $quantityChange,
-                    'quantity_before' => $quantityBefore, // Record quantity BEFORE change
-                    'quantity_after' => $quantityAfter,   // Record quantity AFTER change
+                    'quantity_before' => $currentWarehouseStock, // Recording WAREHOUSE specific before/after makes more sense here
+                    'quantity_after' => $newWarehouseStock,
                     'reason' => $reason,
                     'notes' => $notes,
                 ]);
 
-                return ['adjustment' => $adjustment, 'product' => $product->fresh()]; // Return adjustment and updated product
-
+                return ['adjustment' => $adjustment, 'product' => $product->fresh()];
             }); // End Transaction
 
             return response()->json([
                 'message' => 'Stock adjusted successfully.',
                 'adjustment' => $result['adjustment'],
-                'product' => new ProductResource($result['product']->load('purchaseItems')), // Return updated product potentially with batches
+                'product' => new ProductResource($result['product']->load('purchaseItems')),
             ], Response::HTTP_OK);
-
         } catch (ValidationException $e) {
-            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY); // 422
+            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
             Log::error("Stock adjustment failed: " . $e->getMessage() . "\n" . $e->getTraceAsString());
             return response()->json(['message' => 'Failed to adjust stock. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -118,22 +149,40 @@ class StockAdjustmentController extends Controller
     /**
      * Display a listing of stock adjustments (History).
      */
-     public function index(Request $request)
-     {
+    public function index(Request $request)
+    {
         // Authorization check
-         if ($request->user()->cannot('view-stock-adjustments')) { // Define this permission
-             abort(403);
-         }
+        if ($request->user()->cannot('view-stock-adjustments')) { // Define this permission
+            abort(403);
+        }
 
-         $query = StockAdjustment::with(['user:id,name', 'product:id,name,sku', 'purchaseItemBatch:id,batch_number']); // Eager load
+        $query = StockAdjustment::with(['user:id,name', 'product:id,name,sku', 'purchaseItemBatch:id,batch_number', 'warehouse:id,name']); // Eager load
 
-         // Add Filtering (by date, product, user, reason) if needed
-         // ...
+        // Add Filtering
+        if ($warehouseId = $request->input('warehouse_id')) {
+            $query->where('warehouse_id', $warehouseId);
+        }
 
-         $adjustments = $query->latest()->paginate($request->input('per_page', 20));
+        if ($productId = $request->input('product_id')) {
+            $query->where('product_id', $productId);
+        }
 
-         // Create StockAdjustmentResource if needed for formatting
-         // return StockAdjustmentResource::collection($adjustments);
-         return response()->json($adjustments); // Return raw paginated data for now
-     }
+        if ($userId = $request->input('user_id')) {
+            $query->where('user_id', $userId);
+        }
+
+        if ($startDate = $request->input('start_date')) {
+            $query->whereDate('created_at', '>=', $startDate);
+        }
+
+        if ($endDate = $request->input('end_date')) {
+            $query->whereDate('created_at', '<=', $endDate);
+        }
+
+        $adjustments = $query->latest()->paginate($request->input('per_page', 20));
+
+        // Create StockAdjustmentResource if needed for formatting
+        // return StockAdjustmentResource::collection($adjustments);
+        return response()->json($adjustments); // Return raw paginated data for now
+    }
 }

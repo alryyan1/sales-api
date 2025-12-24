@@ -133,7 +133,7 @@ class UserController extends Controller
                 // Update basic fields
                 $user->fill(Arr::only($validatedData, ['name', 'username', 'warehouse_id']));
                 // Prevent assigning roles if 'admin' is missing, but only for user with ID 1
-                if ($user->id === 1 && !in_array('admin', $validatedData['roles'])) {
+                if ($user->id === 1 && !in_array('admin', $validatedData['roles']) && !in_array('ادمن', $validatedData['roles'])) {
                     throw new \Exception('The "admin" role cannot be removed for this user.');
                 }
                 // Update roles if provided
@@ -150,7 +150,7 @@ class UserController extends Controller
             return response()->json(['user' => new UserResource($user->fresh())]);
         } catch (\Throwable $e) {
             Log::error("User update failed for ID {$user->id}: " . $e->getMessage());
-            return response()->json(['message' => 'Failed to update user.'], Response::HTTP_INTERNAL_SERVER_ERROR);
+            return response()->json(['message' => 'Failed to update user: ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 

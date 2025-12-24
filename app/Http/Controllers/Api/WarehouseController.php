@@ -54,4 +54,25 @@ class WarehouseController extends Controller
         $warehouse->delete();
         return response()->noContent();
     }
+    public function importMissingProducts(Warehouse $warehouse)
+    {
+        // Get all products that are NOT already attached to this warehouse
+        $existingProductIds = $warehouse->products()->pluck('product_id')->toArray();
+
+        $productsToAttach = \App\Models\Product::whereNotIn('id', $existingProductIds)->get();
+
+        $count = 0;
+        foreach ($productsToAttach as $product) {
+            // Attach with current global stock quantity
+            // Note: This logic assumes the user wants to initialize this warehouse 
+            // with the currently recorded global stock.
+            $warehouse->products()->attach($product->id, [
+                'quantity' => $product->stock_quantity ?? 0,
+                'min_stock_level' => 0
+            ]);
+            $count++;
+        }
+
+        return response()->json(['message' => "Imported $count products successfully", 'count' => $count]);
+    }
 }

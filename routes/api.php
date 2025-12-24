@@ -169,6 +169,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Warehouses Management --
   Route::apiResource('warehouses', WarehouseController::class);
+  Route::post('warehouses/{warehouse}/import-missing-products', [WarehouseController::class, 'importMissingProducts']);
   Route::apiResource('stock-transfers', StockTransferController::class)->only(['index', 'store']);
 
   // -- Units Management --
