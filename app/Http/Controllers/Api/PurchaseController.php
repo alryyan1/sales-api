@@ -790,6 +790,34 @@ class PurchaseController extends Controller
     }
 
     /**
+     * Get paginated items for a specific purchase with search.
+     */
+    public function getItems(Request $request, Purchase $purchase)
+    {
+        $query = $purchase->items()->getQuery()
+            ->with(['product:id,name,sku,units_per_stocking_unit']);
+
+        // Search functionality
+        if ($search = $request->input('search')) {
+            $query->where(function ($q) use ($search) {
+                // Search by Product Name or SKU
+                $q->whereHas('product', function ($pQuery) use ($search) {
+                    $pQuery->where('name', 'like', "%{$search}%")
+                        ->orWhere('sku', 'like', "%{$search}%");
+                })
+                    // Or Search by Batch Number
+                    ->orWhere('batch_number', 'like', "%{$search}%");
+            });
+        }
+
+        // Pagination
+        $perPage = $request->input('per_page', 15);
+        $items = $query->orderBy('id', 'desc')->paginate($perPage);
+
+        return \App\Http\Resources\PurchaseItemResource::collection($items);
+    }
+
+    /**
      * Update the total amount of a purchase based on its items.
      */
     private function updatePurchaseTotal(Purchase $purchase): void

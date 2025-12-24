@@ -81,6 +81,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('admin/settings', [SettingController::class, 'index'])->name('settings.index');
   Route::put('admin/settings', [SettingController::class, 'update'])->name('settings.update');
   Route::post('admin/settings/logo', [SettingController::class, 'uploadLogo'])->name('settings.uploadLogo');
+  Route::post('admin/settings/header', [SettingController::class, 'uploadHeader'])->name('settings.uploadHeader');
 
   // -- Database Backup Management --
   Route::middleware(['role:admin'])->prefix('admin')->name('api.admin.')->group(function () {
@@ -182,6 +183,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/purchases/import-items', [PurchaseController::class, 'importPurchaseItems']);
   Route::post('/purchases/preview-import-items', [PurchaseController::class, 'previewImportPurchaseItems']);
   Route::post('/purchases/process-import-items', [PurchaseController::class, 'processImportPurchaseItems']);
+  Route::get('/purchases/{purchase}/items', [PurchaseController::class, 'getItems'])->name('api.purchases.getItems');
   Route::post('/purchases/{purchase}/items', [PurchaseController::class, 'addPurchaseItem'])->name('api.purchases.addPurchaseItem');
   Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updatePurchaseItem');
   Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'deletePurchaseItem'])->name('api.purchases.deletePurchaseItem');

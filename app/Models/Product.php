@@ -285,6 +285,14 @@ class Product extends Model
     // Accessor to get the latest cost PER SELLABLE UNIT
     public function getLatestCostPerSellableUnitAttribute(): ?float
     {
+        if (array_key_exists('latest_purchase_cost_raw', $this->attributes)) {
+            $cost = $this->attributes['latest_purchase_cost_raw'];
+            if ($cost !== null && $this->units_per_stocking_unit > 0) {
+                return round((float) $cost / $this->units_per_stocking_unit, 2);
+            }
+            return null;
+        }
+
         if ($this->relationLoaded('latestPurchaseItem')) {
             $latestBatch = $this->latestPurchaseItem;
         } else {
@@ -309,6 +317,8 @@ class Product extends Model
         $settings = $settingsCache;
 
         $markupToUse = $markupPercentage ?? ($settings['default_profit_rate'] ?? 25.0);
+
+        // This will call the optimized accessor above
         $latestCostPerSellable = $this->latest_cost_per_sellable_unit;
 
         if ($latestCostPerSellable !== null) {
@@ -320,6 +330,10 @@ class Product extends Model
     // Accessor to get the last sale price from the most recent purchase item
     public function getLastSalePricePerSellableUnitAttribute(): ?float
     {
+        if (array_key_exists('last_sale_price_raw', $this->attributes)) {
+            return $this->attributes['last_sale_price_raw'] !== null ? (float) $this->attributes['last_sale_price_raw'] : null;
+        }
+
         $latestPurchaseItem = $this->purchaseItems()
             ->whereNotNull('sale_price')
             ->orderBy('created_at', 'desc')
@@ -335,6 +349,10 @@ class Product extends Model
     // Accessor to get the earliest expiry date from available stock
     public function getEarliestExpiryDateAttribute(): ?string
     {
+        if (array_key_exists('earliest_expiry_date', $this->attributes)) {
+            return $this->attributes['earliest_expiry_date'];
+        }
+
         $earliestExpiry = $this->purchaseItems()
             ->where('remaining_quantity', '>', 0)
             ->whereNotNull('expiry_date')
@@ -391,6 +409,22 @@ class Product extends Model
         }
 
         return $this->total_stock_quantity;
+    }
+
+    /**
+     * Calculate pending stock quantity for a warehouse.
+     *
+     * @param int $warehouseId
+     * @return int
+     */
+    public function countPendingStock(int $warehouseId): int
+    {
+        return (int) PurchaseItem::where('product_id', $this->id)
+            ->whereHas('purchase', function ($q) use ($warehouseId) {
+                $q->where('warehouse_id', $warehouseId)
+                    ->where('status', 'pending');
+            })
+            ->sum('remaining_quantity');
     }
 
     /**

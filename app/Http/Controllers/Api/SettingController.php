@@ -23,7 +23,7 @@ class SettingController extends Controller
      */
     public function index(Request $request)
     {
-        $this->checkAuthorization('view-settings'); // Policy or Gate check
+        $this->checkAuthorization('manage-settings'); // Policy or Gate check
         $service = new SettingsService();
         $settings = $service->getAll();
         return response()->json(['data' => $settings]);
@@ -36,7 +36,7 @@ class SettingController extends Controller
      */
     public function update(Request $request)
     {
-        $this->checkAuthorization('update-settings');
+        $this->checkAuthorization('manage-settings');
         $service = new SettingsService();
         $rules = $service->validationRules();
         Log::info('Settings update request data:', $request->all());
@@ -53,7 +53,7 @@ class SettingController extends Controller
      */
     public function uploadLogo(Request $request)
     {
-        $this->checkAuthorization('update-settings');
+        $this->checkAuthorization('manage-settings');
 
         $request->validate([
             'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:2048'],
@@ -61,14 +61,41 @@ class SettingController extends Controller
 
         $file = $request->file('logo');
         $path = $file->store('logos', 'public');
-        // Build absolute URL that respects subdirectory deployments (e.g., /sales-api/public)
-        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . Storage::url($path);
+        // Build absolute URL dynamically to handle XAMPP/Subdirectory structures correctly
+        // and avoid reliance on potentially misconfigured APP_URL in .env
+        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
 
         $service = new SettingsService();
         $newSettings = $service->update(['company_logo_url' => $publicUrl]);
 
         return response()->json([
             'message' => 'Logo uploaded successfully.',
+            'url' => $publicUrl,
+            'data' => $newSettings,
+        ]);
+    }
+
+    /**
+     * Upload and set company header image.
+     */
+    public function uploadHeader(Request $request)
+    {
+        $this->checkAuthorization('manage-settings');
+
+        $request->validate([
+            'header' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:5120'], // Allow larger size for header
+        ]);
+
+        $file = $request->file('header');
+        $path = $file->store('headers', 'public');
+        // Build absolute URL dynamically
+        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
+
+        $service = new SettingsService();
+        $newSettings = $service->update(['company_header_url' => $publicUrl]);
+
+        return response()->json([
+            'message' => 'Header image uploaded successfully.',
             'url' => $publicUrl,
             'data' => $newSettings,
         ]);

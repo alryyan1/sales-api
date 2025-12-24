@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
+use App\Models\User;
 
 class RolesAndPermissionsSeeder extends Seeder
 {
@@ -24,7 +25,9 @@ class RolesAndPermissionsSeeder extends Seeder
         // 3. Seed new data
         $this->createPermissions();
         $this->createRoles();
+
         $this->assignPermissionsToRoles();
+        $this->assignSuperAdminRole();
 
         $this->command->info('Existing data wiped and new Roles/Permissions seeded successfully!');
     }
@@ -182,6 +185,20 @@ class RolesAndPermissionsSeeder extends Seeder
                     ]);
                 }
             }
+        }
+    }
+
+    /**
+     * Assign the admin role to the superadmin user.
+     */
+    private function assignSuperAdminRole(): void
+    {
+        $adminRole = Role::where('name', 'ادمن')->first();
+        $superAdmin = User::where('username', 'superadmin')->first();
+
+        if ($adminRole && $superAdmin) {
+            $superAdmin->assignRole($adminRole);
+            $this->command->info('Assigned "ادمن" role to superadmin user.');
         }
     }
 }

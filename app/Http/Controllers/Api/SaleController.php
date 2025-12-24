@@ -419,17 +419,21 @@ class SaleController extends Controller
     private function performStockPreCheck(array $validatedData)
     {
         $stockErrors = [];
+        $warehouseId = $validatedData['warehouse_id'] ?? request()->user()->warehouse_id ?? 1;
+
         // Stock Pre-Check (checks Product.stock_quantity which is total sellable units)
         foreach ($validatedData['items'] as $index => $itemData) {
             $product = Product::find($itemData['product_id']);
             if ($product) {
-                // Check if product has any stock
-                if ($product->stock_quantity <= 0) {
-                    $stockErrors["items.{$index}.product_id"] = ["Product '{$product->name}' is out of stock. Available quantity: 0"];
+                // Check if product has any stock in THIS warehouse
+                $availableInWarehouse = $product->countStock($warehouseId);
+
+                if ($availableInWarehouse <= 0) {
+                    $stockErrors["items.{$index}.product_id"] = ["Product '{$product->name}' is out of stock in Warehouse {$warehouseId}. Available: 0"];
                 }
                 // Check if requested quantity exceeds available stock
-                elseif ($product->stock_quantity < $itemData['quantity']) {
-                    $stockErrors["items.{$index}.quantity"] = ["Insufficient stock for '{$product->name}'. Available: {$product->stock_quantity} {$product->sellable_unit_name_plural}, Requested: {$itemData['quantity']}."];
+                elseif ($availableInWarehouse < $itemData['quantity']) {
+                    $stockErrors["items.{$index}.quantity"] = ["Insufficient stock for '{$product->name}' in Warehouse {$warehouseId}. Available: {$availableInWarehouse} {$product->sellable_unit_name_plural}, Requested: {$itemData['quantity']}."];
                 }
             }
         }
@@ -524,14 +528,28 @@ class SaleController extends Controller
 
             // Check if product has any stock
             if ($availableStock <= 0) {
+                $msg = "Product '{$product->name}' is out of stock in Warehouse {$warehouseId}. Available quantity: 0";
+
+                $pendingStock = $product->countPendingStock($warehouseId);
+                if ($pendingStock > 0) {
+                    $msg .= " (Found {$pendingStock} units in PENDING purchases. mark purchase as RECEIVED.)";
+                }
+
                 throw ValidationException::withMessages([
-                    'items' => ["Product '{$product->name}' is out of stock in this warehouse. Available quantity: 0"]
+                    'items' => [$msg]
                 ]);
             }
 
             if ($availableStock < $requestedSellableUnits) {
+                $msg = "Insufficient stock for product '{$product->name}' in Warehouse {$warehouseId}. Available: {$availableStock} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}.";
+
+                $pendingStock = $product->countPendingStock($warehouseId);
+                if ($pendingStock > 0) {
+                    $msg .= " (Note: {$pendingStock} additional units are in PENDING purchases.)";
+                }
+
                 throw ValidationException::withMessages([
-                    'items' => ["Insufficient stock for product '{$product->name}' in this warehouse. Available: {$availableStock} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}."]
+                    'items' => [$msg]
                 ]);
             }
 

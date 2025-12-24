@@ -100,7 +100,25 @@ class ProductController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Product::query();
+        $query = Product::query()->select('products.*');
+
+        // Add subqueries for expensive attributes to avoid N+1 queries
+        $query->addSelect([
+            'earliest_expiry_date' => PurchaseItem::selectRaw('MIN(expiry_date)')
+                ->whereColumn('product_id', 'products.id')
+                ->where('remaining_quantity', '>', 0),
+
+            'latest_purchase_cost_raw' => PurchaseItem::select('unit_cost')
+                ->whereColumn('product_id', 'products.id')
+                ->latest('created_at')
+                ->limit(1),
+
+            'last_sale_price_raw' => PurchaseItem::select('sale_price')
+                ->whereColumn('product_id', 'products.id')
+                ->whereNotNull('sale_price')
+                ->latest('created_at')
+                ->limit(1)
+        ]);
 
         // Load relationships needed for the ProductResource
         $query->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem', 'warehouses'])
