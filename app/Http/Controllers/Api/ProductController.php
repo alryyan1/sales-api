@@ -212,6 +212,7 @@ class ProductController extends Controller
             'stocking_unit_id' => 'nullable|exists:units,id',
             'sellable_unit_id' => 'nullable|exists:units,id',
             'units_per_stocking_unit' => 'nullable|integer|min:1',
+            'has_expiry_date' => 'nullable|boolean',
         ]);
 
         $product = Product::create($validatedData);
@@ -310,26 +311,17 @@ class ProductController extends Controller
      */
     public function update(Request $request, Product $product) // Route model binding
     {
-        // Prevent changing SKU once set
-        if ($request->has('sku')) {
-            $incomingSku = $request->input('sku');
-            if ($incomingSku !== $product->sku) {
-                throw ValidationException::withMessages([
-                    'sku' => ['SKU cannot be changed after creation.']
-                ]);
-            }
-        }
-
         $validatedData = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'scientific_name' => 'sometimes|nullable|string|max:255',
-            // 'sku' is intentionally not editable after creation
+            'sku' => 'sometimes|nullable|string|max:100|unique:products,sku,' . $product->id, // Allow SKU update, ignore current ID
             'description' => 'sometimes|nullable|string|max:65535',
             'stock_alert_level' => 'sometimes|nullable|integer|min:0',
             'category_id' => 'sometimes|nullable|exists:categories,id',
             'stocking_unit_id' => 'sometimes|nullable|exists:units,id',
             'sellable_unit_id' => 'sometimes|nullable|exists:units,id',
             'units_per_stocking_unit' => 'sometimes|nullable|integer|min:1',
+            'has_expiry_date' => 'sometimes|boolean',
         ]);
 
         // Important Note on stock_quantity:

@@ -97,6 +97,7 @@ class Product extends Model
         'stocking_unit_id',
         'sellable_unit_id',
         'units_per_stocking_unit',
+        'has_expiry_date',
     ];
 
     /**
@@ -109,6 +110,7 @@ class Product extends Model
         'stock_quantity' => 'integer',   // Cast to integer
         'stock_alert_level' => 'integer', // Cast to integer
         'units_per_stocking_unit' => 'integer', // Cast to integer
+        'has_expiry_date' => 'boolean',
     ];
 
     /**
@@ -383,7 +385,7 @@ class Product extends Model
             return (int) PurchaseItem::where('product_id', $this->id)
                 ->whereHas('purchase', function ($q) use ($warehouseId) {
                     $q->where('warehouse_id', $warehouseId)
-                      ->where('status', 'received'); // Only count stock from received purchases
+                        ->where('status', 'received'); // Only count stock from received purchases
                 })
                 ->sum('remaining_quantity');
         }

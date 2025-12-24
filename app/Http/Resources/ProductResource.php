@@ -43,6 +43,7 @@ class ProductResource extends JsonResource
             'current_stock_quantity' => $this->current_stock_quantity ?? 0,
             'total_items_purchased' => $this->total_items_purchased ?? 0,
             'total_items_sold' => $this->total_items_sold ?? 0,
+            'has_expiry_date' => (bool) $this->has_expiry_date,
             'available_batches' => $this->whenLoaded('purchaseItemsWithStock', function () {
                 return PurchaseItemResource::collection($this->purchaseItemsWithStock);
             }),
