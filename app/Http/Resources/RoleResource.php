@@ -13,11 +13,12 @@ class RoleResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             // Include permission names if the relationship is loaded
-            'permissions' => $this->whenLoaded('permissions', function() {
+            'permissions' => $this->whenLoaded('permissions', function () {
                 return $this->permissions->pluck('name'); // Return only the names
             }),
             // Optionally include user count if loaded via withCount
             'users_count' => $this->whenCounted('users'),
+            'permissions_count' => $this->whenCounted('permissions'),
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];

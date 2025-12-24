@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
@@ -15,192 +15,173 @@ class RolesAndPermissionsSeeder extends Seeder
      */
     public function run(): void
     {
-        // Reset cached roles and permissions
+        // 1. Clear Cache
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
+        // 2. Wipe existing data (Truncate)
+        $this->cleanupDatabase();
+
+        // 3. Seed new data
         $this->createPermissions();
         $this->createRoles();
         $this->assignPermissionsToRoles();
 
-        $this->command->info('Roles and Permissions seeded successfully!');
+        $this->command->info('Existing data wiped and new Roles/Permissions seeded successfully!');
     }
 
     /**
-     * Create all permissions
+     * Completely removes all roles and permissions from the database.
+     */
+    private function cleanupDatabase(): void
+    {
+        // Disable foreign key checks to allow truncation of linked tables
+        DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+
+        // Clear the pivot tables first
+        DB::table('role_has_permissions')->truncate();
+        DB::table('model_has_permissions')->truncate();
+        DB::table('model_has_roles')->truncate();
+
+        // Clear the main tables
+        Permission::truncate();
+        Role::truncate();
+
+        // Re-enable foreign key checks
+        DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+
+        $this->command->warn('All existing roles and permissions have been deleted.');
+    }
+
+    /**
+     * Create specific permissions based on Arabic terms and Sidebar Navigation.
      */
     private function createPermissions(): void
     {
-        // Clients
-        Permission::firstOrCreate(['name' => 'view-clients', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'create-clients', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'edit-clients', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'delete-clients', 'guard_name' => 'web']);
+        $permissions = [
+            // Core POS / Cashier Permissions
+            'فتح ورديه',      // Open Shift
+            'قفل ورديه',     // Close Shift
+            'سداد',          // Payment
+            'الغاء السداد',   // Cancel Payment
+            'الخصم',         // Discount
 
-        // Suppliers
-        Permission::firstOrCreate(['name' => 'view-suppliers', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'create-suppliers', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'edit-suppliers', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'delete-suppliers', 'guard_name' => 'web']);
+            // Sidebar Navigation Permissions (view-*)
+            // Derived from navItems.ts and common access needs
 
-        // Products
-        Permission::firstOrCreate(['name' => 'view-products', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'create-products', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'edit-products', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'delete-products', 'guard_name' => 'web']);
+            // Main Navigation
+            'view-dashboard',           // لوحة التحكم
+            'view-clients',             // العملاء
+            'view-suppliers',           // الموردون
+            'view-products',            // المنتجات
+            'view-purchases',           // المشتريات
+            'view-stock-adjustments',   // تعديلات المخزون
+            'view-stock-transfers',     // تحويل المخزون (inventory/transfers)
+            'view-pos',                 // نقطة البيع
+            'view-pos-offline',         // نقطة البيع (Offline)
 
-        // Stock Management
-        Permission::firstOrCreate(['name' => 'view-stock-adjustments', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'adjust-stock', 'guard_name' => 'web']);
+            // Reports Navigation
+            'view-reports-sales',            // تقرير المبيعات
+            'view-reports-purchases',        // تقرير المشتريات
+            'view-reports-inventory',        // تقرير المخزون
+            'view-reports-inventory-log',    // سجل المخزون
+            'view-reports-monthly-revenue',  // الإيرادات الشهرية
+            'view-reports-discounts',        // المبيعات المخفضة
+            'view-reports-daily-income',     // تقرير الدخل اليومي
 
-        // Categories
-        Permission::firstOrCreate(['name' => 'view-categories', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'create-categories', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'manage-categories', 'guard_name' => 'web']);
+            // Admin Navigation
+            'manage-users',                  // المستخدمون
+            'manage-roles',                  // الأدوار
+            'manage-categories',             // الفئات
+            'manage-expenses',               // المصروفات
+            'manage-settings',               // الإعدادات
+            'manage-system',                 // النظام
+            'manage-backups',                // النسخ الاحتياطي
+            'manage-warehouses',             // المخازن
+            'manage-whatsapp-schedulers',    // جدولة واتساب
+            'request-stock',                 // طلب مخزون
+            'view-stock-requisitions',       // طلبات المخزون
+            'manage-idb',                    // إدارة DB المحلية
+        ];
 
-        // Purchases
-        Permission::firstOrCreate(['name' => 'view-purchases', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'create-purchases', 'guard_name' => 'web']);
+        foreach ($permissions as $permission) {
+            Permission::create(['name' => $permission, 'guard_name' => 'web']);
+        }
 
-        // Sales
-        Permission::firstOrCreate(['name' => 'view-sales', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'create-sales', 'guard_name' => 'web']);
-
-        // Sales Returns
-        Permission::firstOrCreate(['name' => 'view-returns', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'create-sale-returns', 'guard_name' => 'web']);
-
-        // Reports
-        Permission::firstOrCreate(['name' => 'view-reports', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'view-near-expiry-report', 'guard_name' => 'web']);
-
-        // User Management
-        Permission::firstOrCreate(['name' => 'manage-users', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'manage-roles', 'guard_name' => 'web']);
-
-        // Settings
-        Permission::firstOrCreate(['name' => 'view-settings', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'update-settings', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'manage-settings', 'guard_name' => 'web']);
-
-        // Stock Requisitions
-        Permission::firstOrCreate(['name' => 'request-stock', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'view-own-stock-requisitions', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'view-all-stock-requisitions', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'process-stock-requisitions', 'guard_name' => 'web']);
-
-        // WhatsApp Management
-        Permission::firstOrCreate(['name' => 'send-whatsapp-messages', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'view-whatsapp-status', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'manage-whatsapp-schedulers', 'guard_name' => 'web']);
-
-        // System Management
-        Permission::firstOrCreate(['name' => 'view-system', 'guard_name' => 'web']);
-        Permission::firstOrCreate(['name' => 'update-system', 'guard_name' => 'web']);
-
-        $this->command->info('All permissions created successfully.');
+        $this->command->info('New permissions created.');
     }
 
     /**
-     * Create roles
+     * Create the specific roles.
      */
     private function createRoles(): void
     {
-        Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'web']);
-        Role::firstOrCreate(['name' => 'salesperson', 'guard_name' => 'web']);
-        Role::firstOrCreate(['name' => 'inventory_manager', 'guard_name' => 'web']);
-        Role::firstOrCreate(['name' => 'cashier', 'guard_name' => 'web']);
+        $roles = ['ادمن', 'مسوول المبيعات', 'مسوول المخزن', 'كاشير'];
 
-        $this->command->info('Roles created successfully.');
+        foreach ($roles as $role) {
+            Role::create(['name' => $role, 'guard_name' => 'web']);
+        }
+
+        $this->command->info('New roles created.');
     }
 
     /**
-     * Assign permissions to roles
+     * Assign permissions to the freshly created roles.
      */
     private function assignPermissionsToRoles(): void
     {
-        // Admin Role - All permissions
-        $adminRole = Role::where('name', 'admin')->first();
-        $adminPermissions = [
-            // Clients
-            'view-clients', 'create-clients', 'edit-clients', 'delete-clients',
-            
-            // Suppliers
-            'view-suppliers', 'create-suppliers', 'edit-suppliers', 'delete-suppliers',
-            
-            // Products
-            'view-products', 'create-products', 'edit-products', 'delete-products',
-            
-            // Stock Management
-            'view-stock-adjustments', 'adjust-stock',
-            
-            // Categories
-            'view-categories', 'create-categories', 'manage-categories',
-            
-            // Purchases
-            'view-purchases', 'create-purchases',
-            
-            // Sales
-            'view-sales', 'create-sales',
-            
-            // Sales Returns
-            'view-returns', 'create-sale-returns',
-            
-            // Reports
-            'view-reports', 'view-near-expiry-report',
-            
-            // User Management
-            'manage-users', 'manage-roles',
-            
-            // Settings
-            'view-settings', 'update-settings', 'manage-settings',
-            
-            // Stock Requisitions
-            'request-stock', 'view-own-stock-requisitions', 'view-all-stock-requisitions', 'process-stock-requisitions',
-            
-            // WhatsApp Management
-            'send-whatsapp-messages', 'view-whatsapp-status', 'manage-whatsapp-schedulers',
-            
-            // System Management
-            'view-system', 'update-system',
-        ];
-        $adminRole->syncPermissions($adminPermissions);
-        $this->command->info('Admin permissions assigned.');
+        // Admin gets everything
+        $adminRole = Role::where('name', 'ادمن')->first();
+        if ($adminRole) {
+            $adminRole->givePermissionTo(Permission::all());
+        }
 
-        // Salesperson Role
-        $salesRole = Role::where('name', 'salesperson')->first();
-        $salesPermissions = [
-            'view-clients', 'create-clients', 'edit-clients',
+        // Staff roles get the operational set
+        $operationalPermissions = ['فتح ورديه', 'قفل ورديه', 'سداد', 'الغاء السداد', 'الخصم'];
+
+        // Basic View Permissions for all Staff
+        $commonStaffPermissions = [
+            'view-dashboard',
+            'view-pos',
+            'view-pos-offline',
+            'view-clients',
             'view-products',
-            'view-sales', 'create-sales',
-            'view-returns', 'create-sale-returns',
-            'view-reports',
         ];
-        $salesRole->syncPermissions($salesPermissions);
-        $this->command->info('Salesperson permissions assigned.');
 
-        // Inventory Manager Role
-        $inventoryRole = Role::where('name', 'inventory_manager')->first();
-        $inventoryPermissions = [
-            'view-suppliers', 'create-suppliers', 'edit-suppliers',
-            'view-products', 'create-products', 'edit-products',
-            'view-stock-adjustments', 'adjust-stock',
-            'view-categories', 'create-categories',
-            'view-purchases', 'create-purchases',
-            'view-reports', 'view-near-expiry-report',
-            'request-stock', 'view-own-stock-requisitions', 'view-all-stock-requisitions', 'process-stock-requisitions',
-        ];
-        $inventoryRole->syncPermissions($inventoryPermissions);
-        $this->command->info('Inventory Manager permissions assigned.');
+        $staffRoles = ['مسوول المبيعات', 'كاشير', 'مسوول المخزن'];
 
-        // Cashier Role
-        $cashierRole = Role::where('name', 'cashier')->first();
-        $cashierPermissions = [
-            'view-clients', 'create-clients',
-            'view-products',
-            'view-sales', 'create-sales',
-            'view-returns', 'create-sale-returns',
-        ];
-        $cashierRole->syncPermissions($cashierPermissions);
-        $this->command->info('Cashier permissions assigned.');
+        foreach ($staffRoles as $roleName) {
+            $role = Role::where('name', $roleName)->first();
+            if ($role) {
+                // Give core operational capabilities
+                $role->givePermissionTo($operationalPermissions);
+                // Give basic access
+                $role->givePermissionTo($commonStaffPermissions);
+
+                // Inventory Manager Specifics
+                if ($roleName === 'مسوول المخزن') {
+                    $role->givePermissionTo([
+                        'view-suppliers',
+                        'view-purchases',
+                        'view-stock-adjustments',
+                        'view-stock-transfers',
+                        'view-reports-inventory',
+                        'view-reports-inventory-log',
+                        'request-stock',
+                        'view-stock-requisitions',
+                        'manage-warehouses'
+                    ]);
+                }
+
+                // Sales Manager Specifics
+                if ($roleName === 'مسوول المبيعات') {
+                    $role->givePermissionTo([
+                        'view-reports-sales',
+                        'view-reports-monthly-revenue',
+                        'view-reports-discounts',
+                        'view-reports-daily-income'
+                    ]);
+                }
+            }
+        }
     }
 }

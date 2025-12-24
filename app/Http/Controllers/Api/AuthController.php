@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use App\Models\User;
+use App\Http\Resources\UserResource;
 
 /**
  * @OA\Tag(
@@ -73,14 +74,17 @@ class AuthController extends Controller
         // Create a token for the new user
         // You can provide a name for the token (e.g., 'auth_token', 'device_name')
         $token = $user->createToken('auth_token')->plainTextToken;
+        // Load relationships for UserResource
+        $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name');
         // Get role names
         $roles = $user->getRoleNames();
         return response()->json([
             'message' => 'User registered successfully.',
-            'user' => $user,
+            'user' => new UserResource($user),
             'access_token' => $token, // Return the token
             'token_type' => 'Bearer',
-            'roles' => $roles,             // Send role names
+            'roles' => $roles,
+            'permissions' => $user->getAllPermissions()->pluck('name'),
         ], 201);
     }
 
@@ -137,8 +141,12 @@ class AuthController extends Controller
             ]);
         }
 
-        // Get role names
-        $roles = $user->getRoleNames();
+        // Load relationships for UserResource
+        $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name');
+        
+        // Get role names as array
+        $roles = $user->getRoleNames()->toArray();
+        
         // --- Remove previous tokens if you want only one active token per user ---
         // $user->tokens()->delete(); // Optional: Invalidate all old tokens
 
@@ -147,10 +155,11 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Logged in successfully.',
-            'user' => $user,
+            'user' => new UserResource($user),
             'access_token' => $token, // Return the token
             'token_type' => 'Bearer',
-            'roles' => $roles,             // Send role names
+            'roles' => $roles,
+            'permissions' => $user->getAllPermissions()->pluck('name')->toArray(),
         ]);
     }
 
@@ -186,18 +195,17 @@ class AuthController extends Controller
     public function user(Request $request)
     {
         $user = $request->user();
-        // Get role names
-        $roles = $user->getRoleNames();
-    
+        // Load relationships for UserResource
+        $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name');
+        // Get role names as array (same as login)
+        $roles = $user->getRoleNames()->toArray();
+
+        // Return same structure as login endpoint
         return response()->json([
-             'id' => $user->id,
-             'name' => $user->name,
-             'username' => $user->username,
-             'created_at' => $user->created_at,
-             'updated_at' => $user->updated_at,
-             'roles' => $roles,             // Send role names
+            'user' => new UserResource($user),
+            'roles' => $roles,
+            'permissions' => $user->getAllPermissions()->pluck('name')->toArray(),
         ]);
-        // Or return new UserResource($user->load('roles', 'permissions')); if using Resource
     }
 
     /**

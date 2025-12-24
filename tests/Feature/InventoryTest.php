@@ -971,3 +971,5 @@ class InventoryTest extends TestCase
         $this->assertEquals($expectedRemaining, (int) $pivot->pivot->quantity);
     }
 }
+
+

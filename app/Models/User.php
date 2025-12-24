@@ -49,7 +49,7 @@ use Spatie\Permission\Traits\HasRoles;
  */
 class User extends Authenticatable
 {
-    use HasApiTokens, HasFactory, Notifiable,HasRoles; // <-- Make sure HasApiTokens is used
+    use HasApiTokens, HasFactory, Notifiable, HasRoles; // <-- Make sure HasApiTokens is used
 
     /**
      * The attributes that are mass assignable.
@@ -60,7 +60,13 @@ class User extends Authenticatable
         'name',
         'username',
         'password',
+        'warehouse_id',
     ];
+
+    public function warehouse(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Warehouse::class);
+    }
 
     /**
      * The attributes that should be hidden for serialization.

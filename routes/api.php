@@ -108,13 +108,14 @@ Route::middleware('auth:sanctum')->group(function () {
   });
 
   // -- Admin Only Routes --
-  Route::middleware(['role:admin'])->prefix('admin')->name('api.admin.')->group(function () {
+  Route::middleware(['role:admin|ادمن'])->prefix('admin')->name('api.admin.')->group(function () {
     Route::apiResource('users', UserController::class);
     Route::apiResource('categories', CategoryController::class);
     // Expenses Management
     Route::apiResource('expense-categories', ExpenseCategoryController::class);
     Route::apiResource('expenses', ExpenseController::class);
     Route::apiResource('roles', RoleController::class);
+    Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
 
     // -- System Management Routes --
     Route::prefix('system')->name('system.')->group(function () {

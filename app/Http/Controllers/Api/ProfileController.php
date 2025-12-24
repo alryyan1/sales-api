@@ -25,8 +25,8 @@ class ProfileController extends Controller
     {
         $user = $request->user(); // Get the authenticated user model instance
 
-        // Eager load roles and permissions if needed in the response
-        $user->load('roles:id,name', 'permissions:id,name');
+        // Eager load roles, permissions, and warehouse if needed in the response
+        $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name');
 
         // Option 1: Return specific data directly
         // return response()->json([
@@ -72,7 +72,7 @@ class ProfileController extends Controller
         $user->save();
 
          // Eager load for the response resource
-         $user->load('roles:id,name', 'permissions:id,name');
+         $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name');
 
         return response()->json([
             'message' => 'Profile updated successfully.',

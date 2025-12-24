@@ -96,7 +96,7 @@ class PurchaseController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Purchase::with(['supplier:id,name', 'user:id,name']);
+        $query = Purchase::with(['supplier:id,name', 'user:id,name', 'warehouse:id,name']);
 
         // Filter by supplier
         if ($supplierId = $request->input('supplier_id')) {

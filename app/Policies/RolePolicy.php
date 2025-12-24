@@ -13,7 +13,7 @@ class RolePolicy
     // Grant all abilities to admin for simplicity in this example
     public function before(User $user, string $ability): bool|null
     {
-        if ($user->hasRole('admin')) {
+        if ($user->hasRole('admin') || $user->hasRole('ادمن')) {
             return true;
         }
         return null; // Let other checks proceed

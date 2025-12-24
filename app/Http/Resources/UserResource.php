@@ -21,15 +21,17 @@ class UserResource extends JsonResource
             'username' => $this->username,
             'created_at' => $this->created_at->toISOString(),
             'updated_at' => $this->updated_at->toISOString(),
-            // Conditionally include roles and permissions if they were loaded onto the model
-            'roles' => $this->whenLoaded('roles', function () {
-                return $this->getRoleNames(); // Get just the names
+            'warehouse_id' => $this->warehouse_id,
+            'warehouse' => $this->whenLoaded('warehouse', function () {
+                return $this->warehouse ? [
+                    'id' => $this->warehouse->id,
+                    'name' => $this->warehouse->name,
+                ] : null;
             }),
-            'permissions' => $this->whenLoaded('permissions', function () {
-                // Getting *all* permissions (direct + via roles) might require getAllPermissions()
-                // Depending on what you need, just direct permissions might be $this->permissions->pluck('name')
-                 return $this->getAllPermissions()->pluck('name'); // Get all permission names
-            }),
+            // Always include roles and permissions - get them directly from the model
+            // Spatie Permission provides these methods even if relations are not loaded
+            'roles' => $this->getRoleNames()->toArray(),
+            'permissions' => $this->getAllPermissions()->pluck('name')->toArray(),
         ];
     }
 }

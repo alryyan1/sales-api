@@ -9,6 +9,11 @@ class Warehouse extends Model
 {
     use HasFactory;
 
+    public function users(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(User::class);
+    }
+
     protected $fillable = [
         'name',
         'address',

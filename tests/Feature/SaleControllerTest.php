@@ -469,3 +469,5 @@ class SaleControllerTest extends TestCase
         $this->assertEquals(5, $pivot->pivot->quantity);
     }
 }
+
+

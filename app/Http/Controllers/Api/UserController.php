@@ -28,7 +28,7 @@ class UserController extends Controller
         // Check authorization using UserPolicy@viewAny
         $this->authorize('viewAny', User::class);
 
-        $query = User::with('roles:id,name'); // Eager load roles (only id and name)
+        $query = User::with(['roles:id,name', 'warehouse:id,name']); // Eager load roles (only id and name)
 
         // Search
         if ($search = $request->input('search')) {
@@ -63,7 +63,8 @@ class UserController extends Controller
             'username' => 'required|string|max:255|unique:users,username',
             'password' => ['required', 'string', Password::defaults(), 'confirmed'],
             'roles' => 'required|array', // Roles are required on creation
-            'roles.*' => ['required', 'string', Rule::exists('roles', 'name')], // Validate each role name exists
+            'roles.*' => ['required', 'string', Rule::exists('roles', 'name')],
+            'warehouse_id' => 'nullable|exists:warehouses,id',
         ]);
 
         try {
@@ -73,6 +74,7 @@ class UserController extends Controller
                     'name' => $validatedData['name'],
                     'username' => $validatedData['username'],
                     'password' => Hash::make($validatedData['password']),
+                    'warehouse_id' => $validatedData['warehouse_id'] ?? null,
                 ]);
 
 
@@ -99,7 +101,7 @@ class UserController extends Controller
         // Check authorization using UserPolicy@view
         $this->authorize('view', $user);
 
-        $user->load('roles:id,name', 'permissions:id,name'); // Load roles and permissions for detail view
+        $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name'); // Load roles and permissions for detail view
         return new UserResource($user);
     }
 
@@ -123,12 +125,13 @@ class UserController extends Controller
             ],
             'roles' => 'sometimes|required|array', // Roles required if present
             'roles.*' => ['required', 'string', Rule::exists('roles', 'name')],
+            'warehouse_id' => 'nullable|exists:warehouses,id',
         ]);
 
         try {
             $user = DB::transaction(function () use ($validatedData, $user, $request) {
                 // Update basic fields
-                $user->fill(Arr::only($validatedData, ['name', 'username']));
+                $user->fill(Arr::only($validatedData, ['name', 'username', 'warehouse_id']));
                 // Prevent assigning roles if 'admin' is missing, but only for user with ID 1
                 if ($user->id === 1 && !in_array('admin', $validatedData['roles'])) {
                     throw new \Exception('The "admin" role cannot be removed for this user.');
@@ -185,7 +188,7 @@ class UserController extends Controller
      */
     public function listForFilters(Request $request)
     {
-        $users = User::select('id', 'name')
+        $users = User::select(['id', 'name'])
             ->orderBy('name')
             ->get();
 

@@ -25,6 +25,10 @@ class PurchaseResource extends JsonResource
              'user_id' => $this->user_id,
              'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
 
+            // Warehouse Info
+            'warehouse_id' => $this->warehouse_id,
+            'warehouse_name' => $this->whenLoaded('warehouse', fn() => $this->warehouse?->name),
+
             'purchase_date' => $this->purchase_date->format('Y-m-d'), // Format date
             'reference_number' => $this->reference_number,
             'status' => $this->status,

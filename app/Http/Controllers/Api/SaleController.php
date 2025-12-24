@@ -201,6 +201,7 @@ class SaleController extends Controller
                 $saleHeader = Sale::create([
                     'client_id' => $validatedData['client_id'],
                     'user_id' => $request->user()->id,
+                    'warehouse_id' => $request->user()->warehouse_id ?? 1,
                     'shift_id' => $currentShift->id,
                     'sale_date' => $validatedData['sale_date'],
                     'invoice_number' => null, // Will be generated when completed
@@ -490,7 +491,7 @@ class SaleController extends Controller
         }
 
         return Sale::create([
-            'warehouse_id' => $validatedData['warehouse_id'] ?? 1,
+            'warehouse_id' => $validatedData['warehouse_id'] ?? $request->user()->warehouse_id ?? 1,
             'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
             'shift_id' => $currentShift?->id,
@@ -504,7 +505,7 @@ class SaleController extends Controller
 
     private function processSaleItems(array $validatedData, Sale $saleHeader, &$newTotalSaleAmount)
     {
-        $warehouseId = $validatedData['warehouse_id'] ?? 1;
+        $warehouseId = $saleHeader->warehouse_id;
 
         // 2. Process Sale Items and Stock (Total stock check, FIFO allocation or direct stock decrement)
         foreach ($validatedData['items'] as $itemData) {
