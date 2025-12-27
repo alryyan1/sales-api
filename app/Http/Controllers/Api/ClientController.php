@@ -96,7 +96,6 @@ class ClientController extends Controller
      */
     public function store(Request $request)
     {
-        $this->authorize('create', Client::class); // Checks ClientPolicy@create
 
         // Validation rules matching the form requirements
         $validatedData = $request->validate([
@@ -147,7 +146,6 @@ class ClientController extends Controller
      */
     public function show(Client $client)
     {
-        $this->authorize('view', $client); // Checks ClientPolicy@view
 
         // Route model binding automatically finds the client by ID or throws 404
         // Optionally load relations: $client->load('sales');
@@ -199,7 +197,6 @@ class ClientController extends Controller
      */
     public function update(Request $request, Client $client)
     {
-        $this->authorize('update', $client); // Checks ClientPolicy@update
 
         // Validation rules for update
         // 'sometimes' means validate only if the field is present in the request
@@ -258,7 +255,6 @@ class ClientController extends Controller
     {
         // Optional: Add authorization check here (e.g., using Policies)
         // $this->authorize('delete', $client);
-        $this->authorize('delete', $client); // Checks ClientPolicy@delete
 
         $client->delete();
 

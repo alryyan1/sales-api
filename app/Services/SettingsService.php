@@ -40,6 +40,7 @@ class SettingsService
             'logo_height' => 'int',
             'logo_width' => 'int',
             'tax_number' => 'string',
+            'pdf_font' => 'string',
         ];
     }
 
@@ -74,6 +75,7 @@ class SettingsService
             'logo_height' => $c['logo_height'] ?? 60,
             'logo_width' => $c['logo_width'] ?? 60,
             'tax_number' => $c['tax_number'] ?? null,
+            'pdf_font' => $c['pdf_font'] ?? 'Amiri',
         ];
     }
 

@@ -14,6 +14,7 @@ return [
     'invoice_prefix' => env('APP_SETTINGS_INVOICE_PREFIX', 'INV-'),
     'purchase_order_prefix' => env('APP_SETTINGS_PO_PREFIX', 'PO-'),
     'default_profit_rate' => (float) env('APP_SETTINGS_DEFAULT_PROFIT_RATE', 20.0), // Default profit rate percentage
+    'pdf_font' => env('APP_SETTINGS_PDF_FONT', 'Amiri'),
 
     // WhatsApp API Configuration
     'whatsapp_enabled' => env('APP_SETTINGS_WHATSAPP_ENABLED', false),
@@ -24,7 +25,7 @@ return [
 
     // Add more settings as needed
     // 'timezone' => env('APP_TIMEZONE', 'UTC'),
-     'payment_methods_ar' => [
+    'payment_methods_ar' => [
         'cash' => 'نقدي',
         'visa' => 'فيزا',
         'mastercard' => 'ماستركارد',

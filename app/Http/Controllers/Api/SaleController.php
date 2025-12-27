@@ -53,6 +53,8 @@ class SaleController extends Controller
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('invoice_number', 'like', "%{$search}%")
+                    ->orWhere('id', $search)
+                    ->orWhere('sale_order_number', 'like', "%{$search}%")
                     ->orWhereHas('client', fn($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
             });
         }
@@ -1998,199 +2000,195 @@ class SaleController extends Controller
     }
     public function downloadThermalInvoicePDF(Request $request, Sale $sale)
     {
-        // Authorization check
-        // if ($request->user()->cannot('printThermalInvoice', $sale)) { abort(403); }
+        try {
+            // Authorization check
+            // if ($request->user()->cannot('printThermalInvoice', $sale)) { abort(403); }
 
-        $sale->load([
-            'client:id,name', // Load only what's needed for receipt
-            'user:id,name',
-            'items.product:id,name,sku',
-            // No need to load purchaseItemBatch for thermal receipt unless showing batch no.
-        ]);
+            $sale->load([
+                'client:id,name', // Load only what's needed for receipt
+                'user:id,name',
+                'items.product:id,name,sku',
+                // No need to load purchaseItemBatch for thermal receipt unless showing batch no.
+            ]);
 
-        // --- PDF Setup for Thermal (e.g., 80mm width) ---
-        // Dynamic height: base + items + payments
-        $itemsCount = $sale->items?->count() ?? 0;
-        $paymentsCount = $sale->payments?->count() ?? 0;
-        $pageHeightMm = 105 + (5 * $itemsCount) + (5 * $paymentsCount);
-        $pdf = new MyCustomTCPDF('P', 'mm', [80, $pageHeightMm], true, 'UTF-8', false); // Custom page size [width, height]
-        // $pdf->setThermalDefaults(80, 250); // Or use your preset method
+            // --- PDF Setup for Thermal (e.g., 80mm width) ---
+            // Dynamic height: base + items + payments
+            $itemsCount = $sale->items?->count() ?? 0;
+            $paymentsCount = $sale->payments?->count() ?? 0;
+            $pageHeightMm = 105 + (5 * $itemsCount) + (5 * $paymentsCount);
 
-        $pdf->setPrintHeader(false);
-        $pdf->setPrintFooter(false);
-        $pdf->SetMargins(4, 5, 4); // L, T, R
-        $pdf->SetAutoPageBreak(TRUE, 5); // Bottom margin
-        $pdf->AddPage();
-        $pdf->setRTL(true); // Ensure RTL for Arabic content
+            // Log::info("Generating thermal PDF for Sale {$sale->id}. Height: {$pageHeightMm}mm");
 
-        // --- Company Info (Simplified for Thermal) ---
-        $settingsThermal = (new \App\Services\SettingsService())->getAll();
-        $companyName = $settingsThermal['company_name'] ?? 'Your Company';
-        $companyPhone = $settingsThermal['company_phone'] ?? '';
-        $companyLogoUrl = $settingsThermal['company_logo_url'] ?? null;
-        // $vatNumber = config('app_settings.vat_number', ''); // If applicable
+            $pdf = new MyCustomTCPDF('P', 'mm', [80, $pageHeightMm], true, 'UTF-8', false); // Custom page size [width, height]
+            // $pdf->setThermalDefaults(80, 250); // Or use your preset method
 
-        // Draw logo if exists
-        if (!empty($companyLogoUrl) && is_string($companyLogoUrl)) {
-            try {
-                $path = parse_url($companyLogoUrl, PHP_URL_PATH) ?: '';
-                $logoPath = $companyLogoUrl;
-                if ($path) {
-                    $storagePos = strpos($path, '/storage/');
-                    if ($storagePos !== false) {
-                        $relative = substr($path, $storagePos + strlen('/storage/'));
-                        $candidate = public_path('storage/' . ltrim($relative, '/'));
-                        if (file_exists($candidate)) {
-                            $logoPath = $candidate;
+            $pdf->setPrintHeader(false);
+            $pdf->setPrintFooter(false);
+            $pdf->SetMargins(4, 5, 4); // L, T, R
+            $pdf->SetAutoPageBreak(TRUE, 5); // Bottom margin
+            $pdf->AddPage();
+            $pdf->setRTL(true); // Ensure RTL for Arabic content
+
+            // --- Company Info (Simplified for Thermal) ---
+            $settingsThermal = (new \App\Services\SettingsService())->getAll();
+            $companyName = $settingsThermal['company_name'] ?? 'Your Company';
+            $companyPhone = $settingsThermal['company_phone'] ?? '';
+            $companyLogoUrl = $settingsThermal['company_logo_url'] ?? null;
+            // $vatNumber = config('app_settings.vat_number', ''); // If applicable
+
+            // Draw logo if exists
+            if (!empty($companyLogoUrl) && is_string($companyLogoUrl)) {
+                try {
+                    $path = parse_url($companyLogoUrl, PHP_URL_PATH) ?: '';
+                    $logoPath = $companyLogoUrl;
+                    if ($path) {
+                        $storagePos = strpos($path, '/storage/');
+                        if ($storagePos !== false) {
+                            $relative = substr($path, $storagePos + strlen('/storage/'));
+                            $candidate = public_path('storage/' . ltrim($relative, '/'));
+                            if (file_exists($candidate)) {
+                                $logoPath = $candidate;
+                            }
                         }
                     }
+                    $w = 20; // mm
+                    $x = ($pdf->getPageWidth() - $w) / 2;
+                    $y = 5;
+                    @$pdf->Image($logoPath, $x + 20, $y, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+                    $pdf->Ln(h: 20);
+                } catch (\Throwable $e) {
+                    // ignore logo errors on thermal
                 }
-                $w = 20; // mm
-                $x = ($pdf->getPageWidth() - $w) / 2;
-                $y = 5;
-                @$pdf->Image($logoPath, $x + 20, $y, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
-                $pdf->Ln(h: 20);
-            } catch (\Throwable $e) {
-                // ignore logo errors on thermal
-            }
-        }
-
-        $pdf->SetFont('dejavusans', 'B', 10); // Or your preferred Arabic thermal font
-        $pdf->MultiCell(0, 5, $companyName, 0, 'C', 0, 1);
-        if ($companyPhone) {
-            $pdf->SetFont('dejavusans', '', 8);
-            $pdf->MultiCell(0, 4, 'الهاتف: ' . $companyPhone, 0, 'C', 0, 1);
-        }
-        // if ($vatNumber) {
-        //     $pdf->MultiCell(0, 4, 'الرقم الضريبي: ' . $vatNumber, 0, 'C', 0, 1);
-        // }
-        $pdf->Ln(2);
-
-        // --- Invoice Info ---
-        $pdf->SetFont('dejavusans', '', 7);
-        $pdf->Cell(0, 4, 'فاتورة رقم: ' . ($sale->invoice_number ?: 'S-' . $sale->id), 0, 1, 'R');
-        $pdf->Cell(0, 4, 'التاريخ: ' . Carbon::parse($sale->sale_date)->format('Y/m/d') . ' ' . Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
-        if ($sale->client) {
-            $pdf->Cell(0, 4, 'العميل: ' . $sale->client->name, 0, 1, 'R');
-        }
-        if ($sale->user) {
-            $pdf->Cell(0, 4, 'البائع: ' . $sale->user->name, 0, 1, 'R');
-        }
-        $pdf->Ln(1);
-        $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
-        $pdf->Ln(1);
-
-        // --- Items Header ---
-        // Text: Item | Qty | Price | Total
-        // Align: R  | C   | R     | R
-        $pdf->SetFont('dejavusans', 'B', 7);
-        $pdf->Cell(18, 5, 'الإجمالي', 0, 0, 'R'); // Total
-        $pdf->Cell(18, 5, 'السعر', 0, 0, 'R');    // Price
-        $pdf->Cell(10, 5, 'كمية', 0, 0, 'C');   // Qty
-        $pdf->Cell(26, 5, 'الصنف', 0, 1, 'R');    // Item Name (remaining width)
-        $pdf->Ln(0.5);
-        $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
-        $pdf->Ln(0.5);
-
-        // --- Items Loop ---
-        $pdf->SetFont('dejavusans', '', 7);
-        foreach ($sale->items as $item) {
-            $productName = $item->product?->name ?: 'Product N/A';
-            // Truncate or wrap product name if too long for thermal width
-            if (mb_strlen($productName) > 20) { // Example length check
-                $productName = mb_substr($productName, 0, 18) . '..';
             }
 
-            $itemTotal = number_format((float)$item->total_price, 0);
-            $itemPrice = number_format((float)$item->unit_price, 0);
-            $itemQty = (string)$item->quantity;
+            $pdf->SetFont('dejavusans', 'B', 10); // Or your preferred Arabic thermal font
+            $pdf->MultiCell(0, 5, $companyName, 0, 'C', 0, 1);
+            if ($companyPhone) {
+                $pdf->SetFont('dejavusans', '', 8);
+                $pdf->MultiCell(0, 4, 'الهاتف: ' . $companyPhone, 0, 'C', 0, 1);
+            }
+            // if ($vatNumber) {
+            //     $pdf->MultiCell(0, 4, 'الرقم الضريبي: ' . $vatNumber, 0, 'C', 0, 1);
+            // }
+            $pdf->Ln(2);
 
-            // Using MultiCell for name to handle potential (though short) wrapping
-            $currentY = $pdf->GetY();
-            $pdf->Cell(18, 4, $itemTotal, 0, 0, 'R');
-            $pdf->Cell(18, 4, $itemPrice, 0, 0, 'R');
-            $pdf->Cell(10, 4, $itemQty, 0, 0, 'C');
-            $pdf->MultiCell(26, 4, $productName, 0, 'C', 0, 1); // Set X explicitly
-            $pdf->SetX(4); // Reset X for next line to start from left margin (for RTL Cell flow)
-            // $pdf->Ln(0.5); // Small space between items
-        }
-        $pdf->Ln(0.5);
-        $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
-        $pdf->Ln(1);
-
-        // --- Totals --- (with discount) computed from items and payments
-        $itemsSubtotal = (float) ($sale->items?->sum('total_price') ?? 0);
-        $gross = $itemsSubtotal;
-        $discountAmount = (float) ($sale->discount_amount ?? 0);
-        $finalTotal = max(0, $gross - $discountAmount);
-        $paidAmount = (float) ($sale->payments?->sum('amount') ?? 0);
-        $due = max(0, $finalTotal - $paidAmount);
-
-        $pdf->SetFont('dejavusans', 'B', 8);
-        $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
-        $pdf->Cell(26, 5, number_format($itemsSubtotal, 0), 0, 1, 'R');
-
-        $pdf->SetFont('dejavusans', '', 8);
-        $pdf->Cell(46, 5, 'الخصم:', 0, 0, 'R');
-        $pdf->Cell(26, 5, '-' . number_format($discountAmount, 0), 0, 1, 'R');
-
-        $pdf->SetFont('dejavusans', 'B', 9);
-        $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
-        $pdf->Cell(26, 6, number_format($finalTotal, 0), 0, 1, 'R');
-
-        $pdf->SetFont('dejavusans', '', 8);
-        $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
-        $pdf->Cell(26, 5, number_format($paidAmount, 0), 0, 1, 'R');
-        $pdf->SetFont('dejavusans', 'B', 8);
-        $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
-        $pdf->Cell(26, 5, number_format($due, 0), 0, 1, 'R');
-        $pdf->Ln(1);
-
-        // --- Payment Methods Used ---
-        if ($sale->payments && $sale->payments->count() > 0) {
-            $pdf->SetFont('dejavusans', 'B', 7);
-            $pdf->Cell(0, 4, 'طرق الدفع:', 0, 1, 'R');
+            // --- Invoice Info ---
             $pdf->SetFont('dejavusans', '', 7);
-            foreach ($sale->payments as $payment) {
-                $methodLabel = $payment->method;
-                if (function_exists('config')) {
-                    $methodLabel = config('app_settings.payment_methods_ar.' . $payment->method, $payment->method);
-                }
-                $pdf->Cell(46, 4, $methodLabel . ':', 0, 0, 'R');
-                $pdf->Cell(26, 4, number_format((float)$payment->amount, 0), 0, 1, 'R');
+            $pdf->Cell(0, 4, 'فاتورة رقم: ' . ($sale->invoice_number ?: 'S-' . $sale->id), 0, 1, 'R');
+            $pdf->Cell(0, 4, 'التاريخ: ' . Carbon::parse($sale->sale_date)->format('Y/m/d') . ' ' . Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
+            if ($sale->client) {
+                $pdf->Cell(0, 4, 'العميل: ' . $sale->client->name, 0, 1, 'R');
+            }
+            if ($sale->user) {
+                $pdf->Cell(0, 4, 'البائع: ' . $sale->user->name, 0, 1, 'R');
             }
             $pdf->Ln(1);
-        }
+            $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
+            $pdf->Ln(1);
+
+            // --- Items Header ---
+            // Text: Item | Qty | Price | Total
+            // Align: R  | C   | R     | R
+            $pdf->SetFont('dejavusans', 'B', 7);
+            $pdf->Cell(18, 5, 'الإجمالي', 0, 0, 'R'); // Total
+            $pdf->Cell(18, 5, 'السعر', 0, 0, 'R');    // Price
+            $pdf->Cell(10, 5, 'كمية', 0, 0, 'C');   // Qty
+            $pdf->Cell(26, 5, 'الصنف', 0, 1, 'R');    // Item Name (remaining width)
+            $pdf->Ln(0.5);
+            $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
+            $pdf->Ln(0.5);
+
+            // --- Items Loop ---
+            $pdf->SetFont('dejavusans', '', 7);
+            foreach ($sale->items as $item) {
+                $productName = $item->product?->name ?: 'Product N/A';
+                // Truncate or wrap product name if too long for thermal width
+                if (mb_strlen($productName) > 20) { // Example length check
+                    $productName = mb_substr($productName, 0, 18) . '..';
+                }
+
+                $itemTotal = number_format((float)$item->total_price, 0);
+                $itemPrice = number_format((float)$item->unit_price, 0);
+                $itemQty = (string)$item->quantity;
+
+                // Using MultiCell for name to handle potential (though short) wrapping
+                $currentY = $pdf->GetY();
+                $pdf->Cell(18, 4, $itemTotal, 0, 0, 'R');
+                $pdf->Cell(18, 4, $itemPrice, 0, 0, 'R');
+                $pdf->Cell(10, 4, $itemQty, 0, 0, 'C');
+                $pdf->MultiCell(26, 4, $productName, 0, 'C', 0, 1); // Set X explicitly
+                $pdf->SetX(4); // Reset X for next line to start from left margin (for RTL Cell flow)
+                // $pdf->Ln(0.5); // Small space between items
+            }
+            $pdf->Ln(0.5);
+            $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
+            $pdf->Ln(1);
+
+            // --- Totals --- (with discount) computed from items and payments
+            $itemsSubtotal = (float) ($sale->items?->sum('total_price') ?? 0);
+            $gross = $itemsSubtotal;
+            $discountAmount = (float) ($sale->discount_amount ?? 0);
+            $finalTotal = max(0, $gross - $discountAmount);
+            $paidAmount = (float) ($sale->payments?->sum('amount') ?? 0);
+            $due = max(0, $finalTotal - $paidAmount);
+
+            $pdf->SetFont('dejavusans', 'B', 8);
+            $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
+            $pdf->Cell(26, 5, number_format($itemsSubtotal, 0), 0, 1, 'R');
+
+            $pdf->SetFont('dejavusans', '', 8);
+            $pdf->Cell(46, 5, 'الخصم:', 0, 0, 'R');
+            $pdf->Cell(26, 5, '-' . number_format($discountAmount, 0), 0, 1, 'R');
+
+            $pdf->SetFont('dejavusans', 'B', 9);
+            $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
+            $pdf->Cell(26, 6, number_format($finalTotal, 0), 0, 1, 'R');
+
+            $pdf->SetFont('dejavusans', '', 8);
+            $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
+            $pdf->Cell(26, 5, number_format($paidAmount, 0), 0, 1, 'R');
+            $pdf->SetFont('dejavusans', 'B', 8);
+            $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
+            $pdf->Cell(26, 5, number_format($due, 0), 0, 1, 'R');
+            $pdf->Ln(1);
+
+            // --- Payment Methods Used ---
+            if ($sale->payments && $sale->payments->count() > 0) {
+                $pdf->SetFont('dejavusans', 'B', 7);
+                $pdf->Cell(0, 4, 'طرق الدفع:', 0, 1, 'R');
+                $pdf->SetFont('dejavusans', '', 7);
+                foreach ($sale->payments as $payment) {
+                    $methodLabel = $payment->method;
+                    if (function_exists('config')) {
+                        $methodLabel = config('app_settings.payment_methods_ar.' . $payment->method, $payment->method);
+                    }
+                    $pdf->Cell(46, 4, $methodLabel . ':', 0, 0, 'R');
+                    $pdf->Cell(26, 4, number_format((float)$payment->amount, 0), 0, 1, 'R');
+                }
+                $pdf->Ln(1);
+            }
 
 
-        // --- Footer Message ---
-        $pdf->SetFont('dejavusans', '', 7);
-        $thermalFooter = $settingsThermal['invoice_thermal_footer'] ?? config('app_settings.invoice_thermal_footer', 'شكراً لزيارتكم!');
-        $pdf->MultiCell(0, 4, $thermalFooter, 0, 'C', 0, 1);
+            // --- Footer Message ---
+            $pdf->SetFont('dejavusans', '', 7);
+            $thermalFooter = $settingsThermal['invoice_thermal_footer'] ?? config('app_settings.invoice_thermal_footer', 'شكراً لزيارتكم!');
+            $pdf->MultiCell(0, 4, $thermalFooter, 0, 'C', 0, 1);
 
-        // --- Barcode/QR Code (Optional) ---
-        // if ($sale->invoice_number) {
-        //     $style = array(
-        //         'border' => false,
-        //         'padding' => 1,
-        //         'fgcolor' => array(0,0,0),
-        //         'bgcolor' => false, //array(255,255,255)
-        //     );
-        //     $pdf->Ln(2);
-        //     // $pdf->write1DBarcode($sale->invoice_number, 'C128', '', '', '', 12, 0.4, $style, 'N');
-        //      $pdf->write2DBarcode('SaleID:'.$sale->id . ';Invoice:'.$sale->invoice_number, 'QRCODE,M', '', '', 25, 25, $style, 'N');
-        //      $pdf->Cell(0, 0, 'امسح للمزيد من التفاصيل', 0, 1, 'C');
-        // }
+            // --- Output PDF ---
+            $pdfFileName = 'thermal_invoice_' . ($sale->invoice_number ?: $sale->id) . '.pdf';
+            $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
 
-
-        // --- Output PDF ---
-        $pdfFileName = 'thermal_invoice_' . ($sale->invoice_number ?: $sale->id) . '.pdf';
-        $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
-
-        return response($pdfContent, 200)
-            ->header('Content-Type', 'application/pdf')
+            return response($pdfContent, 200)
+                ->header('Content-Type', 'application/pdf');
             // No 'Content-Disposition: attachment' - frontend will handle display
-        ;
+
+        } catch (\Throwable $e) {
+            Log::error("Error generating thermal invoice PDF for sale {$sale->id}: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return response()->json([
+                'message' => 'Failed to generate thermal invoice PDF.',
+                'error' => $e->getMessage(), // Show error in dev
+            ], 500);
+        }
     }
 
     /**

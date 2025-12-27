@@ -35,20 +35,26 @@ class PurchaseItemObserver
     //         }
     //     }
     // }
-    
-private function updateProductStock(PurchaseItem $purchaseItem): void
-{
-    if ($purchaseItem->product_id) {
-        $product = Product::find($purchaseItem->product_id);
-        if ($product) {
-            // remaining_quantity on PurchaseItem is now in sellable units
-            $totalSellableUnitsStock = $product->purchaseItems()->sum('remaining_quantity');
-            $product->stock_quantity = $totalSellableUnitsStock; // This is now sum of sellable units
-            $product->saveQuietly();
-            Log::info("Observer: Product ID {$product->id} stock (sellable units) updated to {$totalSellableUnitsStock}.");
+
+    private function updateProductStock(PurchaseItem $purchaseItem): void
+    {
+        if ($purchaseItem->product_id) {
+            $product = Product::find($purchaseItem->product_id);
+            if ($product) {
+                // remaining_quantity on PurchaseItem is now in sellable units
+                // FIX: Only count stock from purchases that are 'received'
+                $totalSellableUnitsStock = $product->purchaseItems()
+                    ->whereHas('purchase', function ($q) {
+                        $q->where('status', 'received');
+                    })
+                    ->sum('remaining_quantity');
+
+                $product->stock_quantity = $totalSellableUnitsStock; // This is now sum of sellable units
+                $product->saveQuietly();
+                Log::info("Observer: Product ID {$product->id} stock (sellable units) updated to {$totalSellableUnitsStock}.");
+            }
         }
     }
-}
     public function updated(PurchaseItem $purchaseItem): void
     {
         $this->updateProductStock($purchaseItem);

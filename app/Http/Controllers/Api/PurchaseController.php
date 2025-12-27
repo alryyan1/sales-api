@@ -470,6 +470,17 @@ class PurchaseController extends Controller
                 $purchase->stock_added_to_warehouse = false;
                 $purchase->save();
             }
+
+            // TRIGGER PRODUCT STOCK UPDATE
+            // If the status changed to or from 'received', we must update the total stock_quantity on the product.
+            // The PurchaseItemObserver listens for changes to PurchaseItem, but not Purchase.
+            // So we force an update by 'touching' the items.
+            if ($oldStatus !== $newStatus) {
+                // If status changed, we need to re-evaluate the sum for all related products.
+                foreach ($purchase->items as $item) {
+                    $item->touch(); // This fires 'saved' event on PurchaseItem, triggering the Observer.
+                }
+            }
         });
 
         $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
