@@ -99,6 +99,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profit-loss', [ReportController::class, 'profitLossReport'])->name('profit-loss');
     Route::get('/near-expiry', [ReportController::class, 'nearExpiryReport'])->name('near-expiry'); // <-- Add this line
     Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue');
+    Route::get('/monthly-revenue-excel', [ReportController::class, 'monthlyRevenueExcel'])->name('monthly-revenue-excel');
     Route::get('/monthly-purchases', [ReportController::class, 'monthlyPurchasesReport'])->name('monthly-purchases');
     Route::get('/top-products', [ReportController::class, 'topSellingProducts'])->name('top-products');
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');

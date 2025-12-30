@@ -19,6 +19,12 @@ use Arr;
 use DB;
 use Carbon\Carbon; // Ensure correct Carbon namespace is used
 use Illuminate\Validation\Rule; // For status validation
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Font;
 
 class ReportController extends Controller
 {
@@ -30,9 +36,7 @@ class ReportController extends Controller
      */
     public function salesReport(Request $request)
     {
-        if ($request->user()->cannot('view-reports')) {
-            abort(403, 'You do not have permission to view reports.');
-        }
+       
         // --- Input Validation ---
         $validated = $request->validate([
             'start_date' => 'nullable|date_format:Y-m-d',
@@ -368,6 +372,219 @@ class ReportController extends Controller
                 'month_summary' => $monthSummary,
             ]
         ]);
+    }
+
+    /**
+     * Export Monthly Revenue Report to Excel
+     */
+    public function monthlyRevenueExcel(Request $request)
+    {
+        // Reuse the same validation and data fetching logic
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+        ]);
+
+        $year = $validated['year'];
+        $month = $validated['month'];
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+
+        // Get the same data as monthlyRevenueReport
+        $dailyPaymentsQuery = Payment::query()
+            ->join('sales', 'payments.sale_id', '=', 'sales.id')
+            ->select(
+                DB::raw('DATE(payments.payment_date) as payment_day'),
+                'payments.method',
+                DB::raw('SUM(payments.amount) as total_amount_by_method')
+            )
+            ->whereBetween(DB::raw("DATE(COALESCE(sales.sale_date, sales.created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
+            ->whereBetween('payments.payment_date', [$startDate, $endDate]);
+
+        $dailyPaymentsByMethod = $dailyPaymentsQuery->groupBy('payment_day', 'payments.method')
+            ->orderBy('payment_day', 'asc')
+            ->orderBy('payments.method', 'asc')
+            ->get()
+            ->groupBy('payment_day')
+            ->map(function ($paymentsOnDay) {
+                return $paymentsOnDay->mapWithKeys(function ($paymentGroup) {
+                    return [$paymentGroup->method => (float) $paymentGroup->total_amount_by_method];
+                });
+            });
+
+        // Build report data
+        $report = [];
+        $currentDay = $startDate->copy();
+        $monthSummary = [
+            'total_revenue' => 0,
+            'total_paid' => 0,
+            'total_payments_by_method' => [],
+        ];
+
+        while ($currentDay->lte($endDate)) {
+            $dayStr = $currentDay->toDateString();
+            $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]);
+            $dailyTotalPaymentsFromPaymentsTable = $paymentsForDay->sum();
+            $dailyRevenue = $dailyTotalPaymentsFromPaymentsTable;
+
+            $report[] = [
+                'date' => $dayStr,
+                'day_of_week' => $currentDay->isoFormat('dddd'),
+                'total_revenue' => $dailyRevenue,
+                'total_payments_recorded_on_day' => $dailyTotalPaymentsFromPaymentsTable,
+                'payments_by_method' => $paymentsForDay->toArray(),
+            ];
+
+            $monthSummary['total_revenue'] += $dailyRevenue;
+            foreach ($paymentsForDay as $method => $amount) {
+                $monthSummary['total_payments_by_method'][$method] = ($monthSummary['total_payments_by_method'][$method] ?? 0) + $amount;
+            }
+
+            $currentDay->addDay();
+        }
+
+        // Get all payment methods
+        $paymentMethods = array_keys($monthSummary['total_payments_by_method']);
+
+        // Create Excel file
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        // Set document properties
+        $spreadsheet->getProperties()
+            ->setCreator('Sales System')
+            ->setLastModifiedBy('Sales System')
+            ->setTitle('تقرير المبيعات الشهري')
+            ->setSubject('Monthly Sales Report')
+            ->setDescription('تقرير المبيعات الشهري لشهر ' . $startDate->isoFormat('MMMM YYYY'));
+
+        // Set RTL direction
+        $sheet->setRightToLeft(true);
+
+        // Header Row
+        $row = 1;
+        $col = 'A';
+        $headers = ['التاريخ', 'اليوم', 'إجمالي الدخل'];
+        foreach ($paymentMethods as $method) {
+            $headers[] = $method;
+        }
+
+        foreach ($headers as $header) {
+            $sheet->setCellValue($col . $row, $header);
+            $col++;
+        }
+
+        // Style header row
+        $headerStyle = [
+            'font' => [
+                'bold' => true,
+                'size' => 12,
+                'color' => ['rgb' => 'FFFFFF'],
+            ],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '1976d2'],
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical' => Alignment::VERTICAL_CENTER,
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => '000000'],
+                ],
+            ],
+        ];
+
+        $lastCol = chr(ord('A') + count($headers) - 1);
+        $sheet->getStyle('A' . $row . ':' . $lastCol . $row)->applyFromArray($headerStyle);
+        $sheet->getRowDimension($row)->setRowHeight(25);
+
+        // Data rows
+        $row = 2;
+        foreach ($report as $dayData) {
+            $col = 'A';
+            $sheet->setCellValue($col . $row, $dayData['date']);
+            $col++;
+            $sheet->setCellValue($col . $row, $dayData['day_of_week']);
+            $col++;
+            $sheet->setCellValue($col . $row, number_format($dayData['total_payments_recorded_on_day'], 2));
+            $col++;
+            
+            foreach ($paymentMethods as $method) {
+                $amount = $dayData['payments_by_method'][$method] ?? 0;
+                $sheet->setCellValue($col . $row, number_format($amount, 2));
+                $col++;
+            }
+            $row++;
+        }
+
+        // Total row
+        $totalRow = $row;
+        $col = 'A';
+        $sheet->setCellValue($col . $totalRow, 'الإجمالي');
+        $col++;
+        $sheet->setCellValue($col . $totalRow, '');
+        $col++;
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_revenue'], 2));
+        $col++;
+        
+        foreach ($paymentMethods as $method) {
+            $total = $monthSummary['total_payments_by_method'][$method] ?? 0;
+            $sheet->setCellValue($col . $totalRow, number_format($total, 2));
+            $col++;
+        }
+
+        // Style total row
+        $totalStyle = [
+            'font' => [
+                'bold' => true,
+                'size' => 11,
+            ],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => 'e3f2fd'],
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical' => Alignment::VERTICAL_CENTER,
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => '000000'],
+                ],
+            ],
+        ];
+        $sheet->getStyle('A' . $totalRow . ':' . $lastCol . $totalRow)->applyFromArray($totalStyle);
+
+        // Set column widths
+        $sheet->getColumnDimension('A')->setWidth(15); // Date
+        $sheet->getColumnDimension('B')->setWidth(15); // Day
+        $sheet->getColumnDimension('C')->setWidth(18); // Total Income
+        $colIndex = 'D';
+        foreach ($paymentMethods as $method) {
+            $sheet->getColumnDimension($colIndex)->setWidth(18);
+            $colIndex++;
+        }
+
+        // Center align all cells
+        $sheet->getStyle('A1:' . $lastCol . $totalRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('A1:' . $lastCol . $totalRow)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+
+        // Generate Excel file
+        $writer = new Xlsx($spreadsheet);
+        $fileName = 'daily_income_report_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.xlsx';
+        
+        // Save to temporary file
+        $tempFile = tempnam(sys_get_temp_dir(), 'excel_');
+        $writer->save($tempFile);
+
+        // Return file download
+        return response()->download($tempFile, $fileName, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ])->deleteFileAfterSend(true);
     }
 
     /**
@@ -1033,9 +1250,7 @@ class ReportController extends Controller
      */
     public function inventoryPdf(Request $request)
     {
-        if ($request->user()->cannot('view-reports')) {
-            abort(403, 'You do not have permission to view reports.');
-        }
+       
 
         // Validate request
         $validated = $request->validate([
@@ -1068,9 +1283,7 @@ class ReportController extends Controller
      */
     public function dailySalesPdf(Request $request)
     {
-        if ($request->user()->cannot('view-reports')) {
-            abort(403, 'You do not have permission to view reports.');
-        }
+      
 
         // Validate parameters
         $validated = $request->validate([

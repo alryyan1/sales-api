@@ -21,7 +21,8 @@ class InventoryLogController extends Controller
             'product_id' => 'nullable|integer|exists:products,id',
             'type' => 'nullable|string|in:purchase,sale,adjustment,requisition_issue',
             'per_page' => 'nullable|integer|min:5|max:100',
-            'search' => 'nullable|string|max:255' // Search on product name/sku, batch, ref
+            'search' => 'nullable|string|max:255', // Search on product name/sku, batch, ref
+            'warehouse_id' => 'nullable|integer|exists:warehouses,id'
         ]);
 
         $perPage = $validated['per_page'] ?? 25;
@@ -29,7 +30,9 @@ class InventoryLogController extends Controller
         $endDate = isset($validated['end_date']) ? Carbon::parse($validated['end_date'])->endOfDay() : null;
         $productId = $validated['product_id'] ?? null;
         $type = $validated['type'] ?? null;
+        $type = $validated['type'] ?? null;
         $search = $validated['search'] ?? null;
+        $warehouseId = $validated['warehouse_id'] ?? null;
 
 
         // --- Purchase Items (Stock In) ---
@@ -48,8 +51,11 @@ class InventoryLogController extends Controller
                 'p.reference_number as document_reference',
                 'p.id as document_id',
                 'u.name as user_name',
-                'p.notes as reason_notes' // Use purchase notes as reason
+                'p.notes as reason_notes', // Use purchase notes as reason
+                'w.name as warehouse_name',
+                'w.id as warehouse_id'
             )
+            ->join('warehouses as w', 'p.warehouse_id', '=', 'w.id')
             ->where('p.status', 'received'); // Only count received purchases
 
         // --- Sale Items (Stock Out) ---
@@ -69,8 +75,11 @@ class InventoryLogController extends Controller
                 's.invoice_number as document_reference',
                 's.id as document_id',
                 'u.name as user_name',
-                's.notes as reason_notes'
+                's.notes as reason_notes',
+                'w.name as warehouse_name',
+                'w.id as warehouse_id'
             )
+            ->join('warehouses as w', 's.warehouse_id', '=', 'w.id')
             ->whereIn('s.status', ['completed', 'pending']); // Count completed/pending sales
 
         // --- Stock Adjustments ---
@@ -89,8 +98,11 @@ class InventoryLogController extends Controller
                 'sa.reason as document_reference', // Use reason as reference
                 'sa.id as document_id',
                 'u.name as user_name',
-                'sa.notes as reason_notes'
-            );
+                'sa.notes as reason_notes',
+                'w.name as warehouse_name',
+                'w.id as warehouse_id'
+            )
+            ->join('warehouses as w', 'sa.warehouse_id', '=', 'w.id');
 
         // --- Stock Requisition Issues ---
         $requisitionIssuesQuery = DB::table('stock_requisition_items as sri')
@@ -110,23 +122,36 @@ class InventoryLogController extends Controller
                 DB::raw("CONCAT('REQ-', sr.id) as document_reference"),
                 'sr.id as document_id',
                 'u_app.name as user_name', // User who issued
-                DB::raw("CONCAT(sr.department_or_reason, ' (Requested by: ', u_req.name, ')') as reason_notes")
+                DB::raw("CONCAT(sr.department_or_reason, ' (Requested by: ', u_req.name, ')') as reason_notes"),
+                'w.name as warehouse_name',
+                'w.id as warehouse_id'
             )
+            ->leftJoin('purchases as p_origin', 'pi_batch.purchase_id', '=', 'p_origin.id')
+            ->leftJoin('warehouses as w', 'p_origin.warehouse_id', '=', 'w.id')
             ->where('sri.status', 'issued') // Only issued items
             ->whereNotNull('sr.issue_date');
 
 
         // Apply common filters to each query before union
         foreach ([$purchasesQuery, $salesQuery, $adjustmentsQuery, $requisitionIssuesQuery] as $query) {
-            if ($startDate) { $query->whereDate(DB::raw($query->grammar->wrap('transaction_date')), '>=', $startDate); }
-            if ($endDate) { $query->whereDate(DB::raw($query->grammar->wrap('transaction_date')), '<=', $endDate); }
-            if ($productId) { $query->where('prod.id', $productId); }
+            if ($startDate) {
+                $query->whereDate(DB::raw($query->grammar->wrap('transaction_date')), '>=', $startDate);
+            }
+            if ($endDate) {
+                $query->whereDate(DB::raw($query->grammar->wrap('transaction_date')), '<=', $endDate);
+            }
+            if ($productId) {
+                $query->where('prod.id', $productId);
+            }
+            if ($warehouseId) {
+                $query->where('w.id', $warehouseId);
+            }
             if ($search) {
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('prod.name', 'like', "%{$search}%")
-                      ->orWhere('prod.sku', 'like', "%{$search}%")
-                      ->orWhere(DB::raw($q->grammar->wrap('batch_number')), 'like', "%{$search}%") // Correct way to wrap alias/raw
-                      ->orWhere(DB::raw($q->grammar->wrap('document_reference')), 'like', "%{$search}%");
+                        ->orWhere('prod.sku', 'like', "%{$search}%")
+                        ->orWhere(DB::raw($q->grammar->wrap('batch_number')), 'like', "%{$search}%") // Correct way to wrap alias/raw
+                        ->orWhere(DB::raw($q->grammar->wrap('document_reference')), 'like', "%{$search}%");
                 });
             }
         }
@@ -134,10 +159,18 @@ class InventoryLogController extends Controller
         // Apply type filter after preparing individual queries
         if ($type) {
             switch ($type) {
-                case 'purchase': $query = $purchasesQuery; break;
-                case 'sale': $query = $salesQuery; break;
-                case 'adjustment': $query = $adjustmentsQuery; break;
-                case 'requisition_issue': $query = $requisitionIssuesQuery; break;
+                case 'purchase':
+                    $query = $purchasesQuery;
+                    break;
+                case 'sale':
+                    $query = $salesQuery;
+                    break;
+                case 'adjustment':
+                    $query = $adjustmentsQuery;
+                    break;
+                case 'requisition_issue':
+                    $query = $requisitionIssuesQuery;
+                    break;
                 default: // Build union if no specific type or invalid type
                     $query = $purchasesQuery
                         ->unionAll($salesQuery)
