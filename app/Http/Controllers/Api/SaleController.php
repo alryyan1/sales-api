@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Models\PurchaseItem; // Needed for batch selection
 use App\Models\Shift;
 use App\Services\WhatsAppService;
+use App\Events\SaleCreated;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\SaleResource;
@@ -225,6 +226,9 @@ class SaleController extends Controller
                 'payments.user:id,name'
             ]);
 
+            // Fire event for notifications
+            event(new SaleCreated($sale));
+
             return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
         } catch (\Throwable $e) {
             Log::error("Empty sale creation error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
@@ -353,6 +357,9 @@ class SaleController extends Controller
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
             ]);
+
+            // Fire event for notifications
+            event(new SaleCreated($sale));
 
             return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
         } catch (ValidationException $e) {

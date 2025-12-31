@@ -32,6 +32,21 @@ class EventServiceProvider extends ServiceProvider
         Registered::class => [
             SendEmailVerificationNotification::class,
         ],
+        \App\Events\ProductStockLow::class => [
+            \App\Listeners\SendNotificationListener::class . '@handleProductStockLow',
+        ],
+        \App\Events\ProductOutOfStock::class => [
+            \App\Listeners\SendNotificationListener::class . '@handleProductOutOfStock',
+        ],
+        \App\Events\SaleCreated::class => [
+            \App\Listeners\SendNotificationListener::class . '@handleSaleCreated',
+        ],
+        \App\Events\PurchaseReceived::class => [
+            \App\Listeners\SendNotificationListener::class . '@handlePurchaseReceived',
+        ],
+        \App\Events\StockRequisitionCreated::class => [
+            \App\Listeners\SendNotificationListener::class . '@handleStockRequisitionCreated',
+        ],
     ];
 
     /**

@@ -109,4 +109,12 @@ class User extends Authenticatable
     {
         return $this->hasMany(Shift::class, 'closed_by_user_id');
     }
+
+    /**
+     * Get the notification preferences for the user.
+     */
+    public function notificationPreferences(): HasMany
+    {
+        return $this->hasMany(NotificationPreference::class);
+    }
 }

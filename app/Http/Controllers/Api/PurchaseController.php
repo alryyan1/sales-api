@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Purchase;
 use App\Models\PurchaseItem; // Ensure this is used
 use App\Models\Product;
+use App\Events\PurchaseReceived;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\PurchaseResource;
@@ -428,6 +429,9 @@ class PurchaseController extends Controller
                 }
                 $purchase->stock_added_to_warehouse = true;
                 $purchase->save();
+                
+                // Fire event for notifications
+                event(new PurchaseReceived($purchase));
             }
 
             // Case 2: Changing from RECEIVED to PENDING/ORDERED (revert stock)

@@ -7,6 +7,7 @@ use App\Models\StockRequisition;
 use App\Models\StockRequisitionItem;
 use App\Models\Product;
 use App\Models\PurchaseItem; // For batch stock deduction
+use App\Events\StockRequisitionCreated;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\StockRequisitionResource; // Create this resource
@@ -117,6 +118,10 @@ class StockRequisitionController extends Controller
             });
 
             $requisition->load(['requesterUser:id,name', 'items.product:id,name,sku']);
+            
+            // Fire event for notifications
+            event(new StockRequisitionCreated($requisition, 'created'));
+            
             return response()->json(['stock_requisition' => new StockRequisitionResource($requisition)], Response::HTTP_CREATED);
 
         } catch (\Throwable $e) {
@@ -238,6 +243,7 @@ class StockRequisitionController extends Controller
                 }
 
                 // Update Requisition Header
+                $oldStatus = $stockRequisition->status;
                 $stockRequisition->status = $validatedData['status'];
                 $stockRequisition->approved_by_user_id = $request->user()->id;
                 if (in_array($validatedData['status'], ['issued', 'partially_issued'])) {
@@ -250,6 +256,16 @@ class StockRequisitionController extends Controller
             });
 
             $processedRequisition->load([ 'requesterUser:id,name', 'approvedByUser:id,name', 'items.product:id,name,sku', 'items.issuedFromPurchaseItemBatch:id,batch_number' ]);
+            
+            // Fire event for notifications based on status
+            $action = match($processedRequisition->status) {
+                'approved' => 'approved',
+                'rejected' => 'rejected',
+                'issued', 'partially_issued' => 'fulfilled',
+                default => 'updated',
+            };
+            event(new StockRequisitionCreated($processedRequisition, $action));
+            
             return response()->json(['message' => 'Stock requisition processed successfully.', 'stock_requisition' => new StockRequisitionResource($processedRequisition)]);
 
         } catch (ValidationException $e) { /* ... return 422 ... */ }

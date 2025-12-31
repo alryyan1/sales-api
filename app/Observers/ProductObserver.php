@@ -4,6 +4,8 @@ namespace App\Observers;
 
 use App\Models\Product;
 use App\Services\WhatsAppService; // Import the service
+use App\Events\ProductStockLow;
+use App\Events\ProductOutOfStock;
 use Illuminate\Support\Facades\Log;
 
 class ProductObserver
@@ -34,6 +36,19 @@ class ProductObserver
             if ($currentStock <= $alertLevel && ($originalStock > $alertLevel || is_null($originalStock)) ) {
                 Log::info("ProductObserver: Low stock detected for Product ID {$product->id}. Current: {$currentStock}, Alert: {$alertLevel}. Original: {$originalStock}");
                 $this->whatsAppService->sendLowStockAlert($product);
+                
+                // Fire event for notifications
+                if ($currentStock > 0) {
+                    event(new ProductStockLow($product));
+                } else {
+                    event(new ProductOutOfStock($product));
+                }
+            }
+            
+            // Check if stock went to zero
+            if ($currentStock <= 0 && $originalStock > 0) {
+                Log::info("ProductObserver: Out of stock detected for Product ID {$product->id}.");
+                event(new ProductOutOfStock($product));
             }
         }
     }
@@ -44,6 +59,15 @@ class ProductObserver
         if ($product->stock_alert_level !== null && $product->stock_quantity <= $product->stock_alert_level) {
              Log::info("ProductObserver: Low stock on creation for Product ID {$product->id}. Current: {$product->stock_quantity}, Alert: {$product->stock_alert_level}.");
              $this->whatsAppService->sendLowStockAlert($product);
+             
+             // Fire event for notifications
+             if ($product->stock_quantity > 0) {
+                 event(new ProductStockLow($product));
+             } else {
+                 event(new ProductOutOfStock($product));
+             }
+        } elseif ($product->stock_quantity <= 0) {
+            event(new ProductOutOfStock($product));
         }
     }
 }

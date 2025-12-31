@@ -10,6 +10,8 @@ use App\Http\Controllers\Api\{
   CategoryController,
   ClientController,
   DashboardController,
+  NotificationController,
+  NotificationPreferenceController,
   PermissionController,
   ProductController,
   ProfileController,
@@ -42,6 +44,11 @@ Route::post('/updates/perform', [UpdateController::class, 'performUpdate']);
 Route::post('/register', [AuthController::class, 'register'])->name('api.register');
 Route::post('/login', [AuthController::class, 'login'])->name('api.login');
 
+// --- Health Check Endpoint (Public, lightweight) ---
+Route::get('/health', function () {
+    return response()->json(['status' => 'ok', 'timestamp' => now()], 200);
+})->name('api.health');
+
 // --- Protected Routes ---
 Route::middleware('auth:sanctum')->group(function () {
 
@@ -71,6 +78,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/', [ProfileController::class, 'show'])->name('show');
     Route::put('/', [ProfileController::class, 'update'])->name('update');
     Route::put('/password', [ProfileController::class, 'updatePassword'])->name('updatePassword');
+  });
+
+  // -- Notifications Routes --
+  Route::prefix('notifications')->name('api.notifications.')->group(function () {
+    Route::get('/', [NotificationController::class, 'index'])->name('index');
+    Route::get('/unread-count', [NotificationController::class, 'unreadCount'])->name('unread-count');
+    Route::post('/{id}/read', [NotificationController::class, 'markAsRead'])->name('mark-as-read');
+    Route::post('/read-all', [NotificationController::class, 'markAllAsRead'])->name('read-all');
+    Route::delete('/{id}', [NotificationController::class, 'destroy'])->name('destroy');
+    
+    // Notification Preferences
+    Route::get('/preferences', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'index'])->name('preferences.index');
+    Route::put('/preferences', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'update'])->name('preferences.update');
+    Route::post('/preferences/{type}/toggle', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'toggle'])->name('preferences.toggle');
   });
 
   // -- Stock Adjustments --
