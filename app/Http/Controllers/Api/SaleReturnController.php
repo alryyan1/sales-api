@@ -185,6 +185,12 @@ public function index(Request $request)
                     ]);
                 }
                 
+                // Mark the original sale as returned
+                if ($saleReturnHeader->status === 'completed') {
+                    $originalSale->is_returned = true;
+                    $originalSale->save();
+                }
+                
                 $saleReturnHeader->save();
                 return $saleReturnHeader;
             });

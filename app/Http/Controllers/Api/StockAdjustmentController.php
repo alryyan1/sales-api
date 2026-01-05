@@ -26,9 +26,7 @@ class StockAdjustmentController extends Controller
     public function store(Request $request)
     {
         // Authorization
-        if ($request->user()->cannot('adjust-stock')) {
-            abort(403, 'Unauthorized action.');
-        }
+        
 
         $validated = $request->validate([
             'warehouse_id' => 'required|integer|exists:warehouses,id',
@@ -152,9 +150,7 @@ class StockAdjustmentController extends Controller
     public function index(Request $request)
     {
         // Authorization check
-        if ($request->user()->cannot('view-stock-adjustments')) { // Define this permission
-            abort(403);
-        }
+     
 
         $query = StockAdjustment::with(['user:id,name', 'product:id,name,sku', 'purchaseItemBatch:id,batch_number', 'warehouse:id,name']); // Eager load
 

@@ -20,7 +20,16 @@ class DashboardController extends Controller
      */
     public function summary(Request $request)
     {
-        // --- Define Date Ranges ---
+        // --- Validate Date Parameters ---
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+        ]);
+
+        $startDate = isset($validated['start_date']) ? Carbon::parse($validated['start_date']) : null;
+        $endDate = isset($validated['end_date']) ? Carbon::parse($validated['end_date']) : null;
+
+        // --- Define Date Ranges (for backward compatibility when dates not provided) ---
         $today = Carbon::today();
         $yesterday = Carbon::yesterday();
         $startOfWeek = Carbon::now()->startOfWeek();
@@ -28,6 +37,13 @@ class DashboardController extends Controller
         $startOfYear = Carbon::now()->startOfYear();
 
         // --- Calculate Sales Stats ---
+        // If date range is provided, filter by it; otherwise use default ranges
+        $salesQuery = Sale::query();
+        if ($startDate && $endDate) {
+            $salesQuery->whereDate('sale_date', '>=', $startDate)
+                       ->whereDate('sale_date', '<=', $endDate);
+        }
+
         // Sum of item totals (sale_items.total_price) grouped by sale_date ranges
         $salesToday = Sale::whereDate('sale_date', $today)
             ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
@@ -47,15 +63,47 @@ class DashboardController extends Controller
         $totalSalesAmount = Sale::join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
             ->sum('sale_items.total_price'); // Overall total
 
+        // Filtered sales amount and count (for date range)
+        $filteredSalesAmount = 0;
+        $filteredSalesCount = 0;
+        if ($startDate && $endDate) {
+            $filteredSalesAmount = (float) $salesQuery->clone()
+                ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+                ->sum('sale_items.total_price');
+            $filteredSalesCount = $salesQuery->clone()->count();
+        } else {
+            // Default to this month when no dates provided
+            $filteredSalesAmount = $salesThisMonth;
+            $filteredSalesCount = Sale::whereDate('sale_date', '>=', $startOfMonth)->count();
+        }
+
         // Count sales records
         $salesTodayCount = Sale::whereDate('sale_date', $today)->count();
         $salesThisMonthCount = Sale::whereDate('sale_date', '>=', $startOfMonth)->count();
 
 
         // --- Calculate Purchase Stats ---
+        $purchasesQuery = Purchase::query();
+        if ($startDate && $endDate) {
+            $purchasesQuery->whereDate('purchase_date', '>=', $startDate)
+                           ->whereDate('purchase_date', '<=', $endDate);
+        }
+
         $purchasesToday = Purchase::whereDate('purchase_date', $today)->sum('total_amount');
         $purchasesThisMonth = Purchase::whereDate('purchase_date', '>=', $startOfMonth)->sum('total_amount');
         $purchasesThisMonthCount = Purchase::whereDate('purchase_date', '>=', $startOfMonth)->count();
+
+        // Filtered purchases amount and count (for date range)
+        $filteredPurchasesAmount = 0;
+        $filteredPurchasesCount = 0;
+        if ($startDate && $endDate) {
+            $filteredPurchasesAmount = (float) $purchasesQuery->clone()->sum('total_amount');
+            $filteredPurchasesCount = $purchasesQuery->clone()->count();
+        } else {
+            // Default to this month when no dates provided
+            $filteredPurchasesAmount = $purchasesThisMonth;
+            $filteredPurchasesCount = $purchasesThisMonthCount;
+        }
 
 
         // --- Inventory Stats ---
@@ -90,11 +138,17 @@ class DashboardController extends Controller
                 'total_amount' => (float) $totalSalesAmount,
                 'today_count' => $salesTodayCount,
                 'this_month_count' => $salesThisMonthCount,
+                // Filtered values for date range (used by frontend)
+                'filtered_amount' => $filteredSalesAmount,
+                'filtered_count' => $filteredSalesCount,
             ],
             'purchases' => [
                 'today_amount' => (float) $purchasesToday,
                 'this_month_amount' => (float) $purchasesThisMonth,
                 'this_month_count' => $purchasesThisMonthCount,
+                // Filtered values for date range (used by frontend)
+                'filtered_amount' => $filteredPurchasesAmount,
+                'filtered_count' => $filteredPurchasesCount,
             ],
             'inventory' => [
                 'total_products' => $totalProducts,

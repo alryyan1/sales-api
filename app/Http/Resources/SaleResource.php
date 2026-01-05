@@ -29,6 +29,7 @@ class SaleResource extends JsonResource
 
             'sale_date' => $this->sale_date->format('Y-m-d'),
             'invoice_number' => $this->invoice_number,
+            'is_returned' => $this->is_returned ?? false,
 
             // Computed financial fields
             // total_amount is now derived from items (sum of total_price) for backward compatibility
@@ -44,6 +45,7 @@ class SaleResource extends JsonResource
             'paid_amount' => $this->getCalculatedPaidAmountAttribute(), // computed from payments
             'due_amount' => $this->getCalculatedDueAmountAttribute(),   // computed from items, discount, and payments
             'payments' => PaymentResource::collection($this->whenLoaded('payments')),
+            
         ];
     }
 }

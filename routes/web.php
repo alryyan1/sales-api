@@ -25,6 +25,7 @@ Route::get('/', function () {
 // Web routes without authentication - using guest.access middleware to allow both authenticated and unauthenticated users
 Route::middleware('guest.access')->group(function () {
     Route::get('reports/sales/pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('api.sales.pdf');
+    Route::get('reports/sales/{saleId}/pdf', [ReportController::class, 'downloadSaleDetailPDF'])->name('api.sales.detail.pdf');
 
     // Products PDF Export Route
     Route::get('/products/export/pdf', [ProductController::class, 'exportPdf']);

@@ -15,6 +15,7 @@ use App\Models\SaleItem;
 use App\Services\Pdf\MyCustomTCPDF;
 use App\Services\DailySalesPdfService;
 use App\Services\InventoryPdfService;
+use App\Services\SalesReportPdfService;
 use Arr;
 use DB;
 use Carbon\Carbon; // Ensure correct Carbon namespace is used
@@ -853,182 +854,63 @@ class ReportController extends Controller
             }
         }
 
-        // Generate PDF
-        $pdf = new \TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-        $pdf->SetCreator('Sales System');
-        $pdf->SetAuthor('Sales System');
-        $pdf->SetTitle('Sales Report');
-        $pdf->SetSubject('Sales Report');
-        $pdf->SetMargins(15, 20, 15);
-        $pdf->SetAutoPageBreak(true, 15);
-        $pdf->setRTL(true);
-        $pdf->AddPage();
-
-        // Get settings
-        $settings = (new \App\Services\SettingsService())->getAll();
-        $companyName = $settings['company_name'] ?? 'Company';
-        $currencySymbol = $settings['currency_symbol'] ?? 'SDG';
-
-        // Header
-        $pdf->SetFont('dejavusans', 'B', 16);
-        $pdf->Cell(0, 10, $companyName, 0, 1, 'C');
+        // Generate PDF using service
+        $pdfService = new SalesReportPdfService();
+        $summaryStats = [
+            'totalSales' => $totalSales,
+            'totalAmount' => $totalAmount,
+            'totalPaid' => $totalPaid,
+            'totalDue' => $totalDue,
+        ];
         
-        $pdf->SetFont('dejavusans', 'B', 14);
-        $pdf->Cell(0, 8, 'تقرير المبيعات', 0, 1, 'C');
+        // Get base URL for hyperlinks
+        $baseUrl = $request->getSchemeAndHttpHost() . $request->getBasePath();
         
-        $pdf->SetFont('dejavusans', '', 10);
-        if ($startDate && $endDate) {
-            $pdf->Cell(0, 6, 'من ' . $startDate->format('Y-m-d') . ' إلى ' . $endDate->format('Y-m-d'), 0, 1, 'C');
-        } elseif ($startDate) {
-            $pdf->Cell(0, 6, 'من ' . $startDate->format('Y-m-d'), 0, 1, 'C');
-        } elseif ($endDate) {
-            $pdf->Cell(0, 6, 'حتى ' . $endDate->format('Y-m-d'), 0, 1, 'C');
-        }
-        
-        $pdf->Cell(0, 6, 'تاريخ التقرير: ' . now()->format('Y-m-d H:i'), 0, 1, 'C');
-        $pdf->Ln(5);
-
-        // Applied Filters
-        $filters = [];
-        if (!empty($validated['client_id'])) {
-            $client = \App\Models\Client::find($validated['client_id']);
-            if ($client) {
-                $filters[] = 'العميل: ' . $client->name;
-            }
-        }
-        if (!empty($validated['user_id'])) {
-            $user = \App\Models\User::find($validated['user_id']);
-            if ($user) {
-                $filters[] = 'المستخدم: ' . $user->name;
-            }
-        }
-        if (!empty($validated['shift_id'])) {
-            $filters[] = 'الوردية: #' . $validated['shift_id'];
-        }
-        if (!empty($validated['status'])) {
-            $filters[] = 'الحالة: ' . $validated['status'];
-        }
-
-        if (!empty($filters)) {
-            $pdf->SetFont('dejavusans', '', 9);
-            $pdf->Cell(0, 6, 'الفلاتر: ' . implode(' | ', $filters), 0, 1, 'R');
-            $pdf->Ln(3);
-        }
-
-        // Summary Section
-        $pdf->SetFont('dejavusans', 'B', 12);
-        $pdf->Cell(0, 8, 'ملخص المبيعات', 0, 1, 'R');
-        $pdf->SetFont('dejavusans', '', 10);
-        
-        $pdf->Cell(60, 6, 'عدد المبيعات:', 1, 0, 'R');
-        $pdf->Cell(40, 6, number_format($totalSales), 1, 1, 'L');
-        
-        $pdf->Cell(60, 6, 'إجمالي المبيعات:', 1, 0, 'R');
-        $pdf->Cell(40, 6, number_format($totalAmount, 2) . ' ' . $currencySymbol, 1, 1, 'L');
-        
-        $pdf->Cell(60, 6, 'إجمالي المدفوع:', 1, 0, 'R');
-        $pdf->Cell(40, 6, number_format($totalPaid, 2) . ' ' . $currencySymbol, 1, 1, 'L');
-        
-        $pdf->Cell(60, 6, 'المستحق:', 1, 0, 'R');
-        $pdf->Cell(40, 6, number_format($totalDue, 2) . ' ' . $currencySymbol, 1, 1, 'L');
-        $pdf->Ln(5);
-
-        // Payment Methods Breakdown
-        if (!empty($paymentMethods)) {
-            $pdf->SetFont('dejavusans', 'B', 12);
-            $pdf->Cell(0, 8, 'تفاصيل المدفوعات', 0, 1, 'R');
-            $pdf->SetFont('dejavusans', '', 10);
-            
-            foreach ($paymentMethods as $method => $amount) {
-                $methodLabel = $this->getPaymentMethodLabel($method);
-                $pdf->Cell(60, 6, $methodLabel . ':', 1, 0, 'R');
-                $pdf->Cell(40, 6, number_format($amount, 2) . ' ' . $currencySymbol, 1, 1, 'L');
-            }
-            $pdf->Ln(5);
-        }
-
-        // Sales Table
-        $pdf->SetFont('dejavusans', 'B', 12);
-        $pdf->Cell(0, 8, 'قائمة المبيعات', 0, 1, 'R');
-        $pdf->Ln(2);
-
-        // Table Header
-        $pdf->SetFont('dejavusans', 'B', 9);
-        $pdf->SetFillColor(220, 220, 220);
-        $pdf->Cell(20, 8, 'رقم البيع', 1, 0, 'C', true);
-        $pdf->Cell(25, 8, 'التاريخ', 1, 0, 'C', true);
-        $pdf->Cell(40, 8, 'العميل', 1, 0, 'C', true);
-        $pdf->Cell(30, 8, 'المستخدم', 1, 0, 'C', true);
-        $pdf->Cell(20, 8, 'المدفوعات', 1, 0, 'C', true);
-        $pdf->Cell(35, 8, 'الإجمالي', 1, 0, 'C', true);
-        $pdf->Cell(35, 8, 'المدفوع', 1, 0, 'C', true);
-        $pdf->Cell(35, 8, 'المستحق', 1, 1, 'C', true);
-
-        // Table Rows
-        $pdf->SetFont('dejavusans', '', 8);
-        $pdf->SetFillColor(255, 255, 255);
-        $rowCount = 0;
-        
-        foreach ($sales as $sale) {
-            if ($rowCount > 0 && $rowCount % 25 == 0) {
-                $pdf->AddPage();
-                // Repeat header
-                $pdf->SetFont('dejavusans', 'B', 9);
-                $pdf->SetFillColor(220, 220, 220);
-                $pdf->Cell(20, 8, 'رقم البيع', 1, 0, 'C', true);
-                $pdf->Cell(25, 8, 'التاريخ', 1, 0, 'C', true);
-                $pdf->Cell(40, 8, 'العميل', 1, 0, 'C', true);
-                $pdf->Cell(30, 8, 'المستخدم', 1, 0, 'C', true);
-                $pdf->Cell(20, 8, 'المدفوعات', 1, 0, 'C', true);
-                $pdf->Cell(35, 8, 'الإجمالي', 1, 0, 'C', true);
-                $pdf->Cell(35, 8, 'المدفوع', 1, 0, 'C', true);
-                $pdf->Cell(35, 8, 'المستحق', 1, 1, 'C', true);
-                $pdf->SetFont('dejavusans', '', 8);
-                $pdf->SetFillColor(255, 255, 255);
-            }
-
-            $fill = ($rowCount % 2 == 0) ? false : true;
-            
-            $pdf->Cell(20, 6, '#' . $sale->id, 1, 0, 'C', $fill);
-            $pdf->Cell(25, 6, Carbon::parse($sale->sale_date)->format('Y-m-d'), 1, 0, 'C', $fill);
-            $pdf->Cell(40, 6, mb_substr($sale->client?->name ?? 'عميل عام', 0, 20), 1, 0, 'R', $fill);
-            $pdf->Cell(30, 6, mb_substr($sale->user?->name ?? '-', 0, 15), 1, 0, 'R', $fill);
-            $pdf->Cell(20, 6, $sale->payments->count(), 1, 0, 'C', $fill);
-            $pdf->Cell(35, 6, number_format($sale->total_amount, 2), 1, 0, 'L', $fill);
-            $pdf->Cell(35, 6, number_format($sale->paid_amount, 2), 1, 0, 'L', $fill);
-            $pdf->Cell(35, 6, number_format($sale->due_amount ?? ($sale->total_amount - $sale->paid_amount), 2), 1, 1, 'L', $fill);
-            
-            $rowCount++;
-        }
-
-        // Footer
-        $pdf->SetY(-15);
-        $pdf->SetFont('dejavusans', '', 8);
-        $pdf->Cell(0, 10, 'صفحة ' . $pdf->getAliasNumPage() . ' من ' . $pdf->getAliasNbPages(), 0, 0, 'C');
+        $pdfContent = $pdfService->generate(
+            $sales,
+            $validated,
+            $summaryStats,
+            $paymentMethods,
+            $startDate,
+            $endDate,
+            $baseUrl
+        );
 
         // Output PDF
         $pdfFileName = 'sales_report_' . now()->format('Y-m-d_His') . '.pdf';
-        $pdfContent = $pdf->Output($pdfFileName, 'S');
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
-            ->header('Content-Disposition', "attachment; filename=\"{$pdfFileName}\"");
+            ->header('Content-Disposition', "inline; filename=\"{$pdfFileName}\"");
     }
 
-    private function getPaymentMethodLabel($method)
+    /**
+     * Download PDF report for a single sale with full details
+     *
+     * @param Request $request
+     * @param int $saleId
+     * @return \Illuminate\Http\Response
+     */
+    public function downloadSaleDetailPDF(Request $request, int $saleId)
     {
-        $labels = [
-            'cash' => 'نقدي',
-            'visa' => 'فيزا',
-            'mastercard' => 'ماستركارد',
-            'bank_transfer' => 'تحويل بنكي',
-            'mada' => 'مدى',
-            'store_credit' => 'رصيد متجر',
-            'other' => 'أخرى',
-            'refund' => 'استرداد',
-        ];
-        
-        return $labels[$method] ?? $method;
+        // Load sale with all relationships
+        $sale = Sale::with([
+            'client:id,name',
+            'user:id,name',
+            'items.product:id,name,sku',
+            'payments.user:id,name'
+        ])->findOrFail($saleId);
+
+        // Generate PDF using service
+        $pdfService = new \App\Services\SaleDetailPdfService();
+        $pdfContent = $pdfService->generate($sale);
+
+        // Output PDF
+        $pdfFileName = 'sale_detail_' . $saleId . '_' . now()->format('Y-m-d_His') . '.pdf';
+
+        return response($pdfContent, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', "inline; filename=\"{$pdfFileName}\"");
     }
 
     private function calculateSalesSummary($sales)

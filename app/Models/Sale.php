@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $discount_amount
  * @property string|null $discount_type
  * @property string|null $notes
+ * @property bool $is_returned
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property-read \App\Models\Client|null $client
@@ -46,6 +47,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereStatus($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereSubtotal($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereTotalAmount($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|Sale whereIsReturned($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUpdatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUserId($value)
  * @mixin \Eloquent
@@ -71,6 +73,7 @@ class Sale extends Model
         'sale_order_number',
         'payment_status',
         'status',
+        'is_returned',
     ];
 
     protected $casts = [
@@ -80,6 +83,7 @@ class Sale extends Model
         'discount' => 'decimal:2',
         'paid_amount' => 'decimal:2',
         'discount_amount' => 'decimal:2',
+        'is_returned' => 'boolean',
     ];
 
     /**

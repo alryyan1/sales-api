@@ -86,3 +86,5 @@ $pdf->SetFont('arial', '', 12);
 - The installation creates three files: `{fontname}.php`, `{fontname}.z`, `{fontname}.ctg.z`
 - Fonts are shared across all TCPDF documents in your application
 
+
+
