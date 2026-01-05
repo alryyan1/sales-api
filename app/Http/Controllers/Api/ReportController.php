@@ -779,38 +779,45 @@ class ReportController extends Controller
     }
     public function downloadSalesReportPDF(Request $request)
     {
-        // 1. Validate Input Parameters
+        // Validate Input Parameters
         $validated = $request->validate([
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
             'client_id' => 'nullable|integer|exists:clients,id',
             'user_id' => 'nullable|integer|exists:users,id',
+            'shift_id' => 'nullable|integer|exists:shifts,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'has_discount' => 'nullable|boolean',
         ]);
 
-        // 2. Fetch and Filter Sales Data
+        // Fetch and Filter Sales Data
         $query = Sale::query()->with([
-            'client:id,name,phone,email',
+            'client:id,name',
             'user:id,name',
-            'items.product:id,name,sku',
-            'payments'
+            'payments.user:id,name,username'
         ]);
         
-        $startDate = isset($validated['start_date']) ? Carbon::parse($validated['start_date'])->startOfDay() : Carbon::today()->startOfDay();
-        $endDate = isset($validated['end_date']) ? Carbon::parse($validated['end_date'])->endOfDay() : Carbon::today()->endOfDay();
+        $startDate = isset($validated['start_date']) 
+            ? Carbon::parse($validated['start_date'])->startOfDay() 
+            : null;
+        $endDate = isset($validated['end_date']) 
+            ? Carbon::parse($validated['end_date'])->endOfDay() 
+            : null;
 
         if ($startDate) {
-            $query->where('sale_date', '>=', $startDate);
+            $query->whereDate('sale_date', '>=', $startDate);
         }
         if ($endDate) {
-            $query->where('sale_date', '<=', $endDate);
+            $query->whereDate('sale_date', '<=', $endDate);
         }
         if (!empty($validated['client_id'])) {
             $query->where('client_id', $validated['client_id']);
         }
         if (!empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
+        }
+        if (!empty($validated['shift_id'])) {
+            $query->where('shift_id', $validated['shift_id']);
         }
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
@@ -826,31 +833,202 @@ class ReportController extends Controller
             }
         }
 
-        $sales = $query->orderBy('sale_date', 'desc')->get();
+        $sales = $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc')->get();
 
-        // 3. Calculate Summary Statistics
-        $summaryStats = $this->calculateSalesSummary($sales);
+        // Calculate Summary Statistics
+        $totalSales = $sales->count();
+        $totalAmount = $sales->sum('total_amount');
+        $totalPaid = $sales->sum('paid_amount');
+        $totalDue = $totalAmount - $totalPaid;
 
-        // 4. Generate PDF
-        $pdf = new MyCustomTCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-        $pdf->SetTitle('Professional Sales Report');
-        $pdf->AddPage();
+        // Payment methods breakdown
+        $paymentMethods = [];
+        foreach ($sales as $sale) {
+            foreach ($sale->payments as $payment) {
+                $method = $payment->method ?? 'cash';
+                if (!isset($paymentMethods[$method])) {
+                    $paymentMethods[$method] = 0;
+                }
+                $paymentMethods[$method] += (float) $payment->amount;
+            }
+        }
+
+        // Generate PDF
+        $pdf = new \TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->SetCreator('Sales System');
+        $pdf->SetAuthor('Sales System');
+        $pdf->SetTitle('Sales Report');
+        $pdf->SetSubject('Sales Report');
+        $pdf->SetMargins(15, 20, 15);
+        $pdf->SetAutoPageBreak(true, 15);
         $pdf->setRTL(true);
+        $pdf->AddPage();
 
-        // PDF Content
-        $this->generateProfessionalPDFHeader($pdf, $startDate, $endDate, $validated);
-        $this->generateTotalIncomeSection($pdf, $summaryStats);
-        $this->generatePaymentsBreakdownSection($pdf, $summaryStats);
-        $this->generateSalesTable($pdf, $sales);
-        $this->generateFooter($pdf);
+        // Get settings
+        $settings = (new \App\Services\SettingsService())->getAll();
+        $companyName = $settings['company_name'] ?? 'Company';
+        $currencySymbol = $settings['currency_symbol'] ?? 'SDG';
+
+        // Header
+        $pdf->SetFont('dejavusans', 'B', 16);
+        $pdf->Cell(0, 10, $companyName, 0, 1, 'C');
+        
+        $pdf->SetFont('dejavusans', 'B', 14);
+        $pdf->Cell(0, 8, 'تقرير المبيعات', 0, 1, 'C');
+        
+        $pdf->SetFont('dejavusans', '', 10);
+        if ($startDate && $endDate) {
+            $pdf->Cell(0, 6, 'من ' . $startDate->format('Y-m-d') . ' إلى ' . $endDate->format('Y-m-d'), 0, 1, 'C');
+        } elseif ($startDate) {
+            $pdf->Cell(0, 6, 'من ' . $startDate->format('Y-m-d'), 0, 1, 'C');
+        } elseif ($endDate) {
+            $pdf->Cell(0, 6, 'حتى ' . $endDate->format('Y-m-d'), 0, 1, 'C');
+        }
+        
+        $pdf->Cell(0, 6, 'تاريخ التقرير: ' . now()->format('Y-m-d H:i'), 0, 1, 'C');
+        $pdf->Ln(5);
+
+        // Applied Filters
+        $filters = [];
+        if (!empty($validated['client_id'])) {
+            $client = \App\Models\Client::find($validated['client_id']);
+            if ($client) {
+                $filters[] = 'العميل: ' . $client->name;
+            }
+        }
+        if (!empty($validated['user_id'])) {
+            $user = \App\Models\User::find($validated['user_id']);
+            if ($user) {
+                $filters[] = 'المستخدم: ' . $user->name;
+            }
+        }
+        if (!empty($validated['shift_id'])) {
+            $filters[] = 'الوردية: #' . $validated['shift_id'];
+        }
+        if (!empty($validated['status'])) {
+            $filters[] = 'الحالة: ' . $validated['status'];
+        }
+
+        if (!empty($filters)) {
+            $pdf->SetFont('dejavusans', '', 9);
+            $pdf->Cell(0, 6, 'الفلاتر: ' . implode(' | ', $filters), 0, 1, 'R');
+            $pdf->Ln(3);
+        }
+
+        // Summary Section
+        $pdf->SetFont('dejavusans', 'B', 12);
+        $pdf->Cell(0, 8, 'ملخص المبيعات', 0, 1, 'R');
+        $pdf->SetFont('dejavusans', '', 10);
+        
+        $pdf->Cell(60, 6, 'عدد المبيعات:', 1, 0, 'R');
+        $pdf->Cell(40, 6, number_format($totalSales), 1, 1, 'L');
+        
+        $pdf->Cell(60, 6, 'إجمالي المبيعات:', 1, 0, 'R');
+        $pdf->Cell(40, 6, number_format($totalAmount, 2) . ' ' . $currencySymbol, 1, 1, 'L');
+        
+        $pdf->Cell(60, 6, 'إجمالي المدفوع:', 1, 0, 'R');
+        $pdf->Cell(40, 6, number_format($totalPaid, 2) . ' ' . $currencySymbol, 1, 1, 'L');
+        
+        $pdf->Cell(60, 6, 'المستحق:', 1, 0, 'R');
+        $pdf->Cell(40, 6, number_format($totalDue, 2) . ' ' . $currencySymbol, 1, 1, 'L');
+        $pdf->Ln(5);
+
+        // Payment Methods Breakdown
+        if (!empty($paymentMethods)) {
+            $pdf->SetFont('dejavusans', 'B', 12);
+            $pdf->Cell(0, 8, 'تفاصيل المدفوعات', 0, 1, 'R');
+            $pdf->SetFont('dejavusans', '', 10);
+            
+            foreach ($paymentMethods as $method => $amount) {
+                $methodLabel = $this->getPaymentMethodLabel($method);
+                $pdf->Cell(60, 6, $methodLabel . ':', 1, 0, 'R');
+                $pdf->Cell(40, 6, number_format($amount, 2) . ' ' . $currencySymbol, 1, 1, 'L');
+            }
+            $pdf->Ln(5);
+        }
+
+        // Sales Table
+        $pdf->SetFont('dejavusans', 'B', 12);
+        $pdf->Cell(0, 8, 'قائمة المبيعات', 0, 1, 'R');
+        $pdf->Ln(2);
+
+        // Table Header
+        $pdf->SetFont('dejavusans', 'B', 9);
+        $pdf->SetFillColor(220, 220, 220);
+        $pdf->Cell(20, 8, 'رقم البيع', 1, 0, 'C', true);
+        $pdf->Cell(25, 8, 'التاريخ', 1, 0, 'C', true);
+        $pdf->Cell(40, 8, 'العميل', 1, 0, 'C', true);
+        $pdf->Cell(30, 8, 'المستخدم', 1, 0, 'C', true);
+        $pdf->Cell(20, 8, 'المدفوعات', 1, 0, 'C', true);
+        $pdf->Cell(35, 8, 'الإجمالي', 1, 0, 'C', true);
+        $pdf->Cell(35, 8, 'المدفوع', 1, 0, 'C', true);
+        $pdf->Cell(35, 8, 'المستحق', 1, 1, 'C', true);
+
+        // Table Rows
+        $pdf->SetFont('dejavusans', '', 8);
+        $pdf->SetFillColor(255, 255, 255);
+        $rowCount = 0;
+        
+        foreach ($sales as $sale) {
+            if ($rowCount > 0 && $rowCount % 25 == 0) {
+                $pdf->AddPage();
+                // Repeat header
+                $pdf->SetFont('dejavusans', 'B', 9);
+                $pdf->SetFillColor(220, 220, 220);
+                $pdf->Cell(20, 8, 'رقم البيع', 1, 0, 'C', true);
+                $pdf->Cell(25, 8, 'التاريخ', 1, 0, 'C', true);
+                $pdf->Cell(40, 8, 'العميل', 1, 0, 'C', true);
+                $pdf->Cell(30, 8, 'المستخدم', 1, 0, 'C', true);
+                $pdf->Cell(20, 8, 'المدفوعات', 1, 0, 'C', true);
+                $pdf->Cell(35, 8, 'الإجمالي', 1, 0, 'C', true);
+                $pdf->Cell(35, 8, 'المدفوع', 1, 0, 'C', true);
+                $pdf->Cell(35, 8, 'المستحق', 1, 1, 'C', true);
+                $pdf->SetFont('dejavusans', '', 8);
+                $pdf->SetFillColor(255, 255, 255);
+            }
+
+            $fill = ($rowCount % 2 == 0) ? false : true;
+            
+            $pdf->Cell(20, 6, '#' . $sale->id, 1, 0, 'C', $fill);
+            $pdf->Cell(25, 6, Carbon::parse($sale->sale_date)->format('Y-m-d'), 1, 0, 'C', $fill);
+            $pdf->Cell(40, 6, mb_substr($sale->client?->name ?? 'عميل عام', 0, 20), 1, 0, 'R', $fill);
+            $pdf->Cell(30, 6, mb_substr($sale->user?->name ?? '-', 0, 15), 1, 0, 'R', $fill);
+            $pdf->Cell(20, 6, $sale->payments->count(), 1, 0, 'C', $fill);
+            $pdf->Cell(35, 6, number_format($sale->total_amount, 2), 1, 0, 'L', $fill);
+            $pdf->Cell(35, 6, number_format($sale->paid_amount, 2), 1, 0, 'L', $fill);
+            $pdf->Cell(35, 6, number_format($sale->due_amount ?? ($sale->total_amount - $sale->paid_amount), 2), 1, 1, 'L', $fill);
+            
+            $rowCount++;
+        }
+
+        // Footer
+        $pdf->SetY(-15);
+        $pdf->SetFont('dejavusans', '', 8);
+        $pdf->Cell(0, 10, 'صفحة ' . $pdf->getAliasNumPage() . ' من ' . $pdf->getAliasNbPages(), 0, 0, 'C');
 
         // Output PDF
-        $pdfFileName = 'professional_sales_report_' . now()->format('Y-m-d_H-i-s') . '.pdf';
+        $pdfFileName = 'sales_report_' . now()->format('Y-m-d_His') . '.pdf';
         $pdfContent = $pdf->Output($pdfFileName, 'S');
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', "attachment; filename=\"{$pdfFileName}\"");
+    }
+
+    private function getPaymentMethodLabel($method)
+    {
+        $labels = [
+            'cash' => 'نقدي',
+            'visa' => 'فيزا',
+            'mastercard' => 'ماستركارد',
+            'bank_transfer' => 'تحويل بنكي',
+            'mada' => 'مدى',
+            'store_credit' => 'رصيد متجر',
+            'other' => 'أخرى',
+            'refund' => 'استرداد',
+        ];
+        
+        return $labels[$method] ?? $method;
     }
 
     private function calculateSalesSummary($sales)
