@@ -67,7 +67,7 @@ class SaleController extends Controller
                 'items.product' => function ($query) {
                     $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost']);
                 },
-                'payments' // Load payments for today's sales
+                'payments.user:id,name,username' // Load payments with user relationship for today's sales
             ]);
             $sales = $query->latest('sale_date')->latest('id')->get();
             return SaleResource::collection($sales);
@@ -105,6 +105,8 @@ class SaleController extends Controller
 
         if ($shiftId = $request->input('shift_id')) {
             $query->where('shift_id', $shiftId);
+            // Load payments when filtering by shift_id (for offline POS)
+            $query->with(['payments.user:id,name,username']);
         }
 
         $sales = $query->latest('id')->paginate($request->input('per_page', 15));
@@ -132,7 +134,7 @@ class SaleController extends Controller
             'items.product' => function ($query) {
                 $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost']);
             },
-            'payments'
+            'payments.user:id,name,username' // Load payments with user relationship
         ])
             ->whereDate('created_at', Carbon::today());
 
@@ -604,10 +606,16 @@ class SaleController extends Controller
 
                         // Decrement the remaining quantity of the batch (which is in sellable units)
                         $batch->decrement('remaining_quantity', $canSellFromThisBatchInSellableUnits);
+                        // Refresh the batch to ensure the observer gets the latest data
+                        $batch->refresh();
+                        
                         // Also decrement warehouse specific stock
                         $product->decrementWarehouseStock($warehouseId, $canSellFromThisBatchInSellableUnits);
+                        
                         // The PurchaseItemObserver is responsible for listening to this 'saved' event on PurchaseItem
                         // and then recalculating and updating the total Product->stock_quantity (which is also in sellable units).
+                        // Refresh the product to ensure we have the latest stock_quantity after observer updates
+                        $product->refresh();
 
                         // Update totals for the current sale
                         $newTotalSaleAmount += $canSellFromThisBatchInSellableUnits * $unitSalePrice;
@@ -705,7 +713,7 @@ class SaleController extends Controller
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
-            'payments'
+            'payments.user:id,name,username' // Load user relationship for payments to get user_name
         ]);
         return response()->json(['sale' => new SaleResource($sale)]);
     }
@@ -879,7 +887,7 @@ class SaleController extends Controller
                 'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
-                'payments'
+                'payments.user:id,name,username' // Load user relationship for payments
             ]);
 
             $message = empty($validatedData['payments']) ? 'All payments cleared successfully' : 'Payment(s) added successfully';
@@ -924,7 +932,7 @@ class SaleController extends Controller
                 'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
-                'payments'
+                'payments.user:id,name,username' // Load user relationship for payments
             ]);
 
             return response()->json([
@@ -2212,7 +2220,7 @@ class SaleController extends Controller
         $userId = $request->input('user_id');
 
         $query = Sale::whereDate('sale_date', $date)
-            ->with(['payments', 'user:id,name']);
+            ->with(['payments.user:id,name,username', 'user:id,name']);
 
         if ($userId) {
             $query->where('user_id', $userId);

@@ -402,8 +402,8 @@ class Product extends Model
             // Use a fresh query to avoid any relationship caching issues
             return (int) PurchaseItem::where('product_id', $this->id)
                 ->whereHas('purchase', function ($q) use ($warehouseId) {
-                    $q->where('warehouse_id', $warehouseId)
-                        ->where('status', 'received'); // Only count stock from received purchases
+                    $q->where('warehouse_id', $warehouseId);
+                        // ->where('status', 'received'); // Only count stock from received purchases
                 })
                 ->sum('remaining_quantity');
         }

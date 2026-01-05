@@ -57,6 +57,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/logout', [AuthController::class, 'logout'])->name('api.logout');
 
   // -- Shifts (POS) --
+  Route::get('/shifts', [ShiftController::class, 'index'])->name('api.shifts.index');
   Route::get('/shifts/current', [ShiftController::class, 'current'])->name('api.shifts.current');
   Route::post('/shifts/open', [ShiftController::class, 'open'])->name('api.shifts.open');
   Route::post('/shifts/close', [ShiftController::class, 'close'])->name('api.shifts.close');

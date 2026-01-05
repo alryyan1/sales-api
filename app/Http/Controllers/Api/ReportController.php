@@ -43,6 +43,7 @@ class ReportController extends Controller
             'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
             'client_id' => 'nullable|integer|exists:clients,id',
             'user_id' => 'nullable|integer|exists:users,id',
+            'shift_id' => 'nullable|integer|exists:shifts,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'per_page' => 'nullable|integer|min:5|max:100', // Control pagination size
             // Add validation for sort_by, sort_direction if implementing dynamic sorting
@@ -60,7 +61,8 @@ class ReportController extends Controller
             // Select specific columns for performance
             ->with([
                 'client:id,name', // Load only id and name from client
-                'user:id,name'    // Load only id and name from user (salesperson)
+                'user:id,name',   // Load only id and name from user (salesperson)
+                'payments.user:id,name,username' // Load payments with user relationship when filtering by shift
                 // Only load items if report needs item-level detail (adds overhead)
                 // 'items',
                 // 'items.product:id,name,sku'
@@ -83,6 +85,11 @@ class ReportController extends Controller
         // User (Salesperson) Filter
         if (!empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
+        }
+
+        // Shift Filter
+        if (!empty($validated['shift_id'])) {
+            $query->where('shift_id', $validated['shift_id']);
         }
 
         // Status Filter

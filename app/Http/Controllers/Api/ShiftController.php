@@ -18,6 +18,46 @@ class ShiftController extends Controller
 {
     /**
      * @OA\Get(
+     *     path="/api/shifts",
+     *     summary="Get all shifts",
+     *     description="Retrieve a list of all shifts for filtering purposes.",
+     *     operationId="getShifts",
+     *     tags={"Shifts"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="List of shifts",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="array",
+     *                 @OA\Items(
+     *                     @OA\Property(property="id", type="integer"),
+     *                     @OA\Property(property="opened_at", type="string", format="date-time"),
+     *                     @OA\Property(property="closed_at", type="string", format="date-time", nullable=true)
+     *                 )
+     *             )
+     *         )
+     *     )
+     * )
+     */
+    public function index(Request $request)
+    {
+        $shifts = Shift::orderBy('id', 'desc')
+            ->limit(100) // Limit to recent 100 shifts
+            ->get(['id', 'opened_at', 'closed_at']);
+
+        return response()->json([
+            'data' => $shifts->map(function ($shift) {
+                return [
+                    'id' => $shift->id,
+                    'name' => "الوردية #{$shift->id}",
+                    'shift_date' => $shift->opened_at ? date('Y-m-d', strtotime($shift->opened_at)) : null,
+                ];
+            }),
+        ]);
+    }
+
+    /**
+     * @OA\Get(
      *     path="/api/shifts/current",
      *     summary="Get current shift",
      *     description="Retrieve the current active shift for the authenticated user.",
