@@ -44,3 +44,6 @@ class SaleCreated implements ShouldBroadcast
     }
 }
 
+
+
+

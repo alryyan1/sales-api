@@ -44,3 +44,6 @@ class ProductOutOfStock implements ShouldBroadcast
     }
 }
 
+
+
+

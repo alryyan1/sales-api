@@ -129,3 +129,6 @@ php artisan config:show queue.default
 
 إذا أردت إضافة WebSockets للإشعارات الفورية، راجع `NOTIFICATION_ARCHITECTURE.md` في مجلد `sales-ui`.
 
+
+
+

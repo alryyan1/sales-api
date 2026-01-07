@@ -166,6 +166,7 @@ Route::middleware('auth:sanctum')->group(function () {
   });
 
   // -- Suppliers Management --
+  Route::get('/suppliers/summary', [SupplierController::class, 'summary'])->name('api.suppliers.summary');
   Route::apiResource('suppliers', SupplierController::class);
 
   // -- Supplier Payments & Ledger --

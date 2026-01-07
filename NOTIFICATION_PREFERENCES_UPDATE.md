@@ -122,3 +122,6 @@ php artisan make:command InitializeNotificationPreferences
 6. قم بإنشاء حدث (مثل بيع جديد)
 7. تحقق من أن الإشعارات تظهر فقط للأنواع المفعلة
 
+
+
+

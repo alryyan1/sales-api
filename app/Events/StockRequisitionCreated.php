@@ -46,3 +46,6 @@ class StockRequisitionCreated implements ShouldBroadcast
     }
 }
 
+
+
+

@@ -246,4 +246,58 @@ class SupplierController extends Controller
             return response()->json(['message' => 'Failed to delete supplier.'], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
+
+    /**
+     * Get summary of all suppliers with their debit, credit, and balance.
+     * 
+     * @OA\Get(
+     *     path="/api/suppliers/summary",
+     *     summary="Get suppliers summary",
+     *     description="Retrieve all suppliers with their total debit (purchases), credit (payments), and balance.",
+     *     tags={"Suppliers"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Successful operation",
+     *         @OA\JsonContent(
+     *             type="array",
+     *             @OA\Items(
+     *                 @OA\Property(property="id", type="integer", example=1),
+     *                 @OA\Property(property="name", type="string", example="ABC Supplies"),
+     *                 @OA\Property(property="total_debit", type="number", format="float", example=5000.00),
+     *                 @OA\Property(property="total_credit", type="number", format="float", example=3000.00),
+     *                 @OA\Property(property="balance", type="number", format="float", example=2000.00)
+     *             )
+     *         )
+     *     )
+     * )
+     */
+    public function summary()
+    {
+        try {
+            $suppliers = Supplier::with(['purchases', 'payments'])->get();
+
+            $summary = $suppliers->map(function ($supplier) {
+                $totalDebit = $supplier->purchases->sum('total_amount');
+                $totalCredit = $supplier->payments->sum('amount');
+                $balance = $totalDebit - $totalCredit;
+
+                return [
+                    'id' => $supplier->id,
+                    'name' => $supplier->name,
+                    'total_debit' => (float) $totalDebit,
+                    'total_credit' => (float) $totalCredit,
+                    'balance' => (float) $balance,
+                ];
+            });
+
+            return response()->json($summary->values()->all());
+        } catch (\Exception $e) {
+            Log::error('Error fetching suppliers summary: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to retrieve suppliers summary',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
 }

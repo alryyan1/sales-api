@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AppSetting;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Validation\Rule;
 
 class SettingsService
 {
@@ -41,6 +42,7 @@ class SettingsService
             'logo_width' => 'int',
             'tax_number' => 'string',
             'pdf_font' => 'string',
+            'pos_mode' => 'string', // 'shift' or 'days'
         ];
     }
 
@@ -76,6 +78,7 @@ class SettingsService
             'logo_width' => $c['logo_width'] ?? 60,
             'tax_number' => $c['tax_number'] ?? null,
             'pdf_font' => $c['pdf_font'] ?? 'Amiri',
+            'pos_mode' => $c['pos_mode'] ?? 'shift',
         ];
     }
 
@@ -134,6 +137,7 @@ class SettingsService
         // Specific constraints
         $rules['company_email'] = ['nullable', 'email', 'max:255'];
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
+        $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
         return $rules;
     }
 
