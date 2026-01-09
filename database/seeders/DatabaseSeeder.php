@@ -34,15 +34,15 @@ class DatabaseSeeder extends Seeder
             // Add other seeders here if needed
             CategoriesTableSeeder::class,
             UnitsTableSeeder::class,
-            ProductsTableSeeder::class,
+            // ProductsTableSeeder::class,
+            LifeCareInstrumentsSeeder::class, // Seed medical instruments and equipment
         ]);
         // Assign 'admin' role to the admin user AFTER roles are created
         $adminUser = User::where('username', env('ADMIN_USERNAME', 'superadmin'))->first();
         if ($adminUser && !$adminUser->hasRole('admin')) {
             $adminUser->assignRole('admin');
             $this->command->info('Admin role assigned to admin user.');
-
-    }
+        }
 
         // Optionally create some non-admin users with other roles using factory
         // User::factory()->count(5)->create()->each(function ($user) {

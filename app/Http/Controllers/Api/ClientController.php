@@ -50,8 +50,22 @@ class ClientController extends Controller
     public function index(Request $request) // Added Request for potential filtering/searching later
     {
 
-        // Basic pagination
-        $clients = Client::latest()->paginate($request->input('per_page', 15)); // Default 15 per page
+        // Basic pagination with financial data
+        $clients = Client::with(['sales', 'payments'])
+            ->latest()
+            ->paginate($request->input('per_page', 15)) // Default 15 per page
+            ->through(function ($client) {
+                $totalDebit = $client->sales->sum('total_amount');
+                $totalCredit = $client->payments->sum('amount');
+                $balance = $totalDebit - $totalCredit;
+
+                // Add financial data to client object
+                $client->total_debit = (float) $totalDebit;
+                $client->total_credit = (float) $totalCredit;
+                $client->balance = (float) $balance;
+
+                return $client;
+            });
 
         // Consider adding search/filtering capabilities later based on query parameters
         // e.g., if ($request->has('search')) { ... }
