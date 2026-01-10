@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -17,8 +18,8 @@ class ExpenseController extends Controller
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%")
-                  ->orWhere('reference', 'like', "%{$search}%");
+                    ->orWhere('description', 'like', "%{$search}%")
+                    ->orWhere('reference', 'like', "%{$search}%");
             });
         }
 
@@ -62,7 +63,7 @@ class ExpenseController extends Controller
             'description' => ['nullable', 'string'],
             'amount' => ['required', 'numeric', 'min:0'],
             'expense_date' => ['required', 'date'],
-            'payment_method' => ['nullable', 'string', 'max:100'],
+            'payment_method' => ['nullable', 'string', 'in:cash,bank'],
             'reference' => ['nullable', 'string', 'max:100'],
         ]);
 
@@ -87,7 +88,7 @@ class ExpenseController extends Controller
             'description' => ['sometimes', 'nullable', 'string'],
             'amount' => ['sometimes', 'required', 'numeric', 'min:0'],
             'expense_date' => ['sometimes', 'required', 'date'],
-            'payment_method' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'payment_method' => ['sometimes', 'nullable', 'string', 'in:cash,bank'],
             'reference' => ['sometimes', 'nullable', 'string', 'max:100'],
         ]);
 
@@ -102,5 +103,3 @@ class ExpenseController extends Controller
         return response()->noContent();
     }
 }
-
-

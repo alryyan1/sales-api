@@ -9,6 +9,7 @@ use App\Models\SaleItem; // Though items are created via relationship
 use App\Models\Product;
 use App\Models\PurchaseItem; // Needed for batch selection
 use App\Models\Shift;
+use App\Services\SettingsService;
 use App\Services\WhatsAppService;
 use App\Events\SaleCreated;
 use Illuminate\Http\Request;
@@ -194,15 +195,21 @@ class SaleController extends Controller
 
         try {
             // Check for open shift before transaction
-            $currentShift = Shift::where('user_id', $request->user()->id)
-                ->whereNull('closed_at')
-                ->orderBy('id', 'desc')
-                ->first();
+            $settings = (new SettingsService())->getAll();
+            $posMode = $settings['pos_mode'] ?? 'shift';
+            // return $settings;
+            $currentShift = null;
+            if ($posMode === 'shift') {
+                $currentShift = Shift::where('user_id', $request->user()->id)
+                    ->whereNull('closed_at')
+                    ->orderBy('id', 'desc')
+                    ->first();
 
-            if (!$currentShift) {
-                return response()->json([
-                    'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
-                ], Response::HTTP_BAD_REQUEST);
+                if (!$currentShift) {
+                    return response()->json([
+                        'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
+                    ], Response::HTTP_BAD_REQUEST);
+                }
             }
 
             $sale = DB::transaction(function () use ($validatedData, $request, $currentShift) {
@@ -292,16 +299,23 @@ class SaleController extends Controller
     {
         $validatedData = $this->validateSaleRequest($request);
 
-        // Check for open shift before transaction
-        $currentShift = Shift::where('user_id', $request->user()->id)
-            ->whereNull('closed_at')
-            ->orderBy('id', 'desc')
-            ->first();
+        // Check for open shift only if pos_mode is 'shift'
+        $settings = (new SettingsService())->getAll();
+        $posMode = $settings['pos_mode'] ?? 'shift';
+        // return $settings;
 
-        if (!$currentShift) {
-            return response()->json([
-                'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
-            ], Response::HTTP_BAD_REQUEST);
+        $currentShift = null;
+        if ($posMode === 'shift') {
+            $currentShift = Shift::where('user_id', $request->user()->id)
+                ->whereNull('closed_at')
+                ->orderBy('id', 'desc')
+                ->first();
+
+            if (!$currentShift) {
+                return response()->json([
+                    'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
+                ], Response::HTTP_BAD_REQUEST);
+            }
         }
 
         $this->performStockPreCheck($validatedData);
@@ -312,7 +326,7 @@ class SaleController extends Controller
 
         try {
             $sale = DB::transaction(function () use ($validatedData, $request, $calculatedTotals, $currentShift) {
-                $saleHeader = $this->createSaleHeader($validatedData, $request, $calculatedTotals);
+                $saleHeader = $this->createSaleHeader($validatedData, $request, $calculatedTotals, $currentShift);
 
                 // --- Calculate Total Sale Amount from items in THIS request ---
                 $newTotalSaleAmount = 0;
@@ -504,7 +518,7 @@ class SaleController extends Controller
     {
         // Determine shift_id: use provided shift_id, or auto-fetch if not provided and not explicitly null
         $shiftId = null;
-        
+
         if (array_key_exists('shift_id', $validatedData)) {
             // shift_id was explicitly provided (can be null for days mode)
             // Use array_key_exists instead of isset because isset returns false for null values
@@ -621,10 +635,10 @@ class SaleController extends Controller
                         $batch->decrement('remaining_quantity', $canSellFromThisBatchInSellableUnits);
                         // Refresh the batch to ensure the observer gets the latest data
                         $batch->refresh();
-                        
+
                         // Also decrement warehouse specific stock
                         $product->decrementWarehouseStock($warehouseId, $canSellFromThisBatchInSellableUnits);
-                        
+
                         // The PurchaseItemObserver is responsible for listening to this 'saved' event on PurchaseItem
                         // and then recalculating and updating the total Product->stock_quantity (which is also in sellable units).
                         // Refresh the product to ensure we have the latest stock_quantity after observer updates

@@ -429,7 +429,7 @@ class PurchaseController extends Controller
                 }
                 $purchase->stock_added_to_warehouse = true;
                 $purchase->save();
-                
+
                 // Fire event for notifications
                 event(new PurchaseReceived($purchase));
             }
@@ -801,6 +801,106 @@ class PurchaseController extends Controller
         } catch (\Throwable $e) {
             Log::error("Unexpected error deleting purchase item ID {$purchaseItem->id}: " . $e->getMessage());
             return response()->json(['message' => 'An unexpected error occurred while deleting the purchase item.'], 500);
+        }
+    }
+
+    /**
+     * Delete all items with quantity = 0 for the specified purchase.
+     */
+    public function deleteZeroQuantityItems(Purchase $purchase)
+    {
+        try {
+            $count = DB::transaction(function () use ($purchase) {
+                $zeroItems = $purchase->items()->where('quantity', 0)->get();
+                $deletedCount = 0;
+
+                foreach ($zeroItems as $item) {
+                    // Although quantity is 0, we follow the same pattern for safety
+                    // If quantity is 0, $qtyToRemove will be 0, so pivot update is essentially a no-op but safe.
+                    $warehouseId = $purchase->warehouse_id;
+                    $product = $item->product;
+
+                    if ($product && $warehouseId && $purchase->status === 'received') {
+                        $qtyToRemove = $item->remaining_quantity; // Should be 0 if quantity is 0
+                        $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+                        if ($pivot) {
+                            $product->warehouses()->updateExistingPivot($warehouseId, [
+                                'quantity' => max(0, $pivot->pivot->quantity - $qtyToRemove)
+                            ]);
+                        }
+                    }
+
+                    $item->delete();
+                    $deletedCount++;
+                }
+
+                // Update purchase total amount after all deletions
+                if ($deletedCount > 0) {
+                    $this->updatePurchaseTotal($purchase);
+                }
+
+                return $deletedCount;
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json([
+                'message' => "Successfully deleted {$count} zero-quantity items.",
+                'deleted_count' => $count,
+                'purchase' => new PurchaseResource($purchase->fresh())
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Error deleting zero quantity items for purchase {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to delete zero quantity items.'], 500);
+        }
+    }
+
+    /**
+     * Add ALL products not currently in the purchase as items with quantity 0.
+     */
+    public function addAllMissingProducts(Purchase $purchase)
+    {
+        try {
+            $count = DB::transaction(function () use ($purchase) {
+                // Get IDs of products already in the purchase
+                $existingProductIds = $purchase->items()->pluck('product_id')->toArray();
+
+                // Get all other products
+                $missingProducts = Product::whereNotIn('id', $existingProductIds)->get();
+                $addedCount = 0;
+
+                foreach ($missingProducts as $product) {
+                    $purchase->items()->create([
+                        'product_id' => $product->id,
+                        'batch_number' => null,
+                        'quantity' => 0,
+                        'unit_cost' => $product->latest_purchase_cost ?? 0,
+                        'total_cost' => 0,
+                        'cost_per_sellable_unit' => $product->latest_cost_per_sellable_unit ?? 0,
+                        'sale_price' => $product->suggested_sale_price_per_sellable_unit ?? 0,
+                        'sale_price_stocking_unit' => $product->suggested_sale_price ?? null,
+                        'expiry_date' => null,
+                        'remaining_quantity' => 0,
+                    ]);
+                    $addedCount++;
+                }
+
+                // Update total (though if qty 0, total won't change, but good to keep consistent)
+                if ($addedCount > 0) {
+                    $this->updatePurchaseTotal($purchase);
+                }
+
+                return $addedCount;
+            });
+
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            return response()->json([
+                'message' => "Successfully added {$count} products.",
+                'added_count' => $count,
+                'purchase' => new PurchaseResource($purchase->fresh())
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Error adding all missing products for purchase {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to add products.'], 500);
         }
     }
 

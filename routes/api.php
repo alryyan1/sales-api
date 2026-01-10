@@ -46,7 +46,7 @@ Route::post('/login', [AuthController::class, 'login'])->name('api.login');
 
 // --- Health Check Endpoint (Public, lightweight) ---
 Route::get('/health', function () {
-    return response()->json(['status' => 'ok', 'timestamp' => now()], 200);
+  return response()->json(['status' => 'ok', 'timestamp' => now()], 200);
 })->name('api.health');
 
 // --- Protected Routes ---
@@ -88,7 +88,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/{id}/read', [NotificationController::class, 'markAsRead'])->name('mark-as-read');
     Route::post('/read-all', [NotificationController::class, 'markAllAsRead'])->name('read-all');
     Route::delete('/{id}', [NotificationController::class, 'destroy'])->name('destroy');
-    
+
     // Notification Preferences
     Route::get('/preferences', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'index'])->name('preferences.index');
     Route::put('/preferences', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'update'])->name('preferences.update');
@@ -212,6 +212,8 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/purchases/{purchase}/items', [PurchaseController::class, 'addPurchaseItem'])->name('api.purchases.addPurchaseItem');
   Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updatePurchaseItem');
   Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'deletePurchaseItem'])->name('api.purchases.deletePurchaseItem');
+  Route::delete('/purchases/{purchase}/items-zero-quantity', [PurchaseController::class, 'deleteZeroQuantityItems'])->name('api.purchases.deleteZeroQuantityItems');
+  Route::post('/purchases/{purchase}/add-all-missing-products', [PurchaseController::class, 'addAllMissingProducts'])->name('api.purchases.addAllMissingProducts');
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
   Route::get('/sales/today-by-created-at', [SaleController::class, 'getTodaySalesByCreatedAt'])->name('api.sales.todayByCreatedAt');
   // -- Sales Management --
