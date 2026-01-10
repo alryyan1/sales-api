@@ -82,9 +82,13 @@ class SaleController extends Controller
         }
         if ($startDate = $request->input('start_date')) {
             $query->whereDate('sale_date', '>=', $startDate);
+            // Load payments when filtering by date (for POS days mode)
+            $query->with(['payments.user:id,name,username']);
         }
         if ($endDate = $request->input('end_date')) {
             $query->whereDate('sale_date', '<=', $endDate);
+            // Load payments when filtering by date (for POS days mode)
+            $query->with(['payments.user:id,name,username']);
         }
         if ($userId = $request->input('user_id')) {
             $query->where('user_id', $userId);
