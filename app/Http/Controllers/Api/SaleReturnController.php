@@ -19,55 +19,55 @@ use Illuminate\Validation\ValidationException;
 
 class SaleReturnController extends Controller
 {
-public function index(Request $request)
-{
-    DB::enableQueryLog(); // Enable query log
-    
-    $query = SaleReturn::with(['client:id,name', 'originalSale:id,invoice_number']);
+    public function index(Request $request)
+    {
+        DB::enableQueryLog(); // Enable query log
 
-    // Add filters
-    if ($request->has('start_date')) {
-        $query->where('return_date', '>=', $request->input('start_date'));
+        $query = SaleReturn::with(['client:id,name', 'originalSale:id,invoice_number']);
+
+        // Add filters
+        if ($request->has('start_date')) {
+            $query->where('return_date', '>=', $request->input('start_date'));
+        }
+        if ($request->has('end_date')) {
+            $query->where('return_date', '<=', $request->input('end_date'));
+        }
+        if ($request->has('status')) {
+            $query->where('status', $request->input('status'));
+        }
+        if ($request->has('original_sale_id')) {
+            $query->where('id', $request->input('original_sale_id'));
+        }
+
+        // Execute the query
+        $returns = $query->latest()->paginate($request->input('per_page', 15));
+
+        // Get the query log
+        $queryLog = DB::getQueryLog();
+
+        // The actual paginated query will be the second-to-last in the log
+        // (Last query is usually the count for pagination)
+        $mainQuery = $queryLog[count($queryLog) - 2] ?? end($queryLog);
+
+        // Add raw query info to the response
+        $response = [
+            'data' => $returns->items(),
+            'queryyy' => $queryLog,
+            'meta' => [
+                'current_page' => $returns->currentPage(),
+                'last_page' => $returns->lastPage(),
+                'per_page' => $returns->perPage(),
+                'total' => $returns->total(),
+            ],
+            'query' => [
+                'sql' => $mainQuery['query'],
+                'bindings' => $mainQuery['bindings'],
+                'time' => $mainQuery['time'] . 'ms',
+            ]
+        ];
+
+        return response()->json($response);
     }
-    if ($request->has('end_date')) {
-        $query->where('return_date', '<=', $request->input('end_date'));
-    }
-    if ($request->has('status')) {
-        $query->where('status', $request->input('status'));
-    }
-    if ($request->has('original_sale_id')) {
-        $query->where('id', $request->input('original_sale_id'));
-    }
-
-    // Execute the query
-    $returns = $query->latest()->paginate($request->input('per_page', 15));
-
-    // Get the query log
-    $queryLog = DB::getQueryLog();
-
-    // The actual paginated query will be the second-to-last in the log
-    // (Last query is usually the count for pagination)
-    $mainQuery = $queryLog[count($queryLog) - 2] ?? end($queryLog);
-
-    // Add raw query info to the response
-    $response = [
-        'data' => $returns->items(),
-        'queryyy'=>$queryLog,
-        'meta' => [
-            'current_page' => $returns->currentPage(),
-            'last_page' => $returns->lastPage(),
-            'per_page' => $returns->perPage(),
-            'total' => $returns->total(),
-        ],
-        'query' => [
-            'sql' => $mainQuery['query'],
-            'bindings' => $mainQuery['bindings'],
-            'time' => $mainQuery['time'] . 'ms',
-        ]
-    ];
-
-    return response()->json($response);
-}
 
     // Store a new sale return
     public function store(Request $request)
@@ -171,9 +171,9 @@ public function index(Request $request)
                 }
 
                 $saleReturnHeader->total_returned_amount = $calculatedTotalReturnedAmount;
-                
+
                 // Create refund payment if credit_action is 'refund'
-                if ($validatedData['credit_action'] === 'refund' && $validatedData['refunded_amount'] > 0) {
+                if ($validatedData['credit_action'] === 'refund' && ($validatedData['refunded_amount'] ?? 0) > 0) {
                     // Create a negative payment record for the refund
                     $originalSale->payments()->create([
                         'user_id' => $request->user()->id,
@@ -184,13 +184,13 @@ public function index(Request $request)
                         'notes' => "Refund for sale return #{$saleReturnHeader->id}",
                     ]);
                 }
-                
+
                 // Mark the original sale as returned
                 if ($saleReturnHeader->status === 'completed') {
                     $originalSale->is_returned = true;
                     $originalSale->save();
                 }
-                
+
                 $saleReturnHeader->save();
                 return $saleReturnHeader;
             });
@@ -234,11 +234,11 @@ public function index(Request $request)
     public function getTotalReturnedAmount(Request $request)
     {
         $date = $request->input('date', now()->format('Y-m-d'));
-        
+
         $totalReturnedAmount = SaleReturn::where('return_date', $date)
             ->where('status', 'completed')
             ->sum('total_returned_amount');
-        
+
         return response()->json([
             'date' => $date,
             'total_returned_amount' => $totalReturnedAmount
