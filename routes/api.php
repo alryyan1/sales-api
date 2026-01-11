@@ -129,6 +129,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/inventory-pdf', [ReportController::class, 'inventoryPdf'])->name('inventory-pdf');
     Route::get('/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('inventory-log');
     Route::get('/inventory-log/pdf', [App\Http\Controllers\Api\InventoryLogController::class, 'generatePdf'])->name('inventory-log.pdf');
+    Route::get('/expenses-summary', [ReportController::class, 'expensesSummary'])->name('expenses-summary');
+    Route::get('/monthly-expenses', [ReportController::class, 'monthlyExpenses'])->name('monthly-expenses');
+    Route::get('/monthly-expenses-excel', [ReportController::class, 'monthlyExpensesExcel'])->name('monthly-expenses-excel');
   });
 
   // -- Admin Only Routes --

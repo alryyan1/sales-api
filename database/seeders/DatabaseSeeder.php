@@ -29,7 +29,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RolesAndPermissionsSeeder::class, // Creates roles & permissions
             AdminUserSeeder::class, // Create an admin user
-            AppSettingsSeeder::class, // Seed app settings defaults into DB
+            // AppSettingsSeeder::class, // Seed app settings defaults into DB
             // ProductSeeder::class, // Create an admin user
             // Add other seeders here if needed
             // CategoriesTableSeeder::class,
@@ -37,6 +37,7 @@ class DatabaseSeeder extends Seeder
             // LifeCareProductsSeeder::class,
             // ProductsTableSeeder::class,
             LifeCareInstrumentsSeeder::class, // Seed medical instruments and equipment
+            LifeCareProductsSeeder::class,
             AppSettingsSeeder::class,
         ]);
         // Assign 'admin' role to the admin user AFTER roles are created

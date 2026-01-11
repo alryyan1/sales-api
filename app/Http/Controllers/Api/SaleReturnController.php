@@ -93,7 +93,7 @@ class SaleReturnController extends Controller
 
         // Pre-validate quantities against original sale items
         foreach ($validatedData['items'] as $index => $returnItemData) {
-            $originalSaleItem = $originalSale->items->find($returnItemData['original_sale_item_id']);
+            $originalSaleItem = $originalSale->items()->where('id', $returnItemData['original_sale_item_id'])->first();
             if (!$originalSaleItem || $originalSaleItem->product_id != $returnItemData['product_id']) {
                 throw ValidationException::withMessages(["items.{$index}.original_sale_item_id" => 'Invalid original sale item or product mismatch.']);
             }
@@ -124,7 +124,14 @@ class SaleReturnController extends Controller
                 $calculatedTotalReturnedAmount = 0;
 
                 foreach ($validatedData['items'] as $itemData) {
-                    $originalSaleItem = $originalSale->items->find($itemData['original_sale_item_id']);
+                    $originalSaleItem = $originalSale->items()->where('id', $itemData['original_sale_item_id'])->first();
+
+                    // If originalSaleItem is null, it would have been caught by validation, but defensive programming
+                    if (!$originalSaleItem) {
+                        Log::error("SaleReturn: Original sale item not found for ID {$itemData['original_sale_item_id']}. This should have been caught by validation.");
+                        continue; // Skip this item to prevent further errors
+                    }
+
                     $product = Product::findOrFail($itemData['product_id']); // Or $originalSaleItem->product
 
                     $quantityReturned = $itemData['quantity_returned'];

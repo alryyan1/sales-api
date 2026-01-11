@@ -37,7 +37,7 @@ class ReportController extends Controller
      */
     public function salesReport(Request $request)
     {
-       
+
         // --- Input Validation ---
         $validated = $request->validate([
             'start_date' => 'nullable|date_format:Y-m-d',
@@ -46,9 +46,10 @@ class ReportController extends Controller
             'user_id' => 'nullable|integer|exists:users,id',
             'shift_id' => 'nullable|integer|exists:shifts,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
-            'per_page' => 'nullable|integer|min:5|max:100', // Control pagination size
+            'per_page' => 'nullable|integer', // Control pagination size
             // Add validation for sort_by, sort_direction if implementing dynamic sorting
             'has_discount' => 'nullable|boolean',
+            'product_id' => 'nullable|integer|exists:products,id',
         ]);
 
         // --- Authorization Check (Example - Needs Policy/Gate setup) ---
@@ -70,12 +71,15 @@ class ReportController extends Controller
             ]);
 
         // --- Apply Filters ---
-        // Date Range Filter
-        if (!empty($validated['start_date'])) {
-            $query->whereDate('sale_date', '>=', $validated['start_date']);
-        }
-        if (!empty($validated['end_date'])) {
-            $query->whereDate('sale_date', '<=', $validated['end_date']);
+        // Date Range Filter - only apply if shift_id is NOT provided, or handle accordingly
+        // Usually if a shift is selected, we want sales FOR THAT SHIFT regardless of the calendar date range
+        if (empty($validated['shift_id'])) {
+            if (!empty($validated['start_date'])) {
+                $query->whereDate('sale_date', '>=', $validated['start_date']);
+            }
+            if (!empty($validated['end_date'])) {
+                $query->whereDate('sale_date', '<=', $validated['end_date']);
+            }
         }
 
         // Client Filter
@@ -96,6 +100,13 @@ class ReportController extends Controller
         // Status Filter
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
+        }
+
+        // Product Filter
+        if (!empty($validated['product_id'])) {
+            $query->whereHas('items', function ($q) use ($validated) {
+                $q->where('product_id', $validated['product_id']);
+            });
         }
 
         // Has Discount Filter
@@ -119,6 +130,44 @@ class ReportController extends Controller
 
         // --- Return Paginated Resource Collection ---
         return SaleResource::collection($sales);
+    }
+
+
+    /**
+     * Get a summary of expenses and refunds for a given period.
+     */
+    public function expensesSummary(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+            'user_id' => 'nullable|integer',
+        ]);
+
+        $startDate = $validated['start_date'] ?? null;
+        $endDate = $validated['end_date'] ?? null;
+        $userId = $validated['user_id'] ?? null;
+
+        // 1. Calculate Total Expenses from expenses table
+        $expensesQuery = \App\Models\Expense::query();
+        if ($startDate) $expensesQuery->whereDate('expense_date', '>=', $startDate);
+        if ($endDate) $expensesQuery->whereDate('expense_date', '<=', $endDate);
+        if ($userId) $expensesQuery->where('user_id', $userId);
+
+        $totalExpenses = (float) $expensesQuery->sum('amount');
+
+        // 2. Calculate Total Refunds from sale_returns table
+        $refundsQuery = \App\Models\SaleReturn::where('status', 'completed');
+        if ($startDate) $refundsQuery->whereDate('return_date', '>=', $startDate);
+        if ($endDate) $refundsQuery->whereDate('return_date', '<=', $endDate);
+        if ($userId) $refundsQuery->where('user_id', $userId);
+
+        $totalRefunds = (float) $refundsQuery->sum('refunded_amount');
+
+        return response()->json([
+            'total_expenses' => $totalExpenses,
+            'total_refunds' => $totalRefunds,
+        ]);
     }
 
 
@@ -299,106 +348,18 @@ class ReportController extends Controller
         $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
         $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
 
-        // --- 1. Get Daily Payments by Method (now primary revenue source) ---
-        // This query sums payments made ON a specific day, regardless of when the sale was made,
-        // but linked to sales within the requested month for context OR sales made by a specific user.
-        // For a pure revenue report based on SALE DATE, it's better to sum payments linked to sales *made* in that period.
-        $dailyPaymentsQuery = Payment::query()
-            ->join('sales', 'payments.sale_id', '=', 'sales.id') // Join to filter sales if needed
+        // --- 1. Get Daily Total Sales (invoiced amount) ---
+        $dailySales = Sale::query()
             ->select(
-                DB::raw('DATE(payments.payment_date) as payment_day'), // Could also group by sales.sale_date
-                'payments.method',
-                DB::raw('SUM(payments.amount) as total_amount_by_method')
+                DB::raw('DATE(COALESCE(sale_date, created_at)) as sale_day'),
+                DB::raw('SUM(total_amount) as total_sales')
             )
-            // Option A: Payments made within the month for sales made within the month
-            ->whereBetween(DB::raw("DATE(COALESCE(sales.sale_date, sales.created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
-            ->whereBetween('payments.payment_date', [$startDate, $endDate]) // Payment also in this month
-            // Option B: All payments made within the month, regardless of sale date (cash flow focused)
-            // ->whereBetween('payments.payment_date', [$startDate, $endDate])
-            ;
-
-
-        // if (!empty($validated['client_id'])) { $dailyPaymentsQuery->where('sales.client_id', $validated['client_id']); }
-        // if (!empty($validated['user_id'])) { $dailyPaymentsQuery->where('sales.user_id', $validated['user_id']); }
-        // Note: If using payments.user_id, filter by that directly: ->where('payments.user_id', ...)
-
-        $dailyPaymentsByMethod = $dailyPaymentsQuery->groupBy('payment_day', 'payments.method')
-            ->orderBy('payment_day', 'asc')
-            ->orderBy('payments.method', 'asc')
+            ->whereBetween(DB::raw('DATE(COALESCE(sale_date, created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
+            ->groupBy('sale_day')
             ->get()
-            ->groupBy('payment_day') // Group by day first
-            ->map(function ($paymentsOnDay) {
-                // Then map each day's payments to {method: amount}
-                return $paymentsOnDay->mapWithKeys(function ($paymentGroup) {
-                    return [$paymentGroup->method => (float) $paymentGroup->total_amount_by_method];
-                });
-            });
+            ->keyBy('sale_day');
 
-
-        // --- 2. Combine Data for Each Day of the Month ---
-        $report = [];
-        $currentDay = $startDate->copy();
-        $monthSummary = [
-            'total_revenue' => 0,
-            'total_paid' => 0, // Sum of direct Sale.paid_amount
-            'total_payments_by_method' => [], // Sum of all payments by method for the month
-        ];
-
-        while ($currentDay->lte($endDate)) {
-            $dayStr = $currentDay->toDateString();
-            $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]); // Ensure it's a collection or empty array
-            // Revenue is now based purely on payments recorded on that day
-            $dailyTotalPaymentsFromPaymentsTable = $paymentsForDay->sum();
-            $dailyRevenue = $dailyTotalPaymentsFromPaymentsTable;
-            $dailyPaidOnSale = $dailyTotalPaymentsFromPaymentsTable;
-
-            $report[$dayStr] = [
-                'date' => $dayStr,
-                'day_of_week' => $currentDay->isoFormat('dddd'), // Localized day name (e.g., الأحد)
-                'total_revenue' => $dailyRevenue,
-                'total_paid_at_sale_creation' => $dailyPaidOnSale, // Reflects initial payments from Sale.paid_amount
-                'total_payments_recorded_on_day' => $dailyTotalPaymentsFromPaymentsTable, // Reflects all payments *processed* on this day
-                'payments_by_method' => $paymentsForDay->toArray(),
-            ];
-
-            $monthSummary['total_revenue'] += $dailyRevenue;
-            $monthSummary['total_paid'] += $dailyPaidOnSale; // Or sum dailyTotalPaymentsFromPaymentsTable for a different metric
-
-            foreach ($paymentsForDay as $method => $amount) {
-                $monthSummary['total_payments_by_method'][$method] = ($monthSummary['total_payments_by_method'][$method] ?? 0) + $amount;
-            }
-
-            $currentDay->addDay();
-        }
-
-        return response()->json([
-            'data' => [
-                'year' => $year,
-                'month' => $month,
-                'month_name' => $startDate->isoFormat('MMMM YYYY'), // Localized month name
-                'daily_breakdown' => array_values($report), // Convert associative array to indexed for easier frontend map
-                'month_summary' => $monthSummary,
-            ]
-        ]);
-    }
-
-    /**
-     * Export Monthly Revenue Report to Excel
-     */
-    public function monthlyRevenueExcel(Request $request)
-    {
-        // Reuse the same validation and data fetching logic
-        $validated = $request->validate([
-            'month' => 'required|integer|between:1,12',
-            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
-        ]);
-
-        $year = $validated['year'];
-        $month = $validated['month'];
-        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
-        $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
-
-        // Get the same data as monthlyRevenueReport
+        // --- 2. Get Daily Payments by Method ---
         $dailyPaymentsQuery = Payment::query()
             ->join('sales', 'payments.sale_id', '=', 'sales.id')
             ->select(
@@ -420,39 +381,179 @@ class ReportController extends Controller
                 });
             });
 
-        // Build report data
+        // --- 3. Get Daily Expenses ---
+        $dailyExpenses = \App\Models\Expense::query()
+            ->select(
+                DB::raw('DATE(expense_date) as expense_day'),
+                DB::raw('SUM(amount) as total_expense')
+            )
+            ->whereBetween('expense_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->groupBy('expense_day')
+            ->get()
+            ->keyBy('expense_day');
+
+        // --- 4. Combine Data for Each Day of the Month ---
         $report = [];
         $currentDay = $startDate->copy();
         $monthSummary = [
-            'total_revenue' => 0,
+            'total_sales' => 0,
             'total_paid' => 0,
-            'total_payments_by_method' => [],
+            'total_cash' => 0,
+            'total_bank' => 0,
+            'total_expense' => 0,
+            'net' => 0,
         ];
 
         while ($currentDay->lte($endDate)) {
             $dayStr = $currentDay->toDateString();
             $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]);
-            $dailyTotalPaymentsFromPaymentsTable = $paymentsForDay->sum();
-            $dailyRevenue = $dailyTotalPaymentsFromPaymentsTable;
+            
+            // Calculate daily totals
+            $dailySalesEntry = $dailySales->get($dayStr);
+            $dailyExpensesEntry = $dailyExpenses->get($dayStr);
+            $dailyTotalSales = (float) ($dailySalesEntry->total_sales ?? 0);
+            $dailyTotalPaid = (float) $paymentsForDay->sum();
+            $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
+            $dailyTotalBank = (float) ($paymentsForDay->get('bank') ?? 0);
+            $dailyTotalExpense = (float) ($dailyExpensesEntry->total_expense ?? 0);
+            $dailyNet = $dailyTotalPaid - $dailyTotalExpense;
 
-            $report[] = [
+            $report[$dayStr] = [
                 'date' => $dayStr,
-                'day_of_week' => $currentDay->isoFormat('dddd'),
-                'total_revenue' => $dailyRevenue,
-                'total_payments_recorded_on_day' => $dailyTotalPaymentsFromPaymentsTable,
-                'payments_by_method' => $paymentsForDay->toArray(),
+                'total_sales' => $dailyTotalSales,
+                'total_paid' => $dailyTotalPaid,
+                'total_cash' => $dailyTotalCash,
+                'total_bank' => $dailyTotalBank,
+                'total_expense' => $dailyTotalExpense,
+                'net' => $dailyNet,
             ];
 
-            $monthSummary['total_revenue'] += $dailyRevenue;
-            foreach ($paymentsForDay as $method => $amount) {
-                $monthSummary['total_payments_by_method'][$method] = ($monthSummary['total_payments_by_method'][$method] ?? 0) + $amount;
-            }
+            // Update month summary
+            $monthSummary['total_sales'] += $dailyTotalSales;
+            $monthSummary['total_paid'] += $dailyTotalPaid;
+            $monthSummary['total_cash'] += $dailyTotalCash;
+            $monthSummary['total_bank'] += $dailyTotalBank;
+            $monthSummary['total_expense'] += $dailyTotalExpense;
+            $monthSummary['net'] += $dailyNet;
 
             $currentDay->addDay();
         }
 
-        // Get all payment methods
-        $paymentMethods = array_keys($monthSummary['total_payments_by_method']);
+        return response()->json([
+            'data' => [
+                'year' => $year,
+                'month' => $month,
+                'month_name' => $startDate->isoFormat('MMMM YYYY'),
+                'daily_breakdown' => array_values($report),
+                'month_summary' => $monthSummary,
+            ]
+        ]);
+    }
+
+    /**
+     * Export Monthly Revenue Report to Excel
+     */
+    public function monthlyRevenueExcel(Request $request)
+    {
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+        ]);
+
+        $year = $validated['year'];
+        $month = $validated['month'];
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+
+        // Get the same data as monthlyRevenueReport
+        $dailySales = Sale::query()
+            ->select(
+                DB::raw('DATE(COALESCE(sale_date, created_at)) as sale_day'),
+                DB::raw('SUM(total_amount) as total_sales')
+            )
+            ->whereBetween(DB::raw('DATE(COALESCE(sale_date, created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
+            ->groupBy('sale_day')
+            ->get()
+            ->keyBy('sale_day');
+
+        $dailyPaymentsQuery = Payment::query()
+            ->join('sales', 'payments.sale_id', '=', 'sales.id')
+            ->select(
+                DB::raw('DATE(payments.payment_date) as payment_day'),
+                'payments.method',
+                DB::raw('SUM(payments.amount) as total_amount_by_method')
+            )
+            ->whereBetween(DB::raw("DATE(COALESCE(sales.sale_date, sales.created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
+            ->whereBetween('payments.payment_date', [$startDate, $endDate]);
+
+        $dailyPaymentsByMethod = $dailyPaymentsQuery->groupBy('payment_day', 'payments.method')
+            ->orderBy('payment_day', 'asc')
+            ->orderBy('payments.method', 'asc')
+            ->get()
+            ->groupBy('payment_day')
+            ->map(function ($paymentsOnDay) {
+                return $paymentsOnDay->mapWithKeys(function ($paymentGroup) {
+                    return [$paymentGroup->method => (float) $paymentGroup->total_amount_by_method];
+                });
+            });
+
+        $dailyExpenses = \App\Models\Expense::query()
+            ->select(
+                DB::raw('DATE(expense_date) as expense_day'),
+                DB::raw('SUM(amount) as total_expense')
+            )
+            ->whereBetween('expense_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->groupBy('expense_day')
+            ->get()
+            ->keyBy('expense_day');
+
+        // Build report data
+        $report = [];
+        $currentDay = $startDate->copy();
+        $monthSummary = [
+            'total_sales' => 0,
+            'total_paid' => 0,
+            'total_cash' => 0,
+            'total_bank' => 0,
+            'total_expense' => 0,
+            'net' => 0,
+        ];
+
+        while ($currentDay->lte($endDate)) {
+            $dayStr = $currentDay->toDateString();
+            $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]);
+            
+            $dailySalesEntry = $dailySales->get($dayStr);
+            $dailyExpensesEntry = $dailyExpenses->get($dayStr);
+            $dailyTotalSales = (float) ($dailySalesEntry->total_sales ?? 0);
+            $dailyTotalPaid = (float) $paymentsForDay->sum();
+            $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
+            $dailyTotalBank = (float) ($paymentsForDay->get('bank') ?? 0);
+            $dailyTotalExpense = (float) ($dailyExpensesEntry->total_expense ?? 0);
+            $dailyNet = $dailyTotalPaid - $dailyTotalExpense;
+
+            // Format date as dd,mm,yyyy
+            $formattedDate = $currentDay->format('d,m,Y');
+
+            $report[] = [
+                'date' => $formattedDate,
+                'total_sales' => $dailyTotalSales,
+                'total_paid' => $dailyTotalPaid,
+                'total_cash' => $dailyTotalCash,
+                'total_bank' => $dailyTotalBank,
+                'total_expense' => $dailyTotalExpense,
+                'net' => $dailyNet,
+            ];
+
+            $monthSummary['total_sales'] += $dailyTotalSales;
+            $monthSummary['total_paid'] += $dailyTotalPaid;
+            $monthSummary['total_cash'] += $dailyTotalCash;
+            $monthSummary['total_bank'] += $dailyTotalBank;
+            $monthSummary['total_expense'] += $dailyTotalExpense;
+            $monthSummary['net'] += $dailyNet;
+
+            $currentDay->addDay();
+        }
 
         // Create Excel file
         $spreadsheet = new Spreadsheet();
@@ -471,12 +572,8 @@ class ReportController extends Controller
 
         // Header Row
         $row = 1;
+        $headers = ['التاريخ', 'إجمالي المبيعات', 'إجمالي المدفوع', 'إجمالي النقدي', 'إجمالي البنكي', 'إجمالي المصروفات', 'صافي'];
         $col = 'A';
-        $headers = ['التاريخ', 'اليوم', 'إجمالي الدخل'];
-        foreach ($paymentMethods as $method) {
-            $headers[] = $method;
-        }
-
         foreach ($headers as $header) {
             $sheet->setCellValue($col . $row, $header);
             $col++;
@@ -515,16 +612,17 @@ class ReportController extends Controller
             $col = 'A';
             $sheet->setCellValue($col . $row, $dayData['date']);
             $col++;
-            $sheet->setCellValue($col . $row, $dayData['day_of_week']);
+            $sheet->setCellValue($col . $row, number_format($dayData['total_sales'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_payments_recorded_on_day'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['total_paid'], 2));
             $col++;
-            
-            foreach ($paymentMethods as $method) {
-                $amount = $dayData['payments_by_method'][$method] ?? 0;
-                $sheet->setCellValue($col . $row, number_format($amount, 2));
-                $col++;
-            }
+            $sheet->setCellValue($col . $row, number_format($dayData['total_cash'], 2));
+            $col++;
+            $sheet->setCellValue($col . $row, number_format($dayData['total_bank'], 2));
+            $col++;
+            $sheet->setCellValue($col . $row, number_format($dayData['total_expense'], 2));
+            $col++;
+            $sheet->setCellValue($col . $row, number_format($dayData['net'], 2));
             $row++;
         }
 
@@ -533,16 +631,17 @@ class ReportController extends Controller
         $col = 'A';
         $sheet->setCellValue($col . $totalRow, 'الإجمالي');
         $col++;
-        $sheet->setCellValue($col . $totalRow, '');
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_sales'], 2));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_revenue'], 2));
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_paid'], 2));
         $col++;
-        
-        foreach ($paymentMethods as $method) {
-            $total = $monthSummary['total_payments_by_method'][$method] ?? 0;
-            $sheet->setCellValue($col . $totalRow, number_format($total, 2));
-            $col++;
-        }
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_cash'], 2));
+        $col++;
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_bank'], 2));
+        $col++;
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_expense'], 2));
+        $col++;
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['net'], 2));
 
         // Style total row
         $totalStyle = [
@@ -569,13 +668,12 @@ class ReportController extends Controller
 
         // Set column widths
         $sheet->getColumnDimension('A')->setWidth(15); // Date
-        $sheet->getColumnDimension('B')->setWidth(15); // Day
-        $sheet->getColumnDimension('C')->setWidth(18); // Total Income
-        $colIndex = 'D';
-        foreach ($paymentMethods as $method) {
-            $sheet->getColumnDimension($colIndex)->setWidth(18);
-            $colIndex++;
-        }
+        $sheet->getColumnDimension('B')->setWidth(18); // Total Sales
+        $sheet->getColumnDimension('C')->setWidth(18); // Total Paid
+        $sheet->getColumnDimension('D')->setWidth(18); // Total Cash
+        $sheet->getColumnDimension('E')->setWidth(18); // Total Bank
+        $sheet->getColumnDimension('F')->setWidth(18); // Total Expense
+        $sheet->getColumnDimension('G')->setWidth(18); // Net
 
         // Center align all cells
         $sheet->getStyle('A1:' . $lastCol . $totalRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
@@ -584,7 +682,7 @@ class ReportController extends Controller
         // Generate Excel file
         $writer = new Xlsx($spreadsheet);
         $fileName = 'daily_income_report_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.xlsx';
-        
+
         // Save to temporary file
         $tempFile = tempnam(sys_get_temp_dir(), 'excel_');
         $writer->save($tempFile);
@@ -797,12 +895,12 @@ class ReportController extends Controller
             'user:id,name',
             'payments.user:id,name,username'
         ]);
-        
-        $startDate = isset($validated['start_date']) 
-            ? Carbon::parse($validated['start_date'])->startOfDay() 
+
+        $startDate = isset($validated['start_date'])
+            ? Carbon::parse($validated['start_date'])->startOfDay()
             : null;
-        $endDate = isset($validated['end_date']) 
-            ? Carbon::parse($validated['end_date'])->endOfDay() 
+        $endDate = isset($validated['end_date'])
+            ? Carbon::parse($validated['end_date'])->endOfDay()
             : null;
 
         if ($startDate) {
@@ -862,10 +960,10 @@ class ReportController extends Controller
             'totalPaid' => $totalPaid,
             'totalDue' => $totalDue,
         ];
-        
+
         // Get base URL for hyperlinks
         $baseUrl = $request->getSchemeAndHttpHost() . $request->getBasePath();
-        
+
         $pdfContent = $pdfService->generate(
             $sales,
             $validated,
@@ -919,18 +1017,18 @@ class ReportController extends Controller
         $totalAmount = $sales->sum('total_amount');
         $totalPaid = $sales->sum('paid_amount');
         $totalDue = $totalAmount - $totalPaid;
-        
+
         $statusBreakdown = $sales->groupBy('status')->map->count();
         $completedSales = $statusBreakdown->get('completed', 0);
         $pendingSales = $statusBreakdown->get('pending', 0);
         $draftSales = $statusBreakdown->get('draft', 0);
         $cancelledSales = $statusBreakdown->get('cancelled', 0);
-        
+
         $completionRate = $totalSales > 0 ? ($completedSales / $totalSales) * 100 : 0;
-        
+
         // Payment method breakdown
         $paymentMethods = $sales->flatMap->payments->groupBy('method')->map->sum('amount');
-        
+
         // Top clients
         $topClients = $sales->groupBy('client_id')
             ->map(function ($clientSales) {
@@ -973,7 +1071,7 @@ class ReportController extends Controller
         $pdf->SetY(20);
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 18);
         $pdf->Cell(0, 10, $companyName, 0, 1, 'C');
-        
+
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
         if ($companyAddress) {
             $pdf->Cell(0, 6, $companyAddress, 0, 1, 'C');
@@ -990,12 +1088,12 @@ class ReportController extends Controller
         // Report Title and Date Range
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
         $pdf->Cell(0, 10, 'Professional Sales Report', 0, 1, 'C');
-        
+
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 12);
         $formattedStartDate = $startDate ? $startDate->format('F j, Y') : 'All Time';
         $formattedEndDate = $endDate ? $endDate->format('F j, Y') : 'All Time';
         $pdf->Cell(0, 8, "Period: {$formattedStartDate} to {$formattedEndDate}", 0, 1, 'C');
-        
+
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
         $pdf->Cell(0, 6, 'Generated on: ' . now()->format('F j, Y \a\t g:i A'), 0, 1, 'C');
 
@@ -1019,7 +1117,7 @@ class ReportController extends Controller
             $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
             $pdf->SetFillColor(240, 240, 240);
             $pdf->Cell(0, 8, 'APPLIED FILTERS', 1, 1, 'C', true);
-            
+
             $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
             $pdf->SetFillColor(255, 255, 255);
             $pdf->Cell(0, 6, implode(' | ', $appliedFilters), 1, 1, 'C', true);
@@ -1037,18 +1135,18 @@ class ReportController extends Controller
     {
         // Total Income Section at the top
         $pdf->addSectionHeader('Total Income Summary');
-        
+
         // Large prominent total income display
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
         $pdf->SetFillColor(240, 248, 255); // Light blue background
         $pdf->Cell(0, 12, 'Total Revenue: ' . number_format($summaryStats['total_amount'], 0), 1, 1, 'C', true);
         $pdf->Ln(5);
-        
+
         // Income breakdown in a table format
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
         $pdf->Cell(0, 8, 'Income Breakdown', 0, 1, 'L');
         $pdf->Ln(2);
-        
+
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
         $incomeData = [
             'Total Sales Amount' => number_format($summaryStats['total_amount'], 0),
@@ -1057,7 +1155,7 @@ class ReportController extends Controller
             'Number of Sales' => $summaryStats['total_sales'],
             'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 0) : '0'
         ];
-        
+
         $pdf->addSummaryBox('Income Details', $incomeData, 2);
         $pdf->Ln(10);
     }
@@ -1066,13 +1164,13 @@ class ReportController extends Controller
     {
         // Payments Breakdown Section
         $pdf->addSectionHeader('Payments Breakdown');
-        
+
         // Payment Methods Distribution
         if ($summaryStats['payment_methods']->count() > 0) {
             $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
             $pdf->Cell(0, 8, 'Payment Methods Distribution', 0, 1, 'L');
             $pdf->Ln(2);
-            
+
             $paymentData = [];
             foreach ($summaryStats['payment_methods'] as $method => $amount) {
                 $percentage = $summaryStats['total_paid'] > 0 ? ($amount / $summaryStats['total_paid']) * 100 : 0;
@@ -1080,7 +1178,7 @@ class ReportController extends Controller
             }
             $pdf->addSummaryBox('Payment Methods', $paymentData, 1);
         }
-        
+
         // Sales Status Breakdown
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
         $pdf->Cell(0, 8, 'Sales Status Breakdown', 0, 1, 'L');
@@ -1097,24 +1195,24 @@ class ReportController extends Controller
         foreach ($statuses as $status => $info) {
             $count = $summaryStats['status_breakdown'][$status] ?? 0;
             $percentage = $summaryStats['total_sales'] > 0 ? ($count / $summaryStats['total_sales']) * 100 : 0;
-            
+
             $pdf->Cell(47, 6, $info[0] . ': ' . $count . ' (' . number_format($percentage, 1) . '%)', 1, 0, 'C');
         }
         $pdf->Ln(8);
-        
+
         // Top Clients (if any)
         if ($summaryStats['top_clients']->count() > 0) {
             $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 12);
             $pdf->Cell(0, 8, 'Top 5 Clients by Revenue', 0, 1, 'L');
             $pdf->Ln(2);
-            
+
             $clientData = [];
             foreach ($summaryStats['top_clients'] as $client) {
                 $clientData[$client['name']] = number_format($client['total'], 0) . ' (' . $client['count'] . ' sales)';
             }
             $pdf->addSummaryBox('Top Clients', $clientData, 1);
         }
-        
+
         $pdf->Ln(10);
     }
 
@@ -1122,7 +1220,7 @@ class ReportController extends Controller
     {
         // Professional Section Header
         $pdf->addSectionHeader('Detailed Sales Transactions');
-        
+
         // Add a brief description
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
         $pdf->SetTextColor(100, 100, 100);
@@ -1138,18 +1236,18 @@ class ReportController extends Controller
 
         // Professional Table Headers with optimized column names
         $headers = [
-            'ID', 
-            'Amount', 
-            'Paid', 
-            'Discount', 
-            'Date', 
-            'User', 
+            'ID',
+            'Amount',
+            'Paid',
+            'Discount',
+            'Date',
+            'User',
             'Items'
         ];
         // Optimized column widths for landscape A4 (297mm width)
         // Total width: 20+25+20+20+30+25+35 = 175mm (leaving margin for borders)
         $columnWidths = [20, 25, 20, 20, 30, 25, 35];
-        
+
         $pdf->addTableHeader($headers, $columnWidths);
 
         // Table Data with enhanced formatting
@@ -1161,36 +1259,36 @@ class ReportController extends Controller
             if (isset($sale->discount_amount) && $sale->discount_amount > 0) {
                 $discount = $sale->discount_amount;
             }
-            
+
             // Get sale items names with quantity (optimized for smaller column)
-            $itemNames = $sale->items->map(function($item) {
+            $itemNames = $sale->items->map(function ($item) {
                 $productName = $item->product?->name ?? 'Unknown';
                 $quantity = $item->quantity ?? 1;
                 return $productName . ' (x' . $quantity . ')';
             })->implode(', ');
-            
+
             // Truncate item names for smaller column width
             if (strlen($itemNames) > 30) {
                 $itemNames = substr($itemNames, 0, 27) . '...';
             }
-            
+
             // Status color coding with enhanced colors
             $statusColor = $this->getStatusColor($sale->status);
-            
+
             // Format currency with proper alignment
-                    $totalAmount = number_format($sale->total_amount, 0);
-        $paidAmount = number_format($sale->paid_amount, 0);
-        $discountAmount = number_format($discount, 0);
-            
+            $totalAmount = number_format($sale->total_amount, 0);
+            $paidAmount = number_format($sale->paid_amount, 0);
+            $discountAmount = number_format($discount, 0);
+
             // Format date for smaller column (compact format)
             $saleDate = Carbon::parse($sale->sale_date)->format('M d, H:i');
-            
+
             // Get user name with fallback (truncate if too long)
             $userName = $sale->user?->name ?? 'System';
             if (strlen($userName) > 20) {
                 $userName = substr($userName, 0, 17) . '...';
             }
-            
+
             // Compact transaction ID with status
             $transactionId = '#' . $sale->id . ' (' . substr(ucfirst($sale->status), 0, 3) . ')';
 
@@ -1211,7 +1309,7 @@ class ReportController extends Controller
         // Professional Summary Section
         $pdf->Ln(5);
         $this->generateProfessionalSummaryRow($pdf, $sales, $columnWidths);
-        
+
         // Add additional statistics
         $this->generateSalesStatistics($pdf, $sales);
     }
@@ -1222,7 +1320,7 @@ class ReportController extends Controller
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
         $pdf->SetFillColor(70, 130, 180); // Steel blue background
         $pdf->SetTextColor(255, 255, 255); // White text
-        
+
         $totalAmount = $sales->sum('total_amount');
         $totalPaid = $sales->sum('paid_amount');
         $totalDiscount = $sales->sum('discount_amount');
@@ -1242,7 +1340,7 @@ class ReportController extends Controller
             $pdf->Cell($columnWidths[$i], 10, $cellData, 1, 0, 'C', true);
         }
         $pdf->Ln(12);
-        
+
         // Reset colors
         $pdf->SetTextColor(0, 0, 0);
     }
@@ -1253,21 +1351,21 @@ class ReportController extends Controller
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
         $pdf->Cell(0, 8, 'Transaction Analysis', 0, 1, 'L');
         $pdf->Ln(3);
-        
+
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
-        
+
         // Calculate additional statistics
         $totalAmount = $sales->sum('total_amount');
         $totalPaid = $sales->sum('paid_amount');
         $totalDue = $totalAmount - $totalPaid;
         $avgSaleValue = $sales->count() > 0 ? $totalAmount / $sales->count() : 0;
         $paymentRate = $totalAmount > 0 ? ($totalPaid / $totalAmount) * 100 : 0;
-        
+
         // Status breakdown
         $statusBreakdown = $sales->groupBy('status')->map->count();
         $completedCount = $statusBreakdown->get('completed', 0);
         $pendingCount = $statusBreakdown->get('pending', 0);
-        
+
         // Create statistics in a professional format
         $statsData = [
             'Average Transaction Value' => number_format($avgSaleValue, 0),
@@ -1277,7 +1375,7 @@ class ReportController extends Controller
             'Pending Transactions' => $pendingCount,
             'Total Products Sold' => $sales->flatMap->items->sum('quantity')
         ];
-        
+
         $pdf->addSummaryBox('Key Performance Metrics', $statsData, 2);
         $pdf->Ln(8);
     }
@@ -1303,7 +1401,7 @@ class ReportController extends Controller
         $pdf->SetY(-30);
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'I', 8);
         $pdf->SetTextColor(128);
-        
+
         $pdf->Cell(0, 5, 'This report was generated automatically by the sales management system.', 0, 1, 'C');
         $pdf->Cell(0, 5, 'For questions or support, please contact your system administrator.', 0, 1, 'C');
         $pdf->Cell(0, 5, 'Report generated on: ' . now()->format('Y-m-d H:i:s'), 0, 1, 'C');
@@ -1317,7 +1415,7 @@ class ReportController extends Controller
      */
     public function inventoryPdf(Request $request)
     {
-       
+
 
         // Validate request
         $validated = $request->validate([
@@ -1350,7 +1448,7 @@ class ReportController extends Controller
      */
     public function dailySalesPdf(Request $request)
     {
-      
+
 
         // Validate parameters
         $validated = $request->validate([
@@ -1370,10 +1468,262 @@ class ReportController extends Controller
 
         // Return PDF response
         $filename = 'sales_report_' . now()->format('Y-m-d_H-i-s') . '.pdf';
-        
+
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', "inline; filename=\"{$filename}\"");
+    }
+
+    /**
+     * Get monthly expenses report grouped by day
+     */
+    public function monthlyExpenses(Request $request)
+    {
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+        ]);
+
+        $year = $validated['year'];
+        $month = $validated['month'];
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+
+        // Get all expenses for the month
+        $expenses = \App\Models\Expense::query()
+            ->with(['category:id,name', 'user:id,name'])
+            ->whereBetween('expense_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->orderBy('expense_date', 'asc')
+            ->orderBy('id', 'asc')
+            ->get();
+
+        // Group expenses by date
+        $expensesByDate = $expenses->groupBy(function ($expense) {
+            return Carbon::parse($expense->expense_date)->format('Y-m-d');
+        });
+
+        // Build daily breakdown
+        $dailyBreakdown = [];
+        $currentDay = $startDate->copy();
+        $monthSummary = [
+            'total' => 0,
+            'cash_total' => 0,
+            'bank_total' => 0,
+        ];
+
+        while ($currentDay->lte($endDate)) {
+            $dayStr = $currentDay->toDateString();
+            $dayExpenses = $expensesByDate->get($dayStr) ?? collect([]);
+
+            $dayTotal = $dayExpenses->sum('amount');
+            $dayCashTotal = $dayExpenses->where('payment_method', 'cash')->sum('amount');
+            $dayBankTotal = $dayExpenses->where('payment_method', 'bank')->sum('amount');
+
+            $dailyBreakdown[] = [
+                'date' => $dayStr,
+                'total' => (float) $dayTotal,
+                'cash_total' => (float) $dayCashTotal,
+                'bank_total' => (float) $dayBankTotal,
+                'expenses' => $dayExpenses->map(function ($expense) {
+                    return [
+                        'id' => $expense->id,
+                        'title' => $expense->title,
+                        'description' => $expense->description,
+                        'amount' => (float) $expense->amount,
+                        'expense_date' => $expense->expense_date,
+                        'payment_method' => $expense->payment_method,
+                        'reference' => $expense->reference,
+                        'expense_category_id' => $expense->expense_category_id,
+                        'expense_category_name' => $expense->category?->name,
+                        'user_id' => $expense->user_id,
+                        'user_name' => $expense->user?->name,
+                    ];
+                })->values()->toArray(),
+            ];
+
+            $monthSummary['total'] += $dayTotal;
+            $monthSummary['cash_total'] += $dayCashTotal;
+            $monthSummary['bank_total'] += $dayBankTotal;
+
+            $currentDay->addDay();
+        }
+
+        $monthName = $startDate->isoFormat('MMMM');
+        
+        return response()->json([
+            'year' => $year,
+            'month' => $month,
+            'month_name' => $monthName,
+            'daily_breakdown' => $dailyBreakdown,
+            'month_summary' => $monthSummary,
+        ]);
+    }
+
+    /**
+     * Export Monthly Expenses Report to Excel
+     */
+    public function monthlyExpensesExcel(Request $request)
+    {
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+        ]);
+
+        $year = $validated['year'];
+        $month = $validated['month'];
+        $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+
+        // Get the same data as monthlyExpenses
+        $expenses = \App\Models\Expense::query()
+            ->whereBetween('expense_date', [$startDate->toDateString(), $endDate->toDateString()])
+            ->orderBy('expense_date', 'asc')
+            ->get();
+
+        $expensesByDate = $expenses->groupBy(function ($expense) {
+            return Carbon::parse($expense->expense_date)->format('Y-m-d');
+        });
+
+        // Build report data
+        $report = [];
+        $currentDay = $startDate->copy();
+        $monthSummary = [
+            'total' => 0,
+            'cash_total' => 0,
+            'bank_total' => 0,
+        ];
+
+        while ($currentDay->lte($endDate)) {
+            $dayStr = $currentDay->toDateString();
+            $dayExpenses = $expensesByDate->get($dayStr) ?? collect([]);
+
+            $dayTotal = $dayExpenses->sum('amount');
+            $dayCashTotal = $dayExpenses->where('payment_method', 'cash')->sum('amount');
+            $dayBankTotal = $dayExpenses->where('payment_method', 'bank')->sum('amount');
+
+            $report[] = [
+                'date' => $dayStr,
+                'total' => (float) $dayTotal,
+                'cash_total' => (float) $dayCashTotal,
+                'bank_total' => (float) $dayBankTotal,
+            ];
+
+            $monthSummary['total'] += $dayTotal;
+            $monthSummary['cash_total'] += $dayCashTotal;
+            $monthSummary['bank_total'] += $dayBankTotal;
+
+            $currentDay->addDay();
+        }
+
+        // Create Excel file
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        // Set document properties
+        $spreadsheet->getProperties()
+            ->setCreator('Sales System')
+            ->setLastModifiedBy('Sales System')
+            ->setTitle('تقرير المصروفات الشهري')
+            ->setSubject('Monthly Expenses Report')
+            ->setDescription('تقرير المصروفات الشهري لشهر ' . $startDate->isoFormat('MMMM YYYY'));
+
+        // Set RTL direction
+        $sheet->setRightToLeft(true);
+
+        // Header Row
+        $row = 1;
+        $headers = ['التاريخ', 'إجمالي المصروفات', 'نقدي', 'بنكي'];
+        $col = 'A';
+        foreach ($headers as $header) {
+            $sheet->setCellValue($col . $row, $header);
+            $col++;
+        }
+
+        // Style header row
+        $headerStyle = [
+            'font' => [
+                'bold' => true,
+                'size' => 12,
+                'color' => ['rgb' => 'FFFFFF'],
+            ],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => '1976d2'],
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical' => Alignment::VERTICAL_CENTER,
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => '000000'],
+                ],
+            ],
+        ];
+
+        $lastCol = chr(ord('A') + count($headers) - 1);
+        $sheet->getStyle('A' . $row . ':' . $lastCol . $row)->applyFromArray($headerStyle);
+        $sheet->getRowDimension($row)->setRowHeight(25);
+
+        // Data rows
+        $row = 2;
+        foreach ($report as $dayData) {
+            $col = 'A';
+            $sheet->setCellValue($col . $row, $dayData['date']);
+            $col++;
+            $sheet->setCellValue($col . $row, number_format($dayData['total'], 2));
+            $col++;
+            $sheet->setCellValue($col . $row, number_format($dayData['cash_total'], 2));
+            $col++;
+            $sheet->setCellValue($col . $row, number_format($dayData['bank_total'], 2));
+            $row++;
+        }
+
+        // Summary row
+        $row++;
+        $sheet->setCellValue('A' . $row, 'الإجمالي');
+        $sheet->setCellValue('B' . $row, number_format($monthSummary['total'], 2));
+        $sheet->setCellValue('C' . $row, number_format($monthSummary['cash_total'], 2));
+        $sheet->setCellValue('D' . $row, number_format($monthSummary['bank_total'], 2));
+
+        // Style summary row
+        $summaryStyle = [
+            'font' => [
+                'bold' => true,
+                'size' => 12,
+            ],
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => 'E3F2FD'],
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => '000000'],
+                ],
+            ],
+        ];
+        $sheet->getStyle('A' . $row . ':D' . $row)->applyFromArray($summaryStyle);
+
+        // Auto-size columns
+        foreach (range('A', 'D') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        // Set data format for numeric columns
+        $sheet->getStyle('B2:D' . ($row - 1))->getNumberFormat()->setFormatCode('#,##0.00');
+
+        // Generate Excel file
+        $writer = new Xlsx($spreadsheet);
+        $filename = 'monthly_expenses_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.xlsx';
+        
+        $tempFile = tempnam(sys_get_temp_dir(), 'expenses_');
+        $writer->save($tempFile);
+
+        return response()->download($tempFile, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ])->deleteFileAfterSend(true);
     }
 
     // --- Placeholder for other report methods ---

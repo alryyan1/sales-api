@@ -96,8 +96,11 @@ class AddRandomStock extends Command
                     ['Product', 'Stocking Units', 'Unit Cost', 'Sale Price'],
                     $products->take(10)->map(function ($product) use ($minQuantity, $maxQuantity) {
                         $qty = rand($minQuantity, $maxQuantity);
-                        $unitCost = rand(50, 500);
-                        $salePrice = rand(10, 100);
+
+                        // Use latest prices if available, otherwise fallback to random
+                        $unitCost = $product->latest_purchase_cost ?? rand(50, 500);
+                        $salePrice = $product->last_sale_price_per_sellable_unit ?? rand(10, 100);
+
                         return [
                             $product->name,
                             $qty,
@@ -140,9 +143,11 @@ class AddRandomStock extends Command
             foreach ($products as $product) {
                 try {
                     $quantity = rand($minQuantity, $maxQuantity);
-                    $unitCost = rand(50, 500); // Cost per stocking unit
-                    $salePrice = rand(10, 100); // Sale price per sellable unit
-                    
+
+                    // Use latest prices if available, otherwise fallback to random
+                    $unitCost = $product->latest_purchase_cost ?? (float) rand(50, 500); // Cost per stocking unit
+                    $salePrice = $product->last_sale_price_per_sellable_unit ?? (float) rand(10, 100); // Sale price per sellable unit
+
                     $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
                     $totalSellableUnits = $quantity * $unitsPerStockingUnit;
                     $totalCost = $quantity * $unitCost;
@@ -198,15 +203,15 @@ class AddRandomStock extends Command
 
             // Step 6: Update Purchase Status to "received"
             $this->info("✓ Updating purchase status to 'received'...");
-            
+
             // Reload purchase with items to ensure we have all relationships
             $purchase->load('items.product');
-            
+
             // Update purchase status first (before updating warehouse stock)
             $purchase->status = 'received';
             $purchase->stock_added_to_warehouse = true;
             $purchase->save();
-            
+
             // Update warehouse stock for each item (similar to PurchaseController logic)
             foreach ($purchase->items as $item) {
                 $product = $item->product;
@@ -224,7 +229,7 @@ class AddRandomStock extends Command
                         ]);
                     }
                 }
-                
+
                 // Trigger observer to update product stock_quantity
                 // The observer will recalculate based on all 'received' purchase items
                 $item->touch();
@@ -283,4 +288,3 @@ class AddRandomStock extends Command
         ]);
     }
 }
-

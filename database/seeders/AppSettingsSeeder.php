@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use App\Models\AppSetting;
 use App\Services\SettingsService;
+use Illuminate\Support\Facades\Cache;
 
 class AppSettingsSeeder extends Seeder
 {
@@ -14,6 +15,7 @@ class AppSettingsSeeder extends Seeder
 		$defaults = $service->defaultValues();
 		$types = $service->managedKeysWithTypes();
 
+		// Seed all default values
 		foreach ($types as $key => $type) {
 			$value = $defaults[$key] ?? null;
 			$stored = match ($type) {
@@ -23,11 +25,10 @@ class AppSettingsSeeder extends Seeder
 				default => $value === null ? null : (string) $value,
 			};
 
-			AppSetting::updateOrCreate([
-				'key' => $key,
-			], [
-				'value' => $stored,
-			]);
+			AppSetting::updateOrCreate(
+				['key' => $key],
+				['value' => $stored]
+			);
 		}
 
 		// Override with LifeCare Medical Equipment Trading Enterprises information
@@ -39,8 +40,15 @@ class AppSettingsSeeder extends Seeder
 			'company_address' => "مواقعنا:\n• ولاية الخرطوم – أم درمان – الثورة – الحارة 8\n• ولاية البحر الأحمر – بورتسودان – حي المطار",
 		];
 
-		foreach ($lifeCareSettings as $key => $value) {
-			AppSetting::updateOrCreate(['key' => $key], ['value' => (string) $value]);
+		// Use SettingsService update method to ensure proper type casting and cache clearing
+		$service->update($lifeCareSettings);
+
+		// Verify the company_name was set
+		$companyName = AppSetting::where('key', 'company_name')->first();
+		if ($companyName) {
+			$this->command?->info("✓ Company name set to: {$companyName->value}");
+		} else {
+			$this->command?->error("✗ Company name was NOT set!");
 		}
 
 		$this->command?->info('App settings seeded with LifeCare company information.');
