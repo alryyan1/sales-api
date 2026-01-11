@@ -61,6 +61,7 @@ class User extends Authenticatable
         'username',
         'password',
         'warehouse_id',
+        'allowed_navs',
     ];
 
     public function warehouse(): \Illuminate\Database\Eloquent\Relations\BelongsTo
@@ -85,6 +86,7 @@ class User extends Authenticatable
      */
     protected $casts = [
         'password' => 'hashed', // Use 'hashed' for Laravel 10+
+        'allowed_navs' => 'array',
     ];
 
     /**
@@ -116,5 +118,23 @@ class User extends Authenticatable
     public function notificationPreferences(): HasMany
     {
         return $this->hasMany(NotificationPreference::class);
+    }
+
+    /**
+     * Check if user has access to a specific navigation route.
+     * Superadmin (username === 'superadmin') or null allowed_navs has access to all routes.
+     *
+     * @param string $route
+     * @return bool
+     */
+    public function hasNavAccess(string $route): bool
+    {
+        // Superadmin has access to all routes
+        if ($this->username === 'superadmin' || $this->allowed_navs === null) {
+            return true;
+        }
+
+        // Check if route is in allowed_navs array
+        return in_array($route, $this->allowed_navs ?? [], true);
     }
 }

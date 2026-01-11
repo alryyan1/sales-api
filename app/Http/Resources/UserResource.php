@@ -32,6 +32,7 @@ class UserResource extends JsonResource
             // Spatie Permission provides these methods even if relations are not loaded
             'roles' => $this->getRoleNames()->toArray(),
             'permissions' => $this->getAllPermissions()->pluck('name')->toArray(),
+            'allowed_navs' => $this->allowed_navs,
         ];
     }
 }

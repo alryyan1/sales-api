@@ -44,6 +44,7 @@ class SettingsService
             'tax_number' => 'string',
             'pdf_font' => 'string',
             'pos_mode' => 'string', // 'shift' or 'days'
+            'pos_filter_sales_by_user' => 'bool',
             'product_images_show_in_list' => 'bool',
             'product_images_show_in_pos' => 'bool',
             'product_images_show_in_invoices' => 'bool',
@@ -85,6 +86,7 @@ class SettingsService
             'tax_number' => $c['tax_number'] ?? null,
             'pdf_font' => $c['pdf_font'] ?? 'Amiri',
             'pos_mode' => $c['pos_mode'] ?? 'shift',
+            'pos_filter_sales_by_user' => $c['pos_filter_sales_by_user'] ?? false,
             'product_images_show_in_list' => $c['product_images_show_in_list'] ?? true,
             'product_images_show_in_pos' => $c['product_images_show_in_pos'] ?? true,
             'product_images_show_in_invoices' => $c['product_images_show_in_invoices'] ?? false,

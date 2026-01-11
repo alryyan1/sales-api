@@ -31,6 +31,7 @@ class AdminUserSeeder extends Seeder
                     'name' => $superadminName,
                     'username' => $superadminUsername,
                     'password' => Hash::make($superadminPassword),
+                    'allowed_navs' => null, // null means all navigation access
                 ]);
 
                 $this->command->info("✓ Superadmin user created successfully!");

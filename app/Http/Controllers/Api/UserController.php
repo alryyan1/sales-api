@@ -65,6 +65,8 @@ class UserController extends Controller
             'roles' => 'required|array', // Roles are required on creation
             'roles.*' => ['required', 'string', Rule::exists('roles', 'name')],
             'warehouse_id' => 'nullable|exists:warehouses,id',
+            'allowed_navs' => 'nullable|array',
+            'allowed_navs.*' => 'string',
         ]);
 
         try {
@@ -75,6 +77,7 @@ class UserController extends Controller
                     'username' => $validatedData['username'],
                     'password' => Hash::make($validatedData['password']),
                     'warehouse_id' => $validatedData['warehouse_id'] ?? null,
+                    'allowed_navs' => $validatedData['allowed_navs'] ?? null,
                 ]);
 
 
@@ -126,12 +129,14 @@ class UserController extends Controller
             'roles' => 'sometimes|required|array', // Roles required if present
             'roles.*' => ['required', 'string', Rule::exists('roles', 'name')],
             'warehouse_id' => 'nullable|exists:warehouses,id',
+            'allowed_navs' => 'nullable|array',
+            'allowed_navs.*' => 'string',
         ]);
 
         try {
             $user = DB::transaction(function () use ($validatedData, $user, $request) {
                 // Update basic fields
-                $user->fill(Arr::only($validatedData, ['name', 'username', 'warehouse_id']));
+                $user->fill(Arr::only($validatedData, ['name', 'username', 'warehouse_id', 'allowed_navs']));
                 // Prevent assigning roles if 'admin' is missing, but only for user with ID 1
                 if ($user->id === 1 && !in_array('admin', $validatedData['roles']) && !in_array('ادمن', $validatedData['roles'])) {
                     throw new \Exception('The "admin" role cannot be removed for this user.');
@@ -194,6 +199,81 @@ class UserController extends Controller
 
         return response()->json([
             'data' => $users
+        ]);
+    }
+
+    /**
+     * Get navigation items structure for permissions management
+     */
+    public function getNavigationItems(Request $request)
+    {
+        // Check authorization
+        $this->authorize('viewAny', User::class);
+
+        // Define navigation structure matching frontend navItems.ts
+        $navigationItems = [
+            [
+                'category' => 'لوحة التحكم',
+                'items' => [
+                    ['route' => '/dashboard', 'label' => 'لوحة التحكم']
+                ]
+            ],
+            [
+                'category' => 'المبيعات',
+                'items' => [
+                    ['route' => '/sales/pos-offline', 'label' => 'نقطة البيع (Offline)'],
+                    ['route' => '/sales/pos', 'label' => 'نقطة البيع (Online)'],
+                    ['route' => '/sales/returns', 'label' => 'مردودات المبيعات'],
+                    ['route' => '/clients', 'label' => 'العملاء']
+                ]
+            ],
+            [
+                'category' => 'المخزون',
+                'items' => [
+                    ['route' => '/products', 'label' => 'المنتجات'],
+                    ['route' => '/inventory/adjustments', 'label' => 'تعديلات المخزون'],
+                    ['route' => '/inventory/transfers', 'label' => 'تحويل المخزون'],
+                    ['route' => '/suppliers', 'label' => 'الموردون']
+                ]
+            ],
+            [
+                'category' => 'المشتريات',
+                'items' => [
+                    ['route' => '/purchases', 'label' => 'قائمة المشتريات']
+                ]
+            ],
+            [
+                'category' => 'التقارير',
+                'items' => [
+                    ['route' => '/reports/sales', 'label' => 'تقرير المبيعات'],
+                    ['route' => '/reports/purchases', 'label' => 'تقرير المشتريات'],
+                    ['route' => '/reports/suppliers-summary', 'label' => 'ملخص الموردين'],
+                    ['route' => '/reports/inventory-log', 'label' => 'سجل المخزون'],
+                    ['route' => '/reports/sales-discounts', 'label' => 'المبيعات المخفضة'],
+                    ['route' => '/reports/daily-income', 'label' => 'تقرير المبيعات الشهري'],
+                    ['route' => '/reports/monthly-expenses', 'label' => 'تقرير المصروفات الشهرية']
+                ]
+            ],
+            [
+                'category' => 'الإدارة',
+                'items' => [
+                    ['route' => '/admin/users', 'label' => 'المستخدمون'],
+                    ['route' => '/admin/roles', 'label' => 'الأدوار'],
+                    ['route' => '/admin/expenses', 'label' => 'المصروفات'],
+                    ['route' => '/admin/settings', 'label' => 'الإعدادات'],
+                    ['route' => '/admin/system', 'label' => 'النظام'],
+                    ['route' => '/admin/backups', 'label' => 'النسخ الاحتياطي'],
+                    ['route' => '/admin/warehouses', 'label' => 'المخازن'],
+                    ['route' => '/admin/whatsapp-schedulers', 'label' => 'جدولة واتساب'],
+                    ['route' => '/admin/inventory/requisitions/request', 'label' => 'طلب مخزون'],
+                    ['route' => '/admin/inventory/requisitions', 'label' => 'طلبات المخزون'],
+                    ['route' => '/admin/idb-manager', 'label' => 'إدارة DB المحلية']
+                ]
+            ]
+        ];
+
+        return response()->json([
+            'data' => $navigationItems
         ]);
     }
 }

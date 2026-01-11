@@ -137,6 +137,7 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Admin Only Routes --
   Route::middleware(['role:admin|ادمن'])->prefix('admin')->name('api.admin.')->group(function () {
     Route::apiResource('users', UserController::class);
+    Route::get('/navigation-items', [UserController::class, 'getNavigationItems'])->name('navigation-items');
     Route::apiResource('categories', CategoryController::class);
     // Expenses Management
     Route::apiResource('expense-categories', ExpenseCategoryController::class);
