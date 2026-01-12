@@ -32,20 +32,21 @@ class DatabaseSeeder extends Seeder
             // AppSettingsSeeder::class, // Seed app settings defaults into DB
             // ProductSeeder::class, // Create an admin user
             // Add other seeders here if needed
-            // CategoriesTableSeeder::class,
-            // UnitsTableSeeder::class,
+            CategoriesTableSeeder::class,
+            UnitsTableSeeder::class,
             // LifeCareProductsSeeder::class,
-            // ProductsTableSeeder::class,
-            LifeCareInstrumentsSeeder::class, // Seed medical instruments and equipment
-            LifeCareProductsSeeder::class,
-            AppSettingsSeeder::class,
+            ProductsTableSeeder::class,
+            // LifeCareInstrumentsSeeder::class, // Seed medical instruments and equipment
+            // LifeCareProductsSeeder::class,
+            // AppSettingsSeeder::class,
         ]);
         // Assign 'admin' role to the admin user AFTER roles are created
         $adminUser = User::where('username', env('ADMIN_USERNAME', 'superadmin'))->first();
         if ($adminUser && !$adminUser->hasRole('admin')) {
             $adminUser->assignRole('admin');
             $this->command->info('Admin role assigned to admin user.');
-        }
+            $this->call(CategoriesTableSeeder::class);
+    }
 
         // Optionally create some non-admin users with other roles using factory
         // User::factory()->count(5)->create()->each(function ($user) {
