@@ -190,6 +190,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/products/process-import', [ProductController::class, 'processImport']);
   Route::get('/products/{product}/purchase-history', [ProductController::class, 'purchaseHistory']);
   Route::get('/products/{product}/sales-history', [ProductController::class, 'salesHistory']);
+  Route::post('/products/{product}/image', [ProductController::class, 'uploadImage'])->name('api.products.upload-image');
   Route::apiResource('products', ProductController::class);
 
   // -- Warehouses Management --

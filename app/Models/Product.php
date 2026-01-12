@@ -91,6 +91,7 @@ class Product extends Model
         'scientific_name',
         'sku',
         'description',
+        'image_url',
         'stock_quantity',
         'stock_alert_level',
         'category_id',

@@ -165,8 +165,9 @@ class Sale extends Model
                     $sale->sale_order_number = $maxOrderNumber + 1;
                 } else {
                     // Fallback: use date-based numbering if no shift_id
-                    $today = $sale->sale_date ?? now()->toDateString();
-                    $maxOrderNumber = static::whereDate('sale_date', $today)
+                    // Use sale_date for consistency (it's the business date, not the created_at timestamp)
+                    $saleDate = $sale->sale_date ?? now()->toDateString();
+                    $maxOrderNumber = static::whereDate('sale_date', $saleDate)
                         ->whereNull('shift_id')
                         ->max('sale_order_number') ?? 0;
                     $sale->sale_order_number = $maxOrderNumber + 1;

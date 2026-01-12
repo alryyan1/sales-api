@@ -381,6 +381,7 @@ class SaleController extends Controller
         return $request->validate([
             'warehouse_id' => 'nullable|exists:warehouses,id', // Warehouse for the sale
             'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
+            'shift_id' => 'nullable|exists:shifts,id', // Shift ID - null for days mode, set for shift mode
             'sale_date' => 'required|date_format:Y-m-d',
             'invoice_number' => 'nullable|string|max:255|unique:sales,invoice_number',
             'notes' => 'nullable|string|max:65535',
@@ -501,19 +502,31 @@ class SaleController extends Controller
 
     private function createSaleHeader(array $validatedData, Request $request, array $calculatedTotals, ?Shift $currentShift = null)
     {
-        // Get current user's open shift if not provided
-        if (!$currentShift) {
+        // Determine shift_id: use provided shift_id, or auto-fetch if not provided and not explicitly null
+        $shiftId = null;
+        
+        if (array_key_exists('shift_id', $validatedData)) {
+            // shift_id was explicitly provided (can be null for days mode)
+            // Use array_key_exists instead of isset because isset returns false for null values
+            $shiftId = $validatedData['shift_id'];
+        } elseif (!$currentShift) {
+            // shift_id not provided and no currentShift passed - auto-fetch open shift
+            // This maintains backward compatibility for shift mode
             $currentShift = Shift::where('user_id', $request->user()->id)
                 ->whereNull('closed_at')
                 ->orderBy('id', 'desc')
                 ->first();
+            $shiftId = $currentShift?->id;
+        } else {
+            // currentShift was passed as parameter
+            $shiftId = $currentShift?->id;
         }
 
         return Sale::create([
             'warehouse_id' => $validatedData['warehouse_id'] ?? $request->user()->warehouse_id ?? 1,
             'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
-            'shift_id' => $currentShift?->id,
+            'shift_id' => $shiftId, // Can be null for days mode
             'sale_date' => $validatedData['sale_date'],
             'invoice_number' => $validatedData['invoice_number'] ?? null,
             'notes' => $validatedData['notes'] ?? null,

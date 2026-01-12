@@ -11,6 +11,7 @@ use App\Services\ProductExcelService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -231,6 +232,7 @@ class ProductController extends Controller
             'scientific_name' => 'nullable|string|max:255',
             'sku' => 'nullable|string|max:100|unique:products,sku',
             'description' => 'nullable|string|max:65535',
+            'image_url' => 'nullable|string|max:500',
             'stock_quantity' => 'required|integer|min:0',
             'stock_alert_level' => 'nullable|integer|min:0',
             'category_id' => 'nullable|exists:categories,id',
@@ -341,6 +343,7 @@ class ProductController extends Controller
             'scientific_name' => 'sometimes|nullable|string|max:255',
             'sku' => 'sometimes|nullable|string|max:100|unique:products,sku,' . $product->id, // Allow SKU update, ignore current ID
             'description' => 'sometimes|nullable|string|max:65535',
+            'image_url' => 'sometimes|nullable|string|max:500',
             'stock_alert_level' => 'sometimes|nullable|integer|min:0',
             'category_id' => 'sometimes|nullable|exists:categories,id',
             'stocking_unit_id' => 'sometimes|nullable|exists:units,id',
@@ -1066,6 +1069,44 @@ class ProductController extends Controller
             ->paginate($limit);
 
         return \App\Http\Resources\SaleItemResource::collection($history);
+    }
+
+    /**
+     * Upload product image
+     * 
+     * @param Request $request
+     * @param Product $product
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function uploadImage(Request $request, Product $product)
+    {
+        $validated = $request->validate([
+            'image' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048', // 2MB max
+        ]);
+
+        try {
+            // Store image in public/products directory
+            $imagePath = $request->file('image')->store('products', 'public');
+            
+            // Get full URL
+            $imageUrl = asset('storage/' . $imagePath);
+            
+            // Update product
+            $product->update(['image_url' => $imageUrl]);
+            
+            $product->load(['category', 'stockingUnit', 'sellableUnit']);
+            
+            return response()->json([
+                'message' => 'Image uploaded successfully',
+                'product' => new ProductResource($product)
+            ], Response::HTTP_OK);
+        } catch (\Exception $e) {
+            Log::error('Failed to upload product image: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Failed to upload image',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 }
 

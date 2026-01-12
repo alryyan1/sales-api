@@ -43,6 +43,10 @@ class SettingsService
             'tax_number' => 'string',
             'pdf_font' => 'string',
             'pos_mode' => 'string', // 'shift' or 'days'
+            'product_images_show_in_list' => 'bool',
+            'product_images_show_in_pos' => 'bool',
+            'product_images_show_in_invoices' => 'bool',
+            'product_images_show_in_reports' => 'bool',
         ];
     }
 
@@ -79,6 +83,10 @@ class SettingsService
             'tax_number' => $c['tax_number'] ?? null,
             'pdf_font' => $c['pdf_font'] ?? 'Amiri',
             'pos_mode' => $c['pos_mode'] ?? 'shift',
+            'product_images_show_in_list' => $c['product_images_show_in_list'] ?? true,
+            'product_images_show_in_pos' => $c['product_images_show_in_pos'] ?? true,
+            'product_images_show_in_invoices' => $c['product_images_show_in_invoices'] ?? false,
+            'product_images_show_in_reports' => $c['product_images_show_in_reports'] ?? false,
         ];
     }
 
