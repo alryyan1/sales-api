@@ -13,7 +13,7 @@ class ExpenseController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Expense::query()->with(['category:id,name', 'user:id,name']);
+        $query = Expense::query()->with(['category:id,name', 'user:id,name', 'shift:id,opened_at,closed_at']);
 
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
@@ -25,6 +25,10 @@ class ExpenseController extends Controller
 
         if ($categoryId = $request->input('expense_category_id')) {
             $query->where('expense_category_id', $categoryId);
+        }
+
+        if ($shiftId = $request->input('shift_id')) {
+            $query->where('shift_id', $shiftId);
         }
 
         if ($dateFrom = $request->input('date_from')) {
@@ -59,6 +63,7 @@ class ExpenseController extends Controller
     {
         $validated = $request->validate([
             'expense_category_id' => ['nullable', 'integer', 'exists:expense_categories,id'],
+            'shift_id' => ['nullable', 'integer', 'exists:shifts,id'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'amount' => ['required', 'numeric', 'min:0'],
@@ -70,13 +75,13 @@ class ExpenseController extends Controller
         $validated['user_id'] = $request->user()->id ?? null;
 
         $expense = Expense::create($validated);
-        $expense->load(['category:id,name', 'user:id,name']);
+        $expense->load(['category:id,name', 'user:id,name', 'shift:id,opened_at,closed_at']);
         return response()->json(['expense' => new ExpenseResource($expense)], Response::HTTP_CREATED);
     }
 
     public function show(Expense $expense)
     {
-        $expense->load(['category:id,name', 'user:id,name']);
+        $expense->load(['category:id,name', 'user:id,name', 'shift:id,opened_at,closed_at']);
         return new ExpenseResource($expense);
     }
 
@@ -84,6 +89,7 @@ class ExpenseController extends Controller
     {
         $validated = $request->validate([
             'expense_category_id' => ['sometimes', 'nullable', 'integer', 'exists:expense_categories,id'],
+            'shift_id' => ['sometimes', 'nullable', 'integer', 'exists:shifts,id'],
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],
             'amount' => ['sometimes', 'required', 'numeric', 'min:0'],
@@ -93,7 +99,7 @@ class ExpenseController extends Controller
         ]);
 
         $expense->update($validated);
-        $expense->load(['category:id,name', 'user:id,name']);
+        $expense->load(['category:id,name', 'user:id,name', 'shift:id,opened_at,closed_at']);
         return new ExpenseResource($expense);
     }
 

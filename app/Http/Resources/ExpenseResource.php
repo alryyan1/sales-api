@@ -19,6 +19,7 @@ class ExpenseResource extends JsonResource
             'expense_category_name' => optional($this->category)->name,
             'user_id' => $this->user_id,
             'user_name' => optional($this->user)->name,
+            'shift_id' => $this->shift_id,
             'created_at' => optional($this->created_at)->toDateTimeString(),
             'updated_at' => optional($this->updated_at)->toDateTimeString(),
         ];

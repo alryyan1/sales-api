@@ -12,6 +12,7 @@ class Expense extends Model
     protected $fillable = [
         'expense_category_id',
         'user_id',
+        'shift_id',
         'title',
         'description',
         'amount',
@@ -33,6 +34,11 @@ class Expense extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function shift(): BelongsTo
+    {
+        return $this->belongsTo(Shift::class);
     }
 }
 

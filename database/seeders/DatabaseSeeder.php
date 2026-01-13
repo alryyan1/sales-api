@@ -32,10 +32,10 @@ class DatabaseSeeder extends Seeder
             // AppSettingsSeeder::class, // Seed app settings defaults into DB
             // ProductSeeder::class, // Create an admin user
             // Add other seeders here if needed
-            CategoriesTableSeeder::class,
-            UnitsTableSeeder::class,
+            // CategoriesTableSeeder::class,
+            // UnitsTableSeeder::class,
             // LifeCareProductsSeeder::class,
-            ProductsTableSeeder::class,
+            // ProductsTableSeeder::class,
             // LifeCareInstrumentsSeeder::class, // Seed medical instruments and equipment
             // LifeCareProductsSeeder::class,
             // AppSettingsSeeder::class,

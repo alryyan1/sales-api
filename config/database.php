@@ -88,6 +88,18 @@ return [
             'prefix' => '',
         ],
 
+        'mirgani' => [
+            'driver' => 'mysql',
+            'host' => env('DB_HOST_MIRGANI', '127.0.0.1'),
+            'port' => env('DB_PORT_MIRGANI', '3306'),
+            'database' => env('DB_DATABASE_MIRGANI', 'mirgani'),
+            'username' => env('DB_USERNAME_MIRGANI', 'root'),
+            'password' => env('DB_PASSWORD_MIRGANI', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+        ],
+
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DATABASE_URL'),
