@@ -414,7 +414,11 @@ class ReportController extends Controller
             $dailyTotalSales = (float) ($dailySalesEntry->total_sales ?? 0);
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
-            $dailyTotalBank = (float) ($paymentsForDay->get('bank') ?? 0);
+            // Calculate bank total from all bank-related payment methods
+            $bankMethods = ['visa', 'mastercard', 'mada', 'bank_transfer', 'bank'];
+            $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
+                return in_array($method, $bankMethods);
+            })->sum();
             $dailyTotalExpense = (float) ($dailyExpensesEntry->total_expense ?? 0);
             $dailyNet = $dailyTotalPaid - $dailyTotalExpense;
 
@@ -528,7 +532,11 @@ class ReportController extends Controller
             $dailyTotalSales = (float) ($dailySalesEntry->total_sales ?? 0);
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
-            $dailyTotalBank = (float) ($paymentsForDay->get('bank') ?? 0);
+            // Calculate bank total from all bank-related payment methods
+            $bankMethods = ['visa', 'mastercard', 'mada', 'bank_transfer', 'bank'];
+            $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
+                return in_array($method, $bankMethods);
+            })->sum();
             $dailyTotalExpense = (float) ($dailyExpensesEntry->total_expense ?? 0);
             $dailyNet = $dailyTotalPaid - $dailyTotalExpense;
 
@@ -938,7 +946,22 @@ class ReportController extends Controller
         $totalSales = $sales->count();
         $totalAmount = $sales->sum('total_amount');
         $totalPaid = $sales->sum('paid_amount');
-        $totalDue = $totalAmount - $totalPaid;
+        $totalDiscount = $sales->sum('discount_amount');
+        $totalDue = $totalAmount - $totalDiscount - $totalPaid;
+
+        // Calculate Total Expenses for the period
+        $expensesQuery = \App\Models\Expense::query();
+        if ($startDate) {
+            $expensesQuery->whereDate('expense_date', '>=', $startDate);
+        }
+        if ($endDate) {
+            $expensesQuery->whereDate('expense_date', '<=', $endDate);
+        }
+        // Apply user filter if provided
+        if (!empty($validated['user_id'])) {
+            $expensesQuery->where('user_id', $validated['user_id']);
+        }
+        $totalExpenses = (float) $expensesQuery->sum('amount');
 
         // Payment methods breakdown
         $paymentMethods = [];
@@ -959,6 +982,8 @@ class ReportController extends Controller
             'totalAmount' => $totalAmount,
             'totalPaid' => $totalPaid,
             'totalDue' => $totalDue,
+            'totalDiscount' => $totalDiscount,
+            'totalExpenses' => $totalExpenses,
         ];
 
         // Get base URL for hyperlinks
