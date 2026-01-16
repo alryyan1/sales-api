@@ -19,9 +19,9 @@ class EventServiceProvider extends ServiceProvider
         ],
         Payment::class => [
             \App\Observers\PaymentObserver::class,
-            
+
         ],
-         Product::class => [ProductObserver::class],
+        Product::class => [ProductObserver::class],
     ];
     /**
      * The event to listener mappings for the application.
@@ -31,21 +31,6 @@ class EventServiceProvider extends ServiceProvider
     protected $listen = [
         Registered::class => [
             SendEmailVerificationNotification::class,
-        ],
-        \App\Events\ProductStockLow::class => [
-            \App\Listeners\SendNotificationListener::class . '@handleProductStockLow',
-        ],
-        \App\Events\ProductOutOfStock::class => [
-            \App\Listeners\SendNotificationListener::class . '@handleProductOutOfStock',
-        ],
-        \App\Events\SaleCreated::class => [
-            \App\Listeners\SendNotificationListener::class . '@handleSaleCreated',
-        ],
-        \App\Events\PurchaseReceived::class => [
-            \App\Listeners\SendNotificationListener::class . '@handlePurchaseReceived',
-        ],
-        \App\Events\StockRequisitionCreated::class => [
-            \App\Listeners\SendNotificationListener::class . '@handleStockRequisitionCreated',
         ],
     ];
 

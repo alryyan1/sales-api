@@ -10,8 +10,6 @@ use App\Http\Controllers\Api\{
   CategoryController,
   ClientController,
   DashboardController,
-  NotificationController,
-  NotificationPreferenceController,
   PermissionController,
   ProductController,
   ProfileController,
@@ -81,19 +79,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/password', [ProfileController::class, 'updatePassword'])->name('updatePassword');
   });
 
-  // -- Notifications Routes --
-  Route::prefix('notifications')->name('api.notifications.')->group(function () {
-    Route::get('/', [NotificationController::class, 'index'])->name('index');
-    Route::get('/unread-count', [NotificationController::class, 'unreadCount'])->name('unread-count');
-    Route::post('/{id}/read', [NotificationController::class, 'markAsRead'])->name('mark-as-read');
-    Route::post('/read-all', [NotificationController::class, 'markAllAsRead'])->name('read-all');
-    Route::delete('/{id}', [NotificationController::class, 'destroy'])->name('destroy');
-
-    // Notification Preferences
-    Route::get('/preferences', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'index'])->name('preferences.index');
-    Route::put('/preferences', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'update'])->name('preferences.update');
-    Route::post('/preferences/{type}/toggle', [\App\Http\Controllers\Api\NotificationPreferenceController::class, 'toggle'])->name('preferences.toggle');
-  });
 
   // -- Stock Adjustments --
   Route::get('/stock-adjustments', [StockAdjustmentController::class, 'index'])->name('api.stock-adjustments.index');
