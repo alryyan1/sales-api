@@ -158,21 +158,25 @@ class SaleReturnController extends Controller
                         'condition' => $itemData['condition'] ?? 'resellable',
                     ]);
 
-                    // --- Stock Increment Logic (ONLY IF 'completed' and 'resellable') ---
+                    // --- Stock Increment Logic (ONLY IF 'completed' and 'resellable-refund' or 'resellable') ---
+                    // 'resellable' condition means we put it back in stock
                     if ($saleReturnHeader->status === 'completed' && ($saleReturnItem->condition === 'resellable')) {
+
+                        // 1. Update Product Warehouse Stock (The SSOT)
+                        if ($originalSale->warehouse_id) {
+                            $product->incrementWarehouseStock($originalSale->warehouse_id, $quantityReturned);
+                        } else {
+                            Log::warning("SaleReturn: Original sale #{$originalSale->id} has no warehouse_id. Could not restore stock to a specific warehouse.");
+                        }
+
+                        // 2. Update Batch Stock (PurchaseItem) - For FIFO/Expiry Management
                         if ($returnToBatchId) {
                             $batchToReturnTo = PurchaseItem::lockForUpdate()->find($returnToBatchId);
                             if ($batchToReturnTo) {
                                 $batchToReturnTo->increment('remaining_quantity', $quantityReturned);
-                                // PurchaseItemObserver will update Product->stock_quantity
                             } else {
-                                Log::warning("SaleReturn: Batch ID {$returnToBatchId} not found to return stock for product {$product->id}. Incrementing total stock instead.");
-                                $product->increment('stock_quantity', $quantityReturned); // Fallback
+                                Log::warning("SaleReturn: Batch ID {$returnToBatchId} not found to return stock for product {$product->id}.");
                             }
-                        } else {
-                            // If no specific batch, increment total product stock (less accurate)
-                            $product->increment('stock_quantity', $quantityReturned);
-                            Log::info("SaleReturn: Incrementing total stock for product {$product->id} by {$quantityReturned}.");
                         }
                     }
                 }

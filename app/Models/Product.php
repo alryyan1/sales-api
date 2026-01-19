@@ -289,7 +289,7 @@ class Product extends Model
 
     public function incrementWarehouseStock($warehouseId, $quantity)
     {
-        $warehouse = $this->warehouses()->where('warehouse_id', $warehouseId)->first();
+        $warehouse = $this->warehouses()->where('warehouses.id', $warehouseId)->first();
         if ($warehouse) {
             $this->warehouses()->updateExistingPivot($warehouseId, [
                 'quantity' => $warehouse->pivot->quantity + $quantity
