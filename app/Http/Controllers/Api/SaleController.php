@@ -193,7 +193,7 @@ class SaleController extends Controller
     {
         $validatedData = $request->validate([
             'client_id' => 'nullable|exists:clients,id',
-            'sale_date' => 'required|date_format:Y-m-d',
+            'sale_date' => 'nullable|date_format:Y-m-d',
             'notes' => 'nullable|string|max:65535',
         ]);
 
@@ -400,7 +400,7 @@ class SaleController extends Controller
             'warehouse_id' => 'nullable|exists:warehouses,id', // Warehouse for the sale
             'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
             'shift_id' => 'nullable|exists:shifts,id', // Shift ID - null for days mode, set for shift mode
-            'sale_date' => 'required|date_format:Y-m-d',
+            'sale_date' => 'nullable|date_format:Y-m-d',
             'invoice_number' => 'nullable|string|max:255|unique:sales,invoice_number',
             'notes' => 'nullable|string|max:65535',
             'items' => 'required|array|min:1',

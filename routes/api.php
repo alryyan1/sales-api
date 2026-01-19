@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\{
   CategoryController,
   ClientController,
   DashboardController,
+  InventoryCountController,
   PermissionController,
   ProductController,
   ProfileController,
@@ -186,6 +187,15 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::apiResource('warehouses', WarehouseController::class);
   Route::post('warehouses/{warehouse}/import-missing-products', [WarehouseController::class, 'importMissingProducts']);
   Route::apiResource('stock-transfers', StockTransferController::class)->only(['index', 'store']);
+
+  // -- Inventory Counts --
+  Route::apiResource('inventory-counts', InventoryCountController::class);
+  Route::post('/inventory-counts/{inventoryCount}/items', [InventoryCountController::class, 'addItem'])->name('api.inventory-counts.addItem');
+  Route::put('/inventory-counts/{inventoryCount}/items/{item}', [InventoryCountController::class, 'updateItem'])->name('api.inventory-counts.updateItem');
+  Route::delete('/inventory-counts/{inventoryCount}/items/{item}', [InventoryCountController::class, 'deleteItem'])->name('api.inventory-counts.deleteItem');
+  Route::post('/inventory-counts/{inventoryCount}/approve', [InventoryCountController::class, 'approve'])->name('api.inventory-counts.approve');
+  Route::post('/inventory-counts/{inventoryCount}/reject', [InventoryCountController::class, 'reject'])->name('api.inventory-counts.reject');
+
 
   // -- Units Management --
   Route::get('/units/stocking', [UnitController::class, 'stocking'])->name('api.units.stocking');
