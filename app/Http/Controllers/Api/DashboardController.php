@@ -41,7 +41,7 @@ class DashboardController extends Controller
         $salesQuery = Sale::query();
         if ($startDate && $endDate) {
             $salesQuery->whereDate('sale_date', '>=', $startDate)
-                       ->whereDate('sale_date', '<=', $endDate);
+                ->whereDate('sale_date', '<=', $endDate);
         }
 
         // Sum of item totals (sale_items.total_price) grouped by sale_date ranges
@@ -86,7 +86,7 @@ class DashboardController extends Controller
         $purchasesQuery = Purchase::query();
         if ($startDate && $endDate) {
             $purchasesQuery->whereDate('purchase_date', '>=', $startDate)
-                           ->whereDate('purchase_date', '<=', $endDate);
+                ->whereDate('purchase_date', '<=', $endDate);
         }
 
         $purchasesToday = Purchase::whereDate('purchase_date', $today)->sum('total_amount');
@@ -108,17 +108,29 @@ class DashboardController extends Controller
 
         // --- Inventory Stats ---
         $totalProducts = Product::count();
-        $lowStockProductsCount = Product::whereNotNull('stock_alert_level') // Only consider products with an alert level set
-            ->whereColumn('stock_quantity', '<=', 'stock_alert_level') // Compare quantity to alert level column
+
+        // Define a subquery for total stock from the SSOT (product_warehouse)
+        $totalStockSubquery = function ($query) {
+            $query->selectRaw('COALESCE(SUM(quantity), 0)')
+                ->from('product_warehouse')
+                ->whereColumn('product_id', 'products.id');
+        };
+
+        $lowStockProductsCount = Product::whereNotNull('stock_alert_level')
+            ->where($totalStockSubquery, '<=', DB::raw('products.stock_alert_level'))
             ->count();
-        $outOfStockProductsCount = Product::where('stock_quantity', '<=', 0)->count();
+
+        $outOfStockProductsCount = Product::where($totalStockSubquery, '<=', 0)->count();
 
         // Optional: Get names of a few low stock products
         $lowStockProductsSample = Product::whereNotNull('stock_alert_level')
-            ->whereColumn('stock_quantity', '<=', 'stock_alert_level')
-            ->orderBy('stock_quantity', 'asc') // Show lowest stock first
+            ->select('products.name', 'products.stock_alert_level')
+            ->selectSub($totalStockSubquery, 'total_stock')
+            ->where($totalStockSubquery, '<=', DB::raw('products.stock_alert_level'))
+            ->orderBy('total_stock', 'asc') // Show lowest stock first
             ->limit(5) // Limit sample size
-            ->pluck('name', 'stock_quantity') // Get name and quantity
+            ->get()
+            ->pluck('name', 'total_stock') // Get name and quantity
             ->toArray(); // Convert collection to array
 
 
