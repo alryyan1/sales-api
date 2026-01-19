@@ -195,6 +195,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::delete('/inventory-counts/{inventoryCount}/items/{item}', [InventoryCountController::class, 'deleteItem'])->name('api.inventory-counts.deleteItem');
   Route::post('/inventory-counts/{inventoryCount}/approve', [InventoryCountController::class, 'approve'])->name('api.inventory-counts.approve');
   Route::post('/inventory-counts/{inventoryCount}/reject', [InventoryCountController::class, 'reject'])->name('api.inventory-counts.reject');
+  Route::post('/inventory-counts/{inventoryCount}/import-all-products', [InventoryCountController::class, 'importAllProducts'])->name('api.inventory-counts.importAllProducts');
 
 
   // -- Units Management --

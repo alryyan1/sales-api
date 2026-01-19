@@ -19,7 +19,8 @@ class InventoryCountController extends Controller
      */
     public function index(Request $request)
     {
-        $query = InventoryCount::with(['warehouse:id,name', 'user:id,name', 'approvedBy:id,name']);
+        $query = InventoryCount::with(['warehouse:id,name', 'user:id,name', 'approvedBy:id,name'])
+            ->withCount('items');
 
         // Filter by warehouse
         if ($warehouseId = $request->input('warehouse_id')) {
@@ -283,6 +284,61 @@ class InventoryCountController extends Controller
         } catch (\Throwable $e) {
             Log::error("Reject count error: " . $e->getMessage());
             return response()->json(['message' => 'Failed to reject count.'], 500);
+        }
+    }
+
+    /**
+     * Import all products from the warehouse into the inventory count
+     */
+    public function importAllProducts(InventoryCount $inventoryCount)
+    {
+        // Only allow importing if status is draft or in_progress
+        if (!in_array($inventoryCount->status, ['draft', 'in_progress'])) {
+            return response()->json(['message' => 'Cannot import products to count with status: ' . $inventoryCount->status], 403);
+        }
+
+        try {
+            // Get all products that have stock in this warehouse
+            $products = Product::whereHas('warehouses', function ($query) use ($inventoryCount) {
+                $query->where('warehouse_id', $inventoryCount->warehouse_id);
+            })->get();
+
+            // Get existing product IDs in the count
+            $existingProductIds = $inventoryCount->items()->pluck('product_id')->toArray();
+
+            $importedCount = 0;
+            $skippedCount = 0;
+
+            foreach ($products as $product) {
+                // Skip if product already exists in count
+                if (in_array($product->id, $existingProductIds)) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                // Get expected quantity from warehouse
+                $pivot = $product->warehouses()->where('warehouse_id', $inventoryCount->warehouse_id)->first();
+                $expectedQuantity = $pivot ? $pivot->pivot->quantity : 0;
+
+                // Create count item
+                $inventoryCount->items()->create([
+                    'product_id' => $product->id,
+                    'expected_quantity' => $expectedQuantity,
+                    'actual_quantity' => null,
+                    'notes' => null,
+                ]);
+
+                $importedCount++;
+            }
+
+            return response()->json([
+                'message' => "تم استيراد {$importedCount} منتج. تم تخطي {$skippedCount} منتج موجود مسبقاً.",
+                'imported_count' => $importedCount,
+                'skipped_count' => $skippedCount,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Import all products error: " . $e->getMessage());
+            return response()->json(['message' => 'Failed to import products.'], 500);
         }
     }
 }

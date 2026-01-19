@@ -191,6 +191,28 @@ class Product extends Model
         }
         return null;
     }
+
+    /**
+     * Get total stock across all warehouses (SINGLE SOURCE OF TRUTH)
+     * This is the authoritative stock quantity for the product.
+     */
+    public function getTotalStockAttribute(): float
+    {
+        return (float) $this->warehouses()->sum('product_warehouse.quantity');
+    }
+
+    /**
+     * Get stock quantity for a specific warehouse
+     */
+    public function getWarehouseStock(int $warehouseId): float
+    {
+        $warehouse = $this->warehouses()->where('warehouse_id', $warehouseId)->first();
+        return $warehouse ? (float) $warehouse->pivot->quantity : 0;
+    }
+
+    /**
+     * @deprecated Use total_stock accessor instead. This sums from purchase items (batches).
+     */
     public function getTotalStockQuantityAttribute(): int
     {
         // This sums the remaining quantities from all batches of this product
@@ -404,7 +426,7 @@ class Product extends Model
             return (int) PurchaseItem::where('product_id', $this->id)
                 ->whereHas('purchase', function ($q) use ($warehouseId) {
                     $q->where('warehouse_id', $warehouseId);
-                        // ->where('status', 'received'); // Only count stock from received purchases
+                    // ->where('status', 'received'); // Only count stock from received purchases
                 })
                 ->sum('remaining_quantity');
         }

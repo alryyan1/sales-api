@@ -102,19 +102,15 @@ class InventoryCount extends Model
         // Adjust inventory quantities
         foreach ($this->items as $item) {
             if ($item->actual_quantity !== null) {
-                $difference = $item->actual_quantity - $item->expected_quantity;
+                // Update product warehouse quantity to match actual count
+                $product = $item->product;
+                $pivot = $product->warehouses()->where('warehouse_id', $this->warehouse_id)->first();
 
-                if ($difference != 0) {
-                    // Update product warehouse quantity
-                    $product = $item->product;
-                    $pivot = $product->warehouses()->where('warehouse_id', $this->warehouse_id)->first();
-
-                    if ($pivot) {
-                        $newQuantity = max(0, $pivot->pivot->quantity + $difference);
-                        $product->warehouses()->updateExistingPivot($this->warehouse_id, [
-                            'quantity' => $newQuantity
-                        ]);
-                    }
+                if ($pivot) {
+                    // Set the quantity to the actual counted quantity
+                    $product->warehouses()->updateExistingPivot($this->warehouse_id, [
+                        'quantity' => max(0, $item->actual_quantity)
+                    ]);
                 }
             }
         }
