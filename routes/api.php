@@ -230,6 +230,8 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::delete('/sales/{sale}/items/{saleItem}', [SaleController::class, 'deleteSaleItem'])->name('api.sales.deleteSaleItem');
   Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf'); // <-- New Route
   Route::get('/sales/{sale}/invoice-pdf', [SaleController::class, 'downloadInvoicePDF'])->name('api.sales.invoice.pdf'); // <-- Invoice PDF Route
+  Route::get('/sales/{sale}/a4-invoice-pdf', [SaleController::class, 'downloadA4InvoicePdf'])->name('api.sales.a4Invoice.pdf'); // <-- A4 English Invoice (download)
+  Route::get('/sales/{sale}/a4-invoice-pdf/view', [SaleController::class, 'viewA4InvoicePdf'])->name('api.sales.a4Invoice.view'); // <-- A4 English Invoice (view)
 
   // ... existing Sale routes ...
   Route::get('/sales-print/last-completed-id', [SaleController::class, 'getLastCompletedSaleId'])->name('api.sales.lastCompletedId'); // <-- New Route

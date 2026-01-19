@@ -148,19 +148,19 @@ class PurchaseExcelService
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'إجمالي المشتريات:');
         $sheet->setCellValue('B' . $summaryRow, $purchases->count());
-        
+
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'إجمالي المبالغ:');
         $sheet->setCellValue('B' . $summaryRow, number_format($purchases->sum('total_amount'), 0));
-        
+
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'تم الاستلام:');
         $sheet->setCellValue('B' . $summaryRow, $purchases->where('status', 'received')->count());
-        
+
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'قيد الانتظار:');
         $sheet->setCellValue('B' . $summaryRow, $purchases->where('status', 'pending')->count());
-        
+
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'تم الطلب:');
         $sheet->setCellValue('B' . $summaryRow, $purchases->where('status', 'ordered')->count());
@@ -172,7 +172,7 @@ class PurchaseExcelService
 
         // Create Excel file
         $writer = new Xlsx($spreadsheet);
-        
+
         // Capture output
         ob_start();
         $writer->save('php://output');
@@ -193,7 +193,7 @@ class PurchaseExcelService
         $worksheet = $spreadsheet->getActiveSheet();
         $highestColumn = $worksheet->getHighestColumn();
         $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
-        
+
         $headers = [];
         for ($col = 1; $col <= $highestColumnIndex; $col++) {
             $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col) . '1')->getValue();
@@ -201,12 +201,12 @@ class PurchaseExcelService
                 $headers[] = (string) $cellValue;
             }
         }
-        
+
         // Clear memory
         $spreadsheet->disconnectWorksheets();
         unset($spreadsheet);
         gc_collect_cycles();
-        
+
         return $headers;
     }
 
@@ -223,13 +223,13 @@ class PurchaseExcelService
         $spreadsheet = IOFactory::load($file->getPathname());
         $worksheet = $spreadsheet->getActiveSheet();
         $highestRow = $worksheet->getHighestRow();
-        
+
         $previewData = [];
         $startRow = $skipHeader ? 2 : 1;
-        
+
         // Cache headers to avoid repeated calls
         $headers = $this->getExcelHeaders($file);
-        
+
         // Create column index mapping for better performance
         $columnIndexMapping = [];
         foreach ($columnMapping as $purchaseItemField => $excelColumn) {
@@ -240,20 +240,20 @@ class PurchaseExcelService
                 }
             }
         }
-        
+
         // Log the mapping for debugging
         Log::info("Purchase items preview mapping:", [
             'headers' => $headers,
             'columnMapping' => $columnMapping,
             'columnIndexMapping' => $columnIndexMapping
         ]);
-        
+
         // Process first 50 rows for preview
         $previewRows = min(50, $highestRow - $startRow + 1);
-        
+
         for ($row = $startRow; $row < $startRow + $previewRows; $row++) {
             $rowData = [];
-            
+
             // Read row data based on column mapping
             foreach ($columnIndexMapping as $purchaseItemField => $columnIndex) {
                 $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
@@ -266,21 +266,21 @@ class PurchaseExcelService
                     }
                 }
             }
-            
+
             // Apply default values for unmapped or skipped columns
             $rowData = $this->applyDefaultValues($rowData, $columnMapping);
-            
+
             // Only add rows that have at least product name or SKU
             if (!empty($rowData['product_name']) || !empty($rowData['product_sku'])) {
                 $previewData[] = $rowData;
             }
         }
-        
+
         // Clear memory
         $spreadsheet->disconnectWorksheets();
         unset($spreadsheet);
         gc_collect_cycles();
-        
+
         return $previewData;
     }
 
@@ -296,19 +296,25 @@ class PurchaseExcelService
     {
         // Set memory limit for large files
         ini_set('memory_limit', '512M');
-        
+
         $spreadsheet = IOFactory::load($file->getPathname());
         $worksheet = $spreadsheet->getActiveSheet();
         $highestRow = $worksheet->getHighestRow();
-        
+
+        // Fetch purchase object once
+        $purchase = Purchase::find($purchaseId);
+        if (!$purchase) {
+            throw new \Exception("Purchase with ID {$purchaseId} not found.");
+        }
+
         $imported = 0;
         $errors = 0;
         $errorDetails = [];
         $startRow = $skipHeader ? 2 : 1;
-        
+
         // Cache headers to avoid repeated calls
         $headers = $this->getExcelHeaders($file);
-        
+
         // Create column index mapping for better performance
         $columnIndexMapping = [];
         foreach ($columnMapping as $purchaseItemField => $excelColumn) {
@@ -319,7 +325,7 @@ class PurchaseExcelService
                 }
             }
         }
-        
+
         // Log the mapping for debugging
         Log::info("Purchase items import mapping:", [
             'headers' => $headers,
@@ -328,23 +334,23 @@ class PurchaseExcelService
             'purchaseId' => $purchaseId,
             'totalRows' => $highestRow - $startRow + 1
         ]);
-        
+
         // Batch size for processing
         $batchSize = 100;
         $totalBatches = ceil(($highestRow - $startRow + 1) / $batchSize);
-        
+
         // Process in batches for better memory management
         for ($batch = 0; $batch < $totalBatches; $batch++) {
             $batchStartRow = $startRow + ($batch * $batchSize);
             $batchEndRow = min($batchStartRow + $batchSize - 1, $highestRow);
-            
+
             // Start database transaction for this batch
             DB::beginTransaction();
-            
+
             try {
                 for ($row = $batchStartRow; $row <= $batchEndRow; $row++) {
                     $rowData = [];
-                    
+
                     // Read row data based on column mapping
                     foreach ($columnIndexMapping as $purchaseItemField => $columnIndex) {
                         $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
@@ -357,15 +363,15 @@ class PurchaseExcelService
                             }
                         }
                     }
-                    
+
                     // Apply default values for unmapped or skipped columns
                     $rowData = $this->applyDefaultValues($rowData, $columnMapping);
-                    
+
                     // Skip empty rows (after applying defaults)
                     if (empty($rowData['product_name']) && empty($rowData['product_sku'])) {
                         continue;
                     }
-                    
+
                     // Validate and create purchase item
                     $validationResult = $this->validatePurchaseItemData($rowData);
                     if (!$validationResult['valid']) {
@@ -376,52 +382,51 @@ class PurchaseExcelService
                         ];
                         continue;
                     }
-                    
+
                     // Create purchase item
-                    $this->createPurchaseItem($rowData, $purchaseId);
+                    $this->createPurchaseItem($rowData, $purchase);
                     $imported++;
-                    
+
                     // Log progress for large imports
                     if ($imported % 50 === 0) {
                         Log::info("Import progress: {$imported} items imported, {$errors} errors");
                     }
                 }
-                
+
                 DB::commit();
-                
+
                 // Log batch completion
                 Log::info("Batch " . ($batch + 1) . "/{$totalBatches} completed: rows {$batchStartRow}-{$batchEndRow}");
-                
+
                 // Clear memory after each batch
                 gc_collect_cycles();
-                
             } catch (\Exception $e) {
                 DB::rollBack();
-                
+
                 Log::error('Purchase items import batch failed:', [
                     'batch' => $batch + 1,
                     'rows' => "{$batchStartRow}-{$batchEndRow}",
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString()
                 ]);
-                
+
                 // Add batch error to error details
                 $errorDetails[] = [
                     'row' => "Batch " . ($batch + 1),
                     'errors' => ['batch_error' => $e->getMessage()]
                 ];
                 $errors++;
-                
+
                 // Continue with next batch instead of failing completely
                 continue;
             }
         }
-        
+
         // Clear memory
         $spreadsheet->disconnectWorksheets();
         unset($spreadsheet);
         gc_collect_cycles();
-        
+
         return [
             'imported' => $imported,
             'errors' => $errors,
@@ -449,14 +454,14 @@ class PurchaseExcelService
             'sale_price' => null,
             'expiry_date' => null,
         ];
-        
+
         // Apply defaults for any field that is not in the data or was skipped
         foreach ($defaultValues as $field => $defaultValue) {
             if (!isset($data[$field])) {
                 $data[$field] = $defaultValue;
             }
         }
-        
+
         return $data;
     }
 
@@ -472,29 +477,29 @@ class PurchaseExcelService
         if (empty($data['product_name']) && empty($data['product_sku'])) {
             return ['valid' => false, 'errors' => ['product' => ['Either product name or SKU is required.']]];
         }
-        
+
         if (!isset($data['quantity']) || !is_numeric($data['quantity']) || $data['quantity'] <= 0) {
             return ['valid' => false, 'errors' => ['quantity' => ['Quantity must be a positive number.']]];
         }
-        
+
         if (!isset($data['unit_cost']) || !is_numeric($data['unit_cost']) || $data['unit_cost'] < 0) {
             return ['valid' => false, 'errors' => ['unit_cost' => ['Unit cost must be a non-negative number.']]];
         }
-        
+
         // Find product by name or SKU
         $product = null;
         if (!empty($data['product_sku'])) {
             $product = Product::where('sku', $data['product_sku'])->first();
         }
-        
+
         if (!$product && !empty($data['product_name'])) {
             $product = Product::where('name', 'like', '%' . $data['product_name'] . '%')->first();
         }
-        
+
         if (!$product) {
             return ['valid' => false, 'errors' => ['product' => ['Product not found. Please check the product name or SKU.']]];
         }
-        
+
         return ['valid' => true, 'errors' => []];
     }
 
@@ -505,30 +510,58 @@ class PurchaseExcelService
      * @param int $purchaseId
      * @return void
      */
-    private function createPurchaseItem(array $data, int $purchaseId): void
+    /**
+     * Create purchase item and update warehouse stock
+     *
+     * @param array $data
+     * @param Purchase $purchase
+     * @return void
+     */
+    private function createPurchaseItem(array $data, Purchase $purchase): void
     {
         // Find product by name or SKU
         $product = null;
         if (!empty($data['product_sku'])) {
             $product = Product::where('sku', $data['product_sku'])->first();
         }
-        
+
         if (!$product && !empty($data['product_name'])) {
             $product = Product::where('name', 'like', '%' . $data['product_name'] . '%')->first();
         }
-        
+
         if (!$product) {
             throw new \Exception('Product not found');
         }
-        
+
         // Calculate total cost
         $quantity = (int) ($data['quantity'] ?? 0);
         $unitCost = (float) ($data['unit_cost'] ?? 0);
         $totalCost = $quantity * $unitCost;
-        
-        // Create purchase item
+
+        // Update warehouse stock (Single Source of Truth) FIRST
+        // so that when PurchaseItem is created, the Observer sees the correct total_stock.
+        if ($purchase->warehouse_id && $purchase->status === 'received') {
+            // Convert to sellable units
+            $units = $product->units_per_stocking_unit ?: 1;
+            $sellableQty = $quantity * $units;
+
+            $warehouseId = $purchase->warehouse_id;
+            $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
+
+            if ($pivot) {
+                $product->warehouses()->updateExistingPivot($warehouseId, [
+                    'quantity' => $pivot->pivot->quantity + $sellableQty
+                ]);
+            } else {
+                $product->warehouses()->attach($warehouseId, [
+                    'quantity' => $sellableQty
+                ]);
+            }
+        }
+
+        // Create purchase item (Triggers Observer -> Syncs Legacy Stock)
         PurchaseItem::create([
-            'purchase_id' => $purchaseId,
+            'purchase_id' => $purchase->id,
             'product_id' => $product->id,
             'batch_number' => $data['batch_number'] ?? null,
             'quantity' => $quantity,
@@ -537,9 +570,10 @@ class PurchaseExcelService
             'sale_price' => isset($data['sale_price']) && $data['sale_price'] > 0 ? (float) $data['sale_price'] : null,
             'expiry_date' => !empty($data['expiry_date']) ? $data['expiry_date'] : null,
         ]);
-        
-        // Update product stock quantity
-        $product->increment('stock_quantity', $quantity);
+
+
+        // Stock quantity (legacy) is updated by PurchaseItemObserver which listens to created event
+
     }
 
     /**
@@ -609,4 +643,4 @@ class PurchaseExcelService
             ],
         };
     }
-} 
+}

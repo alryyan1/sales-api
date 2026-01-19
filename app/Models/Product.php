@@ -91,10 +91,11 @@ class Product extends Model
         'scientific_name',
         'sku',
         'description',
-        'image_url',
-        'stock_quantity',
-        'stock_alert_level',
         'category_id',
+        // 'stock_quantity', // Dropped - now virtual via accessor from product_warehouse
+        'stock_alert_level',
+        'sellable_unit_name',
+        'stocking_unit_name',
         'stocking_unit_id',
         'sellable_unit_id',
         'units_per_stocking_unit',
@@ -108,7 +109,7 @@ class Product extends Model
      * @var array<string, string>
      */
     protected $casts = [
-        'stock_quantity' => 'integer',   // Cast to integer
+        // 'stock_quantity' => 'integer', // Dropped - now virtual via accessor
         'stock_alert_level' => 'integer', // Cast to integer
         'units_per_stocking_unit' => 'integer', // Cast to integer
         'has_expiry_date' => 'boolean',
@@ -202,11 +203,20 @@ class Product extends Model
     }
 
     /**
+     * Virtual accessor for stock_quantity - returns warehouse total (SSOT)
+     * Column dropped from database - this provides backward compatibility
+     */
+    public function getStockQuantityAttribute(): int
+    {
+        return (int) $this->total_stock;
+    }
+
+    /**
      * Get stock quantity for a specific warehouse
      */
     public function getWarehouseStock(int $warehouseId): float
     {
-        $warehouse = $this->warehouses()->where('warehouse_id', $warehouseId)->first();
+        $warehouse = $this->warehouses()->where('warehouses.id', $warehouseId)->first();
         return $warehouse ? (float) $warehouse->pivot->quantity : 0;
     }
 
@@ -248,25 +258,21 @@ class Product extends Model
      */
     public function scopeHasStock($query)
     {
-        return $query->whereHas('purchaseItems', function ($q) {
-            $q->where('remaining_quantity', '>', 0);
+        // Query product_warehouse directly (SSOT)
+        return $query->whereHas('warehouses', function ($q) {
+            $q->where('product_warehouse.quantity', '>', 0);
         });
-        // OR if 'stock_quantity' on products table is reliably updated by observer:
-        // return $query->where('stock_quantity', '>', 0);
     }
 
     /**
      * Scope a query to only include products that are low on stock.
-     */
-    /**
-     * Scope a query to only include products that are low on stock.
+     * Uses product_warehouse as source of truth.
      */
     public function scopeLowStock($query)
     {
         return $query->whereNotNull('stock_alert_level')
-            ->whereColumn('stock_quantity', '<=', 'stock_alert_level');
-        // If stock_quantity is an aggregate, this whereColumn will work if it's updated.
-        // Otherwise, you'd need a more complex whereHas with sum.
+            ->withSum('warehouses as total_warehouse_stock', 'product_warehouse.quantity')
+            ->havingRaw('COALESCE(total_warehouse_stock, 0) <= stock_alert_level');
     }
 
     /**
@@ -295,13 +301,43 @@ class Product extends Model
 
     public function decrementWarehouseStock($warehouseId, $quantity)
     {
-        $warehouse = $this->warehouses()->where('warehouse_id', $warehouseId)->first();
+        // Get stock before update for comparison
+        $oldTotal = $this->total_stock;
+
+        $warehouse = $this->warehouses()->where('warehouses.id', $warehouseId)->first();
         if ($warehouse) {
             $this->warehouses()->updateExistingPivot($warehouseId, [
                 'quantity' => $warehouse->pivot->quantity - $quantity
             ]);
         } else {
             $this->warehouses()->attach($warehouseId, ['quantity' => -$quantity]);
+        }
+
+        // Force refresh of relationships/attributes to get new total
+        $this->unsetRelation('warehouses');
+
+        // Check for low stock alerts
+        if ($this->stock_alert_level !== null) {
+            $newTotal = $this->total_stock;
+
+            // Check if we crossed info low stock territory
+            if ($newTotal <= $this->stock_alert_level && ($oldTotal > $this->stock_alert_level || $oldTotal === null)) {
+                try {
+                    $whatsAppService = app(\App\Services\WhatsAppService::class);
+                    $whatsAppService->sendLowStockAlert($this);
+
+                    if ($newTotal > 0) {
+                        event(new \App\Events\ProductStockLow($this));
+                    }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::error("Failed to trigger low stock alert: " . $e->getMessage());
+                }
+            }
+
+            // Check Out of Stock
+            if ($newTotal <= 0 && $oldTotal > 0) {
+                event(new \App\Events\ProductOutOfStock($this));
+            }
         }
     }
 
@@ -422,16 +458,19 @@ class Product extends Model
     public function countStock(?int $warehouseId = null): int
     {
         if ($warehouseId) {
-            // Use a fresh query to avoid any relationship caching issues
-            return (int) PurchaseItem::where('product_id', $this->id)
-                ->whereHas('purchase', function ($q) use ($warehouseId) {
-                    $q->where('warehouse_id', $warehouseId);
-                    // ->where('status', 'received'); // Only count stock from received purchases
-                })
-                ->sum('remaining_quantity');
+            // Use loaded relationship if available to avoid N+1
+            if ($this->relationLoaded('warehouses')) {
+                $warehouse = $this->warehouses->firstWhere('id', $warehouseId);
+                return $warehouse ? (int) $warehouse->pivot->quantity : 0;
+            }
+
+            // Fallback query (ensure we filter by Warehouse ID correctly)
+            $warehouse = $this->warehouses()->where('warehouses.id', $warehouseId)->first();
+            return $warehouse ? (int) $warehouse->pivot->quantity : 0;
         }
 
-        return $this->total_stock_quantity;
+        // Return total stock from SSOT (product_warehouse sum)
+        return (int) $this->total_stock;
     }
 
     /**

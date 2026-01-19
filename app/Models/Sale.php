@@ -74,6 +74,7 @@ class Sale extends Model
         'payment_status',
         'status',
         'is_returned',
+        'total_cost',
     ];
 
     protected $casts = [

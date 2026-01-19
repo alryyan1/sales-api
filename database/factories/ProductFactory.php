@@ -28,7 +28,7 @@ class ProductFactory extends Factory
     {
         $purchasePrice = fake()->randomFloat(2, 5, 200); // Random price between 5.00 and 200.00
 
-         // Find an existing category or create one
+        // Find an existing category or create one
         $category = Category::inRandomOrder()->first() ?? Category::factory()->create();
 
         return [
@@ -36,7 +36,7 @@ class ProductFactory extends Factory
             'sku' => 'SKU-' . Str::upper(Str::random(8)), // Generate a somewhat unique SKU
             'description' => fake()->optional(0.8)->paragraph(), // 80% chance of description
             // Sale price is typically higher than purchase price
-            'stock_quantity' => fake()->numberBetween(0, 500), // Random stock level
+            // 'stock_quantity' => fake()->numberBetween(0, 500), // REMOVED: Column dropped
             'stock_alert_level' => fake()->optional(0.9, 10)->numberBetween(5, 50), // 90% chance, between 5-50, default 10
             // 'unit' => fake()->randomElement(['piece', 'kg', 'box', 'liter']), // Example if unit field exists
             'category_id' => $category->id, // <-- Assign category_id
@@ -51,25 +51,25 @@ class ProductFactory extends Factory
      */
     public function outOfStock(): Factory
     {
-        return $this->state(fn (array $attributes) => [
-            'stock_quantity' => 0,
+        return $this->state(fn(array $attributes) => [
+            // 'stock_quantity' => 0, // REMOVED: Column dropped
         ]);
     }
 
-     /**
-      * Indicate that the product has low stock. (Example state)
-      *
-      * @return \Illuminate\Database\Eloquent\Factories\Factory
-      */
-     public function lowStock(): Factory
-     {
-         // Use a callback to access other attributes if needed for calculation
-         return $this->state(function (array $attributes) {
-             $alertLevel = $attributes['stock_alert_level'] ?? 10; // Use defined alert level or default
-             return [
-                 // Set stock slightly below or at alert level
-                 'stock_quantity' => fake()->numberBetween(0, $alertLevel),
-             ];
-         });
-     }
+    /**
+     * Indicate that the product has low stock. (Example state)
+     *
+     * @return \Illuminate\Database\Eloquent\Factories\Factory
+     */
+    public function lowStock(): Factory
+    {
+        // Use a callback to access other attributes if needed for calculation
+        return $this->state(function (array $attributes) {
+            $alertLevel = $attributes['stock_alert_level'] ?? 10; // Use defined alert level or default
+            return [
+                // Set stock slightly below or at alert level
+                // 'stock_quantity' => fake()->numberBetween(0, $alertLevel), // REMOVED: Column dropped
+            ];
+        });
+    }
 }

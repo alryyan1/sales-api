@@ -25,48 +25,41 @@ class ProductObserver
      */
     public function updated(Product $product): void
     {
-        // Check if stock_quantity was changed and is now at or below alert level
-        if ($product->isDirty('stock_quantity') && $product->stock_alert_level !== null) {
-            $originalStock = $product->getOriginal('stock_quantity'); // Stock before update
-            $currentStock = $product->stock_quantity;
+        // Only check if stock_alert_level changed (stock_quantity column dropped)
+        // Stock changes happen via warehouse updates which have their own alert logic
+        if ($product->isDirty('stock_alert_level') && $product->stock_alert_level !== null) {
+            $currentStock = $product->total_stock;
             $alertLevel = $product->stock_alert_level;
 
-            // Send alert if stock just dropped to or below the alert level
-            // And if it was previously above the alert level (to avoid spamming on every save if already low)
-            if ($currentStock <= $alertLevel && ($originalStock > $alertLevel || is_null($originalStock)) ) {
-                Log::info("ProductObserver: Low stock detected for Product ID {$product->id}. Current: {$currentStock}, Alert: {$alertLevel}. Original: {$originalStock}");
+            // Check if we're now below the new alert level
+            $originalAlert = $product->getOriginal('stock_alert_level');
+
+            // If stock is low against new alert level, and it wasn't low before
+            if ($currentStock <= $alertLevel && ($originalAlert === null || $currentStock > $originalAlert)) {
+                Log::info("ProductObserver: Alert level changed - Product ID {$product->id} now low. Current: {$currentStock}, Alert: {$alertLevel}.");
                 $this->whatsAppService->sendLowStockAlert($product);
-                
-                // Fire event for notifications
+
                 if ($currentStock > 0) {
                     event(new ProductStockLow($product));
                 } else {
                     event(new ProductOutOfStock($product));
                 }
             }
-            
-            // Check if stock went to zero
-            if ($currentStock <= 0 && $originalStock > 0) {
-                Log::info("ProductObserver: Out of stock detected for Product ID {$product->id}.");
-                event(new ProductOutOfStock($product));
-            }
         }
     }
 
-    // You might also want to check on "created" if initial stock can be low
     public function created(Product $product): void
     {
+        // Check if created with low stock
         if ($product->stock_alert_level !== null && $product->stock_quantity <= $product->stock_alert_level) {
-             Log::info("ProductObserver: Low stock on creation for Product ID {$product->id}. Current: {$product->stock_quantity}, Alert: {$product->stock_alert_level}.");
-             $this->whatsAppService->sendLowStockAlert($product);
-             
-             // Fire event for notifications
-             if ($product->stock_quantity > 0) {
-                 event(new ProductStockLow($product));
-             } else {
-                 event(new ProductOutOfStock($product));
-             }
-        } elseif ($product->stock_quantity <= 0) {
+            Log::info("ProductObserver: Low stock on creation for Product ID {$product->id}. Current: {$product->stock_quantity}, Alert: {$product->stock_alert_level}.");
+            $this->whatsAppService->sendLowStockAlert($product);
+
+            if ($product->stock_quantity > 0) {
+                event(new ProductStockLow($product));
+            } else {
+                event(new ProductOutOfStock($product));
+            }
             event(new ProductOutOfStock($product));
         }
     }

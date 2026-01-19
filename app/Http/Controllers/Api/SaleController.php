@@ -360,10 +360,16 @@ class SaleController extends Controller
                     $paymentStatus = 'partial';
                 }
 
+                // Calculate total cost
+                $totalCost = $saleHeader->items()->get()->sum(function ($item) {
+                    return $item->cost_price_at_sale * $item->quantity;
+                });
+
                 $saleHeader->update([
                     'total_amount' => $calculatedTotals['subtotal'], // Gross total
                     'paid_amount' => $paidAmount,
                     'payment_status' => $paymentStatus,
+                    // 'total_cost' => $totalCost,
                     // 'tax' => 0, // already defaulted
                 ]);
 
@@ -540,7 +546,7 @@ class SaleController extends Controller
             $shiftId = $currentShift?->id;
         }
 
-        return Sale::create([
+        $saleData = [
             'warehouse_id' => $validatedData['warehouse_id'] ?? $request->user()->warehouse_id ?? 1,
             'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
@@ -550,7 +556,10 @@ class SaleController extends Controller
             'notes' => $validatedData['notes'] ?? null,
             'discount_amount' => $calculatedTotals['discountAmount'],
             'discount_type' => $validatedData['discount_type'] ?? null,
-        ]);
+            // 'total_cost' => 0, // Initialize total cost
+        ];
+
+        return Sale::create($saleData);
     }
 
     private function processSaleItems(array $validatedData, Sale $saleHeader, &$newTotalSaleAmount)
@@ -740,7 +749,7 @@ class SaleController extends Controller
             'client:id,name,email',
             'user:id,name',
             'items',
-            'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+            'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
@@ -795,7 +804,7 @@ class SaleController extends Controller
             'client:id,name',
             'user:id,name',
             'items',
-            'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+            'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date'
@@ -2458,7 +2467,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
@@ -2495,6 +2504,24 @@ class SaleController extends Controller
                 'error' => $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * Generate and download A4 invoice PDF (English, TCPDF)
+     */
+    public function downloadA4InvoicePdf(Sale $sale)
+    {
+        $invoiceService = app(\App\Services\InvoicePdfService::class);
+        return $invoiceService->downloadInvoice($sale);
+    }
+
+    /**
+     * View A4 invoice PDF in browser (English, TCPDF)
+     */
+    public function viewA4InvoicePdf(Sale $sale)
+    {
+        $invoiceService = app(\App\Services\InvoicePdfService::class);
+        return $invoiceService->viewInvoice($sale);
     }
 }
 

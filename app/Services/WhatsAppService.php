@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Config; // To access config values
 use App\Models\Product;
 use Illuminate\Support\ServiceProvider;
+
 class WhatsAppService extends ServiceProvider
 {
     protected GuzzleClient $client;
@@ -58,7 +59,7 @@ class WhatsAppService extends ServiceProvider
                 ],
                 'headers' => [
                     'accept' => 'application/json',
-                    'authorization' => 'Bearer '.$this->apiToken,
+                    'authorization' => 'Bearer ' . $this->apiToken,
                     'content-type' => 'application/json', // Guzzle sets this with 'json' option
                 ],
                 'http_errors' => true, // Ensure Guzzle throws exceptions for 4xx/5xx responses
@@ -106,7 +107,7 @@ class WhatsAppService extends ServiceProvider
         $sku = $product->sku ?? 'N/A';
         $message = "⚠️ Low Stock Alert! ⚠️\n\n";
         $message .= "Product: {$product->name} (SKU: {$sku})\n";
-        $message .= "Current Stock: {$product->stock_quantity}\n";
+        $message .= "Current Stock: {$product->total_stock}\n";
         $message .= "Alert Level: {$product->stock_alert_level}\n\n";
         $message .= "Please reorder soon.\n";
         $message .= "System: " . Config::get('app.name');
