@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\PurchaseItem;
 use App\Services\Pdf\MyCustomTCPDF;
 use Illuminate\Support\Facades\DB;
 
@@ -17,7 +18,20 @@ class ProductPdfService
     public function generateProductsPdf(array $filters = []): string
     {
         // Build query with filters
+        // Build query with filters
         $query = Product::query()
+            ->select('products.*')
+            ->addSelect([
+                'latest_purchase_cost_raw' => PurchaseItem::select('unit_cost')
+                    ->whereColumn('product_id', 'products.id')
+                    ->latest('created_at')
+                    ->limit(1),
+                'last_sale_price_raw' => PurchaseItem::select('sale_price')
+                    ->whereColumn('product_id', 'products.id')
+                    ->whereNotNull('sale_price')
+                    ->latest('created_at')
+                    ->limit(1)
+            ])
             ->with(['category', 'stockingUnit', 'sellableUnit']);
 
         // Apply filters
@@ -42,7 +56,7 @@ class ProductPdfService
         if (!empty($filters['low_stock_only'])) {
             $query->where(function ($q) {
                 $q->whereNotNull('stock_alert_level')
-                  ->where('stock_quantity', '<=', DB::raw('stock_alert_level'));
+                    ->where('stock_quantity', '<=', DB::raw('stock_alert_level'));
             });
         }
 
@@ -102,22 +116,22 @@ class ProductPdfService
         $html .= '<div class="summary-item"><strong>إجمالي المنتجات:</strong> ' . $totalProducts . '</div>';
         $html .= '<div class="summary-item"><strong>متوفر:</strong> ' . $totalInStock . '</div>';
         $html .= '<div class="summary-item"><strong>غير متوفر:</strong> ' . $totalOutOfStock . '</div>';
-        
+
         if (!empty($filters['search'])) {
             $html .= '<div class="summary-item"><strong>مصطلح البحث:</strong> ' . htmlspecialchars($filters['search']) . '</div>';
         }
-        
+
         if (!empty($filters['category_id'])) {
             $category = \App\Models\Category::find($filters['category_id']);
             if ($category) {
                 $html .= '<div class="summary-item"><strong>الفئة:</strong> ' . htmlspecialchars($category->name) . '</div>';
             }
         }
-        
+
         if (!empty($filters['in_stock_only'])) {
             $html .= '<div class="summary-item"><strong>الفلتر:</strong> المتوفر فقط</div>';
         }
-        
+
         $html .= '<div class="summary-item"><strong>تاريخ التقرير:</strong> ' . now()->format('Y-m-d H:i:s') . '</div>';
         $html .= '</div>';
 
@@ -133,6 +147,8 @@ class ProductPdfService
                     <th>الفئة</th>
                     <th>المخزون</th>
                     <th>الوحدة</th>
+                    <th>احدث تكلفة</th>
+                    <th>اخر سعر بيع</th>
                     <th>مستوى التنبيه</th>
                     <th>الحالة</th>
                 </tr>
@@ -142,7 +158,7 @@ class ProductPdfService
         foreach ($products as $index => $product) {
             $stockStatus = $this->getStockStatus($product);
             $rowClass = $this->getRowClass($product);
-            
+
             $html .= '<tr class="' . $rowClass . '">';
             $html .= '<td>' . ($index + 1) . '</td>';
             $html .= '<td>' . htmlspecialchars($product->name) . '</td>';
@@ -151,6 +167,8 @@ class ProductPdfService
             $html .= '<td>' . htmlspecialchars($product->category?->name ?: '-') . '</td>';
             $html .= '<td>' . number_format($product->stock_quantity) . '</td>';
             $html .= '<td>' . htmlspecialchars($product->sellableUnit?->name ?: '-') . '</td>';
+            $html .= '<td>' . ($product->latest_cost_per_sellable_unit ? number_format($product->latest_cost_per_sellable_unit, 2) : '-') . '</td>';
+            $html .= '<td>' . ($product->last_sale_price_per_sellable_unit ? number_format($product->last_sale_price_per_sellable_unit, 2) : '-') . '</td>';
             $html .= '<td>' . ($product->stock_alert_level ? number_format($product->stock_alert_level) : '-') . '</td>';
             $html .= '<td>' . $stockStatus . '</td>';
             $html .= '</tr>';
@@ -172,11 +190,11 @@ class ProductPdfService
         if ($product->stock_quantity <= 0) {
             return 'غير متوفر';
         }
-        
+
         if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
             return 'مخزون منخفض';
         }
-        
+
         return 'متوفر';
     }
 
@@ -191,11 +209,11 @@ class ProductPdfService
         if ($product->stock_quantity <= 0) {
             return 'out-of-stock';
         }
-        
+
         if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
             return 'low-stock';
         }
-        
+
         return 'in-stock';
     }
-} 
+}

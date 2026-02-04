@@ -26,7 +26,7 @@ class StockAdjustmentController extends Controller
     public function store(Request $request)
     {
         // Authorization
-        
+
 
         $validated = $request->validate([
             'warehouse_id' => 'required|integer|exists:warehouses,id',
@@ -150,7 +150,7 @@ class StockAdjustmentController extends Controller
     public function index(Request $request)
     {
         // Authorization check
-     
+
 
         $query = StockAdjustment::with(['user:id,name', 'product:id,name,sku', 'purchaseItemBatch:id,batch_number', 'warehouse:id,name']); // Eager load
 

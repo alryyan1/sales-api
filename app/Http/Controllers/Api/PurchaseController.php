@@ -242,7 +242,7 @@ class PurchaseController extends Controller
 
                         $quantityInStockingUnits = $itemData['quantity'];
                         $unitCostPerStockingUnit = $itemData['unit_cost'];
-                        $totalCostForStockingUnits = $quantityInStockingUnits * $unitsPerStockingUnit;
+                        $totalCostForStockingUnits = $quantityInStockingUnits * $unitCostPerStockingUnit;
 
                         // Calculate values in sellable units
                         $totalSellableUnitsPurchased = $quantityInStockingUnits * $unitsPerStockingUnit;

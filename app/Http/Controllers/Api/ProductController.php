@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\ProductDeletionService;
 use App\Http\Resources\ProductResource; // Use the ProductResource
 use App\Models\Product; // Use the Product model
 use App\Models\PurchaseItem;
@@ -23,6 +24,12 @@ use Illuminate\Validation\ValidationException;
  */
 class ProductController extends Controller
 {
+    protected $deletionService;
+
+    public function __construct(\App\Services\ProductDeletionService $deletionService)
+    {
+        $this->deletionService = $deletionService;
+    }
     /**
      * @OA\Get(
      *     path="/api/products",
@@ -404,25 +411,35 @@ class ProductController extends Controller
      *     )
      * )
      */
-    public function destroy(Product $product)
+    public function destroy(Product $product, Request $request)
     {
         // Authorization check
         // if (auth()->user()->cannot('delete', $product)) { abort(403); }
+
+        $forceDelete = $request->query('force', false) === 'true' || $request->input('force') === true;
 
         // Check for dependencies (e.g., if product is in purchase_items or sale_items)
         // The 'restrict' onDelete constraint in migrations for purchase_items and sale_items
         // should prevent deletion if related records exist, throwing a QueryException.
         try {
-            $product->delete();
+            if ($forceDelete) {
+                $this->deletionService->forceDeleteProduct($product);
+            } else {
+                $product->delete();
+            }
+
             return response()->json(['message' => 'Product deleted successfully.'], Response::HTTP_OK);
-            // Or: return response()->noContent(); // 204
         } catch (\Illuminate\Database\QueryException $e) {
             // Check for foreign key constraint violation error code (varies by DB)
             // MySQL: 1451, PostgreSQL: 23503, SQLite: 19 (SQLITE_CONSTRAINT)
             $errorCode = $e->errorInfo[1] ?? null;
             if ($errorCode == 1451 || $errorCode == 23503 || (str_contains($e->getMessage(), 'FOREIGN KEY constraint failed'))) {
                 Log::warning("Attempted to delete Product ID {$product->id} with existing relations.");
-                return response()->json(['message' => 'Cannot delete product. It is associated with existing purchases or sales records.'], Response::HTTP_CONFLICT); // 409 Conflict
+                return response()->json([
+                    'message' => 'Cannot delete product. It is associated with existing purchases or sales records.',
+                    'can_force_delete' => true, // Flag to tell frontend it can ask for force delete
+                    'confirmation_message' => 'هذا المنتج مرتبط بعمليات بيع أو شراء سابقة. هل تريد بالتأكيد حذفه وحذف جميع العمليات المرتبطة به؟ هذا الإجراء لا يمكن التراجع عنه.'
+                ], Response::HTTP_CONFLICT); // 409 Conflict
             }
             // Log other database errors
             Log::error("Error deleting product ID {$product->id}: " . $e->getMessage());
@@ -556,7 +573,7 @@ class ProductController extends Controller
     public function getByIds(Request $request)
     {
         $validated = $request->validate([
-            'ids'   => 'required|array',
+            'ids' => 'required|array',
             'ids.*' => 'integer|exists:products,id',
         ]);
 
@@ -1060,6 +1077,7 @@ class ProductController extends Controller
         return \App\Http\Resources\PurchaseItemResource::collection($history);
     }
 
+
     public function salesHistory(Request $request, Product $product)
     {
         $limit = $request->input('per_page', 10);
@@ -1087,15 +1105,15 @@ class ProductController extends Controller
         try {
             // Store image in public/products directory
             $imagePath = $request->file('image')->store('products', 'public');
-            
+
             // Get full URL
             $imageUrl = asset('storage/' . $imagePath);
-            
+
             // Update product
             $product->update(['image_url' => $imageUrl]);
-            
+
             $product->load(['category', 'stockingUnit', 'sellableUnit']);
-            
+
             return response()->json([
                 'message' => 'Image uploaded successfully',
                 'product' => new ProductResource($product)
