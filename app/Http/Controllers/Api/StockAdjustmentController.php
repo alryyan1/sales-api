@@ -109,10 +109,7 @@ class StockAdjustmentController extends Controller
                     // Update Warehouse Pivot
                     $product->warehouses()->updateExistingPivot($warehouseId, ['quantity' => $newWarehouseStock]);
 
-                    // Start of Global update (direct or via observer?)
-                    // If we update pivot, we should also update global count to keep in sync.
-                    $product->stock_quantity += $quantityChange;
-                    $product->save();
+
                 }
 
                 // 4. Create Adjustment Record

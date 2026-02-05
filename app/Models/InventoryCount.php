@@ -111,6 +111,11 @@ class InventoryCount extends Model
                     $product->warehouses()->updateExistingPivot($this->warehouse_id, [
                         'quantity' => max(0, $item->actual_quantity)
                     ]);
+                } else {
+                    // Pivot doesn't exist, create it (product had 0 stock and no history in this warehouse)
+                    $product->warehouses()->attach($this->warehouse_id, [
+                        'quantity' => max(0, $item->actual_quantity)
+                    ]);
                 }
             }
         }

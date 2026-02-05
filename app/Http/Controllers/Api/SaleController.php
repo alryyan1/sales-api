@@ -473,7 +473,8 @@ class SaleController extends Controller
                 }
             }
         }
-        if (!empty($stockErrors)) throw ValidationException::withMessages($stockErrors);
+        if (!empty($stockErrors))
+            throw ValidationException::withMessages($stockErrors);
     }
 
     private function calculateTotals(array $validatedData)
@@ -518,7 +519,7 @@ class SaleController extends Controller
     private function validatePaidAmount(array $calculatedTotals)
     {
         // Paid amount cannot exceed NET amount (gross - discount)
-        $netAmount = (float)$calculatedTotals['amountAfterDiscount'];
+        $netAmount = (float) $calculatedTotals['amountAfterDiscount'];
         if ($calculatedTotals['totalPaidAmount'] > $netAmount) {
             throw ValidationException::withMessages(['payments' => ['Total paid amount cannot exceed the net sale amount after discount.']]);
         }
@@ -635,13 +636,13 @@ class SaleController extends Controller
                     if ($canSellFromThisBatchInSellableUnits > 0) {
                         // Create the SaleItem record, linking it to the specific PurchaseItem (batch)
                         $saleHeader->items()->create([
-                            'product_id'         => $product->id,
-                            'purchase_item_id'   => $batch->id, // Link to the specific batch
-                            'batch_number_sold'  => $batch->batch_number, // Store batch number for easy display
-                            'quantity'           => $canSellFromThisBatchInSellableUnits, // Quantity sold in SELLABLE units
-                            'unit_price'         => $unitSalePrice, // Sale price per sellable unit (from request)
+                            'product_id' => $product->id,
+                            'purchase_item_id' => $batch->id, // Link to the specific batch
+                            'batch_number_sold' => $batch->batch_number, // Store batch number for easy display
+                            'quantity' => $canSellFromThisBatchInSellableUnits, // Quantity sold in SELLABLE units
+                            'unit_price' => $unitSalePrice, // Sale price per sellable unit (from request)
                             'cost_price_at_sale' => $batch->cost_per_sellable_unit, // COGS component from the batch
-                            'total_price'        => $canSellFromThisBatchInSellableUnits * $unitSalePrice,
+                            'total_price' => $canSellFromThisBatchInSellableUnits * $unitSalePrice,
                         ]);
 
                         // Decrement the remaining quantity of the batch (which is in sellable units)
@@ -671,17 +672,16 @@ class SaleController extends Controller
 
                     // Create a sale item for the remaining quantity without batch tracking
                     $saleHeader->items()->create([
-                        'product_id'         => $product->id,
-                        'purchase_item_id'   => null, // No batch tracking for this portion
-                        'batch_number_sold'  => null, // No batch number
-                        'quantity'           => $remainingQuantity, // Quantity sold in SELLABLE units
-                        'unit_price'         => $unitSalePrice, // Sale price per sellable unit (from request)
+                        'product_id' => $product->id,
+                        'purchase_item_id' => null, // No batch tracking for this portion
+                        'batch_number_sold' => null, // No batch number
+                        'quantity' => $remainingQuantity, // Quantity sold in SELLABLE units
+                        'unit_price' => $unitSalePrice, // Sale price per sellable unit (from request)
                         'cost_price_at_sale' => 0, // No cost tracking for non-batch items
-                        'total_price'        => $remainingQuantity * $unitSalePrice,
+                        'total_price' => $remainingQuantity * $unitSalePrice,
                     ]);
 
                     // Decrement directly from product stock
-                    $product->decrement('stock_quantity', $remainingQuantity);
                     // Also decrement warehouse specific stock
                     $product->decrementWarehouseStock($warehouseId, $remainingQuantity);
 
@@ -694,25 +694,23 @@ class SaleController extends Controller
             } else {
                 // --- No batches available, decrement directly from product stock ---
                 $saleHeader->items()->create([
-                    'product_id'         => $product->id,
-                    'purchase_item_id'   => null, // No batch tracking
-                    'batch_number_sold'  => null, // No batch number
-                    'quantity'           => $requestedSellableUnits, // Quantity sold in SELLABLE units
-                    'unit_price'         => $unitSalePrice, // Sale price per sellable unit (from request)
+                    'product_id' => $product->id,
+                    'purchase_item_id' => null, // No batch tracking
+                    'batch_number_sold' => null, // No batch number
+                    'quantity' => $requestedSellableUnits, // Quantity sold in SELLABLE units
+                    'unit_price' => $unitSalePrice, // Sale price per sellable unit (from request)
                     'cost_price_at_sale' => 0, // No cost tracking for non-batch items
-                    'total_price'        => $requestedSellableUnits * $unitSalePrice,
+                    'total_price' => $requestedSellableUnits * $unitSalePrice,
                 ]);
-
-                // Decrement directly from product stock
-                $product->decrement('stock_quantity', $requestedSellableUnits);
-                // Also decrement warehouse specific stock
-                $product->decrementWarehouseStock($warehouseId, $requestedSellableUnits);
 
                 // Update totals for the current sale
                 $newTotalSaleAmount += $requestedSellableUnits * $unitSalePrice;
                 $quantityFulfilledInSellableUnits = $requestedSellableUnits;
 
                 Log::info("SaleItem created (no batch): Product ID {$product->id}, Qty Sold: {$requestedSellableUnits}, Direct stock decrement. Sale ID: {$saleHeader->id}");
+
+                // Decrement directly from product stock (RE-ADDED)
+                $product->decrementWarehouseStock($warehouseId, $requestedSellableUnits);
             }
 
             // Final verification that the requested quantity was fully met
@@ -727,7 +725,7 @@ class SaleController extends Controller
     {
         if (!empty($validatedData['payments'])) {
             foreach ($validatedData['payments'] as $paymentData) {
-                if (isset($paymentData['amount']) && is_numeric($paymentData['amount']) && (float)$paymentData['amount'] > 0) {
+                if (isset($paymentData['amount']) && is_numeric($paymentData['amount']) && (float) $paymentData['amount'] > 0) {
                     $saleHeader->payments()->create([
                         'user_id' => $request->user()->id,
                         'method' => $paymentData['method'],
@@ -791,8 +789,8 @@ class SaleController extends Controller
         // The frontend form should also restrict item editing for completed/non-draft sales.
         // Paid amount should not exceed net amount (gross - discount)
         // Calculate totals from items since they're no longer stored
-        $currentTotal = (float)$sale->items()->sum('total_price');
-        $discountAmount = (float)($sale->discount_amount ?? 0);
+        $currentTotal = (float) $sale->items()->sum('total_price');
+        $discountAmount = (float) ($sale->discount_amount ?? 0);
         $currentNet = max(0, $currentTotal - $discountAmount);
         if (isset($validatedData['paid_amount']) && $validatedData['paid_amount'] > $currentNet) {
             throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed the net sale amount after discount.']]);
@@ -843,11 +841,11 @@ class SaleController extends Controller
                             // PurchaseItemObserver will update Product->stock_quantity
                         } else {
                             // Fallback: increment total product stock
-                            $product->increment('stock_quantity', $quantity);
+                            $product->incrementWarehouseStock($sale->warehouse_id, $quantity);
                         }
                     } else {
                         // No specific batch, increment total product stock
-                        $product->increment('stock_quantity', $quantity);
+                        $product->incrementWarehouseStock($sale->warehouse_id, $quantity);
                     }
                 }
 
@@ -1112,7 +1110,7 @@ class SaleController extends Controller
         try {
             DB::transaction(function () use ($validated, $sale) {
                 // Always compute subtotal from items to ensure accuracy
-                $subtotal = (float)$sale->items()->sum('total_price');
+                $subtotal = (float) $sale->items()->sum('total_price');
 
                 // Compute discount value (absolute) from input
                 $discountValue = 0.0;
@@ -1123,13 +1121,13 @@ class SaleController extends Controller
                             'discount_amount' => ['Discount percentage cannot exceed 100%']
                         ]);
                     }
-                    $discountValue = $subtotal * ((float)$validated['discount_amount'] / 100);
+                    $discountValue = $subtotal * ((float) $validated['discount_amount'] / 100);
                 } else { // fixed
-                    $discountValue = min((float)$validated['discount_amount'], $subtotal);
+                    $discountValue = min((float) $validated['discount_amount'], $subtotal);
                 }
 
                 // Ensure discount does not reduce total below amount already paid
-                $paidAmount = (float)$sale->payments()->sum('amount');
+                $paidAmount = (float) $sale->payments()->sum('amount');
                 $maxDiscountAllowed = max(0.0, $subtotal - $paidAmount);
                 if ($discountValue > $maxDiscountAllowed) {
                     throw ValidationException::withMessages([
@@ -1295,9 +1293,9 @@ class SaleController extends Controller
                 if ($existingSaleItem) {
                     // Product already exists - do nothing
                     // Calculate totals from items/payments
-                    $currentTotal = (float)$sale->items()->sum('total_price');
-                    $discountAmount = (float)($sale->discount_amount ?? 0);
-                    $paidAmount = (float)$sale->payments()->sum('amount');
+                    $currentTotal = (float) $sale->items()->sum('total_price');
+                    $discountAmount = (float) ($sale->discount_amount ?? 0);
+                    $paidAmount = (float) $sale->payments()->sum('amount');
                     $dueAmount = max(0, $currentTotal - $discountAmount - $paidAmount);
                     return [
                         'sale_items' => [],
@@ -1328,21 +1326,21 @@ class SaleController extends Controller
                 }
 
                 // Determine unit price (fallback to product defaults if request sent 0)
-                $resolvedUnitPrice = (float)($validatedData['unit_price'] ?? 0);
+                $resolvedUnitPrice = (float) ($validatedData['unit_price'] ?? 0);
                 if ($resolvedUnitPrice <= 0) {
                     // Use last sale price if > 0
                     if ($product->last_sale_price_per_sellable_unit > 0) {
-                        $resolvedUnitPrice = (float)$product->last_sale_price_per_sellable_unit;
+                        $resolvedUnitPrice = (float) $product->last_sale_price_per_sellable_unit;
                     }
                     // Otherwise use suggested price if > 0
                     elseif ($product->suggested_sale_price_per_sellable_unit > 0) {
-                        $resolvedUnitPrice = (float)$product->suggested_sale_price_per_sellable_unit;
+                        $resolvedUnitPrice = (float) $product->suggested_sale_price_per_sellable_unit;
                     }
                     // Otherwise try to find a price from available batches
                     else {
                         $firstBatch = $product->purchaseItemsWithStock()->where('remaining_quantity', '>', 0)->orderBy('expiry_date')->first();
                         if ($firstBatch && $firstBatch->sale_price > 0) {
-                            $resolvedUnitPrice = (float)$firstBatch->sale_price;
+                            $resolvedUnitPrice = (float) $firstBatch->sale_price;
                         } else {
                             $resolvedUnitPrice = 0;
                         }
@@ -1403,7 +1401,8 @@ class SaleController extends Controller
 
                     // Allocate from batches first
                     foreach ($availableBatches as $batch) {
-                        if ($remainingQuantity <= 0) break;
+                        if ($remainingQuantity <= 0)
+                            break;
 
                         $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
 
@@ -1442,9 +1441,7 @@ class SaleController extends Controller
                     $saleItems[] = $saleItem;
                 }
 
-                // Update product stock
-                $product->stock_quantity -= $validatedData['quantity'];
-                $product->save();
+
 
                 // UPDATE WAREHOUSE STOCK
                 $warehouseId = $sale->warehouse_id;
@@ -1459,8 +1456,8 @@ class SaleController extends Controller
 
                 // Calculate totals from items (no longer stored in DB)
                 $newTotal = $sale->items()->sum('total_price');
-                $discountAmount = (float)($sale->discount_amount ?? 0);
-                $paidAmount = (float)$sale->payments()->sum('amount');
+                $discountAmount = (float) ($sale->discount_amount ?? 0);
+                $paidAmount = (float) $sale->payments()->sum('amount');
                 $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
 
                 return [
@@ -1618,9 +1615,9 @@ class SaleController extends Controller
                     } else {
                         // No batch tracking: adjust product stock directly
                         if ($quantityDifference > 0) {
-                            $product->decrement('stock_quantity', $quantityDifference);
+                            $product->decrementWarehouseStock($sale->warehouse_id, $quantityDifference);
                         } else {
-                            $product->increment('stock_quantity', abs($quantityDifference));
+                            $product->incrementWarehouseStock($sale->warehouse_id, abs($quantityDifference));
                         }
                     }
                 }
@@ -1678,8 +1675,8 @@ class SaleController extends Controller
 
                 // Calculate totals from items (no longer stored in DB)
                 $newTotal = $sale->items()->sum('total_price');
-                $discountAmount = (float)($sale->discount_amount ?? 0);
-                $paidAmount = (float)$sale->payments()->sum('amount');
+                $discountAmount = (float) ($sale->discount_amount ?? 0);
+                $paidAmount = (float) $sale->payments()->sum('amount');
                 $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
 
                 return [
@@ -1779,6 +1776,7 @@ class SaleController extends Controller
 
                 // Update product stock quantity (this will be handled by the observer)
                 // The PurchaseItemObserver will automatically update product.stock_quantity
+                $product->incrementWarehouseStock($sale->warehouse_id, $saleItem->quantity);
 
                 // Delete the sale item first
                 $deletedQuantity = $saleItem->quantity;
@@ -1966,8 +1964,8 @@ class SaleController extends Controller
             $lineHeight = $pdf->getStringHeight($w_items[3], $productDescription); // Calculate height needed for description
             $lineHeight = max(6, $lineHeight); // Minimum height of 6
 
-            $pdf->Cell($w_items[0], $lineHeight, number_format((float)$item->total_price, 0), 'LRB', 0, 'R', $fill);
-            $pdf->Cell($w_items[1], $lineHeight, number_format((float)$item->unit_price, 0), 'LRB', 0, 'R', $fill);
+            $pdf->Cell($w_items[0], $lineHeight, number_format((float) $item->total_price, 0), 'LRB', 0, 'R', $fill);
+            $pdf->Cell($w_items[1], $lineHeight, number_format((float) $item->unit_price, 0), 'LRB', 0, 'R', $fill);
             $pdf->Cell($w_items[2], $lineHeight, $item->quantity, 'LRB', 0, 'C', $fill);
 
             $x = $pdf->GetX();
@@ -2023,9 +2021,10 @@ class SaleController extends Controller
             $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
             foreach ($sale->payments as $payment) {
                 $paymentText = "طريقة الدفع: " . config('app_settings.payment_methods.' . $payment->method, $payment->method); // Assuming payment_methods in config
-                $paymentText .= "  |  المبلغ: " . number_format((float)$payment->amount, 0);
+                $paymentText .= "  |  المبلغ: " . number_format((float) $payment->amount, 0);
                 $paymentText .= "  |  التاريخ: " . Carbon::parse($payment->payment_date)->format('Y-m-d');
-                if ($payment->reference_number) $paymentText .= "  |  مرجع: " . $payment->reference_number;
+                if ($payment->reference_number)
+                    $paymentText .= "  |  مرجع: " . $payment->reference_number;
                 $pdf->MultiCell(0, 5, $paymentText, 0, 'R', 0, 1);
             }
         }
@@ -2162,9 +2161,9 @@ class SaleController extends Controller
                     $productName = mb_substr($productName, 0, 18) . '..';
                 }
 
-                $itemTotal = number_format((float)$item->total_price, 0);
-                $itemPrice = number_format((float)$item->unit_price, 0);
-                $itemQty = (string)$item->quantity;
+                $itemTotal = number_format((float) $item->total_price, 0);
+                $itemPrice = number_format((float) $item->unit_price, 0);
+                $itemQty = (string) $item->quantity;
 
                 // Using MultiCell for name to handle potential (though short) wrapping
                 $currentY = $pdf->GetY();
@@ -2218,7 +2217,7 @@ class SaleController extends Controller
                         $methodLabel = config('app_settings.payment_methods_ar.' . $payment->method, $payment->method);
                     }
                     $pdf->Cell(46, 4, $methodLabel . ':', 0, 0, 'R');
-                    $pdf->Cell(26, 4, number_format((float)$payment->amount, 0), 0, 1, 'R');
+                    $pdf->Cell(26, 4, number_format((float) $payment->amount, 0), 0, 1, 'R');
                 }
                 $pdf->Ln(1);
             }
@@ -2274,7 +2273,7 @@ class SaleController extends Controller
             'user_id' => $userId,
             'total_sales_found' => $sales->count(),
             'sales_details' => $sales->map(function ($sale) {
-                $totalAmount = (float)($sale->items?->sum('total_price') ?? 0);
+                $totalAmount = (float) ($sale->items?->sum('total_price') ?? 0);
                 return [
                     'id' => $sale->id,
                     'total_amount' => $totalAmount,
@@ -2380,12 +2379,12 @@ class SaleController extends Controller
                         }
 
                         // Resolve unit price with backend fallback if 0/empty comes from client
-                        $resolvedUnitPrice = (float)($itemData['unit_price'] ?? 0);
+                        $resolvedUnitPrice = (float) ($itemData['unit_price'] ?? 0);
                         if ($resolvedUnitPrice <= 0) {
                             $fallback = $product->last_sale_price_per_sellable_unit
                                 ?? $product->suggested_sale_price_per_sellable_unit
                                 ?? 0;
-                            $resolvedUnitPrice = (float)$fallback;
+                            $resolvedUnitPrice = (float) $fallback;
                         }
 
                         // Find available batches (FIFO)
@@ -2400,7 +2399,8 @@ class SaleController extends Controller
 
                         // Allocate from batches first
                         foreach ($availableBatches as $batch) {
-                            if ($remainingQuantity <= 0) break;
+                            if ($remainingQuantity <= 0)
+                                break;
 
                             $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
 
@@ -2437,12 +2437,13 @@ class SaleController extends Controller
                             $saleItems[] = $saleItem;
                         }
 
-                        // Update product stock
-                        $product->stock_quantity -= $itemData['quantity'];
-                        $product->save();
+
 
                         $addedItems = array_merge($addedItems, $saleItems);
                         $totalAdded++;
+
+                        // Update product stock (RE-ADDED)
+                        $product->decrementWarehouseStock($sale->warehouse_id, $itemData['quantity']);
                     } catch (\Exception $e) {
                         $errors[] = "Failed to add product at index {$index}: " . $e->getMessage();
                     }
@@ -2450,8 +2451,8 @@ class SaleController extends Controller
 
                 // Calculate totals from items (no longer stored in DB)
                 $newTotal = $sale->items()->sum('total_price');
-                $discountAmount = (float)($sale->discount_amount ?? 0);
-                $paidAmount = (float)$sale->payments()->sum('amount');
+                $discountAmount = (float) ($sale->discount_amount ?? 0);
+                $paidAmount = (float) $sale->payments()->sum('amount');
                 $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
 
                 return [
