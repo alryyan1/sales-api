@@ -104,19 +104,19 @@ class InventoryPdfService
         $html .= '<div class="summary-item"><strong>متوفر:</strong> ' . $totalInStock . '</div>';
         $html .= '<div class="summary-item"><strong>مخزون منخفض:</strong> ' . $totalLowStock . '</div>';
         $html .= '<div class="summary-item"><strong>غير متوفر:</strong> ' . $totalOutOfStock . '</div>';
-        
+
         if (!empty($filters['search'])) {
             $html .= '<div class="summary-item"><strong>مصطلح البحث:</strong> ' . htmlspecialchars($filters['search']) . '</div>';
         }
-        
+
         if (!empty($filters['low_stock_only'])) {
             $html .= '<div class="summary-item"><strong>الفلتر:</strong> مخزون منخفض فقط</div>';
         }
-        
+
         if (!empty($filters['out_of_stock_only'])) {
             $html .= '<div class="summary-item"><strong>الفلتر:</strong> غير متوفر فقط</div>';
         }
-        
+
         $html .= '</div>';
 
         // Products table
@@ -142,15 +142,15 @@ class InventoryPdfService
         foreach ($products as $index => $product) {
             $stockStatus = $this->getStockStatus($product);
             $rowClass = $this->getRowClass($product);
-            
+
             $html .= '<tr class="' . $rowClass . '">';
             $html .= '<td>' . ($index + 1) . '</td>';
             $html .= '<td>' . htmlspecialchars($product->sku ?: '-') . '</td>';
             $html .= '<td>' . htmlspecialchars($product->name) . '</td>';
             $html .= '<td>' . number_format($product->stock_quantity) . '</td>';
             $html .= '<td>' . ($product->stock_alert_level ? number_format($product->stock_alert_level) : '-') . '</td>';
-                    $html .= '<td>' . ($product->latest_cost_per_sellable_unit ? number_format($product->latest_cost_per_sellable_unit, 0) : '-') . '</td>';
-        $html .= '<td>' . ($product->last_sale_price_per_sellable_unit ? number_format($product->last_sale_price_per_sellable_unit, 0) : '-') . '</td>';
+            $html .= '<td>' . ($product->latest_cost_per_sellable_unit ? number_format($product->latest_cost_per_sellable_unit, 0) : '-') . '</td>';
+            $html .= '<td>' . ($product->last_sale_price_per_sellable_unit ? number_format($product->last_sale_price_per_sellable_unit, 0) : '-') . '</td>';
             $html .= '<td>' . number_format($product->total_items_purchased) . '</td>';
             $html .= '<td>' . number_format($product->total_items_sold) . '</td>';
             $html .= '<td>' . htmlspecialchars($product->sellableUnit?->name ?: '-') . '</td>';
@@ -174,11 +174,11 @@ class InventoryPdfService
         if ($product->stock_quantity <= 0) {
             return 'غير متوفر';
         }
-        
+
         if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
             return 'مخزون منخفض';
         }
-        
+
         return 'متوفر';
     }
 
@@ -193,11 +193,11 @@ class InventoryPdfService
         if ($product->stock_quantity <= 0) {
             return 'out-of-stock';
         }
-        
+
         if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
             return 'low-stock';
         }
-        
+
         return 'in-stock';
     }
-} 
+}

@@ -303,6 +303,24 @@ class SaleController extends Controller
     {
         $validatedData = $this->validateSaleRequest($request);
 
+        // --- IDEMPOTENCY CHECK ---
+        if (!empty($validatedData['offline_id'])) {
+            $existingSale = Sale::where('offline_id', $validatedData['offline_id'])->first();
+            if ($existingSale) {
+                $existingSale->load([
+                    'client:id,name',
+                    'user:id,name',
+                    'items.product:id,name,sku',
+                    'items.purchaseItemBatch:id,batch_number,unit_cost',
+                    'payments.user:id,name'
+                ]);
+                return response()->json([
+                    'sale' => new SaleResource($existingSale),
+                    'message' => 'Sale already exists (processed via offline_id)'
+                ], Response::HTTP_OK);
+            }
+        }
+
         // Check for open shift only if pos_mode is 'shift'
         $settings = (new SettingsService())->getAll();
         $posMode = $settings['pos_mode'] ?? 'shift';
@@ -403,6 +421,7 @@ class SaleController extends Controller
     private function validateSaleRequest(Request $request)
     {
         return $request->validate([
+            'offline_id' => 'nullable|string|max:255',
             'warehouse_id' => 'nullable|exists:warehouses,id', // Warehouse for the sale
             'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
             'shift_id' => 'nullable|exists:shifts,id', // Shift ID - null for days mode, set for shift mode
@@ -548,6 +567,7 @@ class SaleController extends Controller
         }
 
         $saleData = [
+            'offline_id' => $validatedData['offline_id'] ?? null,
             'warehouse_id' => $validatedData['warehouse_id'] ?? $request->user()->warehouse_id ?? 1,
             'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
@@ -567,8 +587,24 @@ class SaleController extends Controller
     {
         $warehouseId = $saleHeader->warehouse_id;
 
+        // --- MERGE DUPLICATE PRODUCTS ---
+        $mergedItems = [];
+        foreach ($validatedData['items'] as $item) {
+            $productId = $item['product_id'];
+            if (isset($mergedItems[$productId])) {
+                // If price is different, we could either average it or keep one. 
+                // Usually in POS, if you add the same item twice, it's just more quantity.
+                // We'll add the quantity.
+                $mergedItems[$productId]['quantity'] += $item['quantity'];
+                // We'll keep the last unit_price for the merged item (or we could use the first).
+                $mergedItems[$productId]['unit_price'] = $item['unit_price'];
+            } else {
+                $mergedItems[$productId] = $item;
+            }
+        }
+
         // 2. Process Sale Items and Stock (Total stock check, FIFO allocation or direct stock decrement)
-        foreach ($validatedData['items'] as $itemData) {
+        foreach ($mergedItems as $itemData) {
             $product = Product::findOrFail($itemData['product_id']); // Ensure product exists
             $requestedSellableUnits = (int) $itemData['quantity']; // Quantity customer wants, in sellable units
             $unitSalePrice = (float) $itemData['unit_price']; // Price per sellable unit from request
@@ -1471,7 +1507,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'

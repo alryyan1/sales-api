@@ -57,6 +57,7 @@ class Sale extends Model
     use HasFactory;
 
     protected $fillable = [
+        'offline_id',
         'warehouse_id',
         'client_id',
         'user_id',

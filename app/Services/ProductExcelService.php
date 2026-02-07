@@ -51,7 +51,7 @@ class ProductExcelService
         if (!empty($filters['low_stock_only'])) {
             $query->where(function ($q) {
                 $q->whereNotNull('stock_alert_level')
-                  ->where('stock_quantity', '<=', DB::raw('stock_alert_level'));
+                    ->where('stock_quantity', '<=', DB::raw('stock_alert_level'));
             });
         }
 
@@ -134,7 +134,7 @@ class ProductExcelService
         $row = 2;
         foreach ($products as $index => $product) {
             $stockStatus = $this->getStockStatus($product);
-            
+
             $sheet->setCellValue('A' . $row, $index + 1);
             $sheet->setCellValue('B' . $row, $product->name);
             $sheet->setCellValue('C' . $row, $product->scientific_name ?: '-');
@@ -182,11 +182,11 @@ class ProductExcelService
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'إجمالي المنتجات:');
         $sheet->setCellValue('B' . $summaryRow, $products->count());
-        
+
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'متوفر:');
         $sheet->setCellValue('B' . $summaryRow, $products->where('stock_quantity', '>', 0)->count());
-        
+
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'غير متوفر:');
         $sheet->setCellValue('B' . $summaryRow, $products->where('stock_quantity', '<=', 0)->count());
@@ -196,13 +196,13 @@ class ProductExcelService
             $summaryRow += 2;
             $sheet->setCellValue('A' . $summaryRow, 'الفلترة المطبقة:');
             $sheet->getStyle('A' . $summaryRow)->getFont()->setBold(true);
-            
+
             if (!empty($filters['search'])) {
                 $summaryRow++;
                 $sheet->setCellValue('A' . $summaryRow, 'مصطلح البحث:');
                 $sheet->setCellValue('B' . $summaryRow, $filters['search']);
             }
-            
+
             if (!empty($filters['category_id'])) {
                 $category = \App\Models\Category::find($filters['category_id']);
                 if ($category) {
@@ -211,7 +211,7 @@ class ProductExcelService
                     $sheet->setCellValue('B' . $summaryRow, $category->name);
                 }
             }
-            
+
             if (!empty($filters['in_stock_only'])) {
                 $summaryRow++;
                 $sheet->setCellValue('A' . $summaryRow, 'الفلتر:');
@@ -226,7 +226,7 @@ class ProductExcelService
 
         // Create Excel file
         $writer = new Xlsx($spreadsheet);
-        
+
         // Capture output
         ob_start();
         $writer->save('php://output');
@@ -246,11 +246,11 @@ class ProductExcelService
         if ($product->stock_quantity <= 0) {
             return 'غير متوفر';
         }
-        
+
         if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
             return 'مخزون منخفض';
         }
-        
+
         return 'متوفر';
     }
 
@@ -274,7 +274,7 @@ class ProductExcelService
                 ],
             ];
         }
-        
+
         if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
             return [
                 'fill' => [
@@ -287,7 +287,7 @@ class ProductExcelService
                 ],
             ];
         }
-        
+
         return [
             'fill' => [
                 'fillType' => Fill::FILL_SOLID,
@@ -312,7 +312,7 @@ class ProductExcelService
         $worksheet = $spreadsheet->getActiveSheet();
         $highestColumn = $worksheet->getHighestColumn();
         $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
-        
+
         $headers = [];
         for ($col = 1; $col <= $highestColumnIndex; $col++) {
             $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col) . '1')->getValue();
@@ -320,7 +320,7 @@ class ProductExcelService
                 $headers[] = $cellValue;
             }
         }
-        
+
         return $headers;
     }
 
@@ -337,13 +337,13 @@ class ProductExcelService
         $spreadsheet = IOFactory::load($file->getPathname());
         $worksheet = $spreadsheet->getActiveSheet();
         $highestRow = $worksheet->getHighestRow();
-        
+
         $previewData = [];
         $startRow = $skipHeader ? 2 : 1;
-        
+
         // Cache headers to avoid repeated calls
         $headers = $this->getExcelHeaders($file);
-        
+
         // Create column index mapping for better performance
         $columnIndexMapping = [];
         foreach ($columnMapping as $productField => $excelColumn) {
@@ -354,20 +354,20 @@ class ProductExcelService
                 }
             }
         }
-        
+
         // Log the mapping for debugging
         Log::info("Preview mapping:", [
             'headers' => $headers,
             'columnMapping' => $columnMapping,
             'columnIndexMapping' => $columnIndexMapping
         ]);
-        
+
         // Process first 50 rows for preview
         $previewRows = min(50, $highestRow - $startRow + 1);
-        
+
         for ($row = $startRow; $row < $startRow + $previewRows; $row++) {
             $rowData = [];
-            
+
             // Read row data based on column mapping
             foreach ($columnIndexMapping as $productField => $columnIndex) {
                 $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
@@ -382,21 +382,21 @@ class ProductExcelService
                     }
                 }
             }
-            
+
             // Apply default values for unmapped or skipped columns
             $rowData = $this->applyDefaultValues($rowData, $columnMapping);
-            
+
             // Only add rows that have a product name
             if (!empty($rowData['name'])) {
                 $previewData[] = $rowData;
             }
         }
-        
+
         // Clear memory
         $spreadsheet->disconnectWorksheets();
         unset($spreadsheet);
         gc_collect_cycles();
-        
+
         return $previewData;
     }
 
@@ -413,21 +413,21 @@ class ProductExcelService
         // Set memory limit and execution time for large imports
         ini_set('memory_limit', '512M');
         set_time_limit(300); // 5 minutes
-        
+
         $spreadsheet = IOFactory::load($file->getPathname());
         $worksheet = $spreadsheet->getActiveSheet();
         $highestRow = $worksheet->getHighestRow();
         $highestColumn = $worksheet->getHighestColumn();
         $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestColumn);
-        
+
         $imported = 0;
         $errors = 0;
         $errorDetails = [];
         $startRow = $skipHeader ? 2 : 1;
-        
+
         // Cache headers to avoid repeated calls
         $headers = $this->getExcelHeaders($file);
-        
+
         // Create column index mapping for better performance
         $columnIndexMapping = [];
         foreach ($columnMapping as $productField => $excelColumn) {
@@ -438,24 +438,24 @@ class ProductExcelService
                 }
             }
         }
-        
+
         // Log the mapping for debugging
         Log::info("Import mapping:", [
             'headers' => $headers,
             'columnMapping' => $columnMapping,
             'columnIndexMapping' => $columnIndexMapping
         ]);
-        
+
         // Process in batches to avoid memory issues
         $batchSize = 100;
         $currentBatch = [];
-        
+
         DB::beginTransaction();
-        
+
         try {
             for ($row = $startRow; $row <= $highestRow; $row++) {
                 $rowData = [];
-                
+
                 // Read row data based on column mapping (optimized)
                 foreach ($columnIndexMapping as $productField => $columnIndex) {
                     $cellValue = $worksheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($columnIndex) . $row)->getValue();
@@ -470,7 +470,7 @@ class ProductExcelService
                         }
                     }
                 }
-                
+
                 // Debug logging for first few rows
                 if ($row <= 5) {
                     Log::info("Row {$row} data:", [
@@ -479,18 +479,18 @@ class ProductExcelService
                         'rowData' => $rowData
                     ]);
                 }
-                
+
                 // Apply default values for unmapped or skipped columns
                 $rowData = $this->applyDefaultValues($rowData, $columnMapping);
-                
+
                 // Skip rows that don't have a product name
                 if (empty($rowData['name'])) {
                     continue;
                 }
-                
+
                 // Validate and process the row data
                 $validationResult = $this->validateProductData($rowData);
-                
+
                 if ($validationResult['valid']) {
                     $currentBatch[] = $rowData;
                     $imported++;
@@ -501,37 +501,37 @@ class ProductExcelService
                         'errors' => $validationResult['errors']
                     ];
                 }
-                
+
                 // Process batch when it reaches the batch size
                 if (count($currentBatch) >= $batchSize) {
                     $this->createProductsBatch($currentBatch);
                     $currentBatch = [];
-                    
+
                     // Log progress for large imports
                     if ($highestRow > 1000) {
                         Log::info("Import progress: {$row}/{$highestRow} rows processed");
                     }
                 }
             }
-            
+
             // Process remaining batch
             if (!empty($currentBatch)) {
                 $this->createProductsBatch($currentBatch);
             }
-            
+
             DB::commit();
-            
+
             // Clear memory
             $spreadsheet->disconnectWorksheets();
             unset($spreadsheet);
             gc_collect_cycles();
-            
+
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Product import error: ' . $e->getMessage());
             throw $e;
         }
-        
+
         return [
             'imported' => $imported,
             'errors' => $errors,
@@ -555,14 +555,14 @@ class ProductExcelService
             'scientific_name' => null,
             'stock_quantity' => 0, // Keep 0 as default for stock quantity
         ];
-        
+
         // Apply defaults for any field that is not in the data or was skipped
         foreach ($defaultValues as $field => $defaultValue) {
             if (!isset($data[$field])) {
                 $data[$field] = $defaultValue;
             }
         }
-        
+
         return $data;
     }
 
@@ -583,7 +583,7 @@ class ProductExcelService
                 'errors' => ['name' => ['The name field is required.']]
             ];
         }
-        
+
         // Validate SKU if provided
         if (isset($data['sku']) && $data['sku'] !== null && $data['sku'] !== '') {
             // Check if SKU already exists
@@ -595,7 +595,7 @@ class ProductExcelService
                 ];
             }
         }
-        
+
         // Validate stock quantity if provided
         if (isset($data['stock_quantity']) && $data['stock_quantity'] !== null && $data['stock_quantity'] !== '') {
             if (!is_numeric($data['stock_quantity']) || $data['stock_quantity'] < 0) {
@@ -605,7 +605,7 @@ class ProductExcelService
                 ];
             }
         }
-        
+
         return ['valid' => true, 'errors' => []];
     }
 
@@ -619,7 +619,7 @@ class ProductExcelService
     private function createProductsBatch(array $batchData): void
     {
         $productsToCreate = [];
-        
+
         foreach ($batchData as $data) {
             $productsToCreate[] = [
                 'name' => trim($data['name'] ?? ''),
@@ -630,7 +630,7 @@ class ProductExcelService
                 'updated_at' => now(),
             ];
         }
-        
+
         if (!empty($productsToCreate)) {
             Product::insert($productsToCreate);
         }
@@ -652,7 +652,7 @@ class ProductExcelService
             'scientific_name' => isset($data['scientific_name']) && $data['scientific_name'] !== '' ? (string) $data['scientific_name'] : null,
             'stock_quantity' => isset($data['stock_quantity']) && is_numeric($data['stock_quantity']) ? (int) $data['stock_quantity'] : 0,
         ];
-        
+
         return Product::create($productData);
     }
-} 
+}
