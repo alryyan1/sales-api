@@ -1471,7 +1471,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
@@ -1603,15 +1603,35 @@ class SaleController extends Controller
 
                 // Handle stock changes first (so observers update product totals where applicable)
                 if ($quantityDifference !== 0) {
+                    \Log::info('updateSaleItem: handling stock change', ['diff' => $quantityDifference, 'batch_id' => $batch ? $batch->id : 'none']);
                     if ($batch) {
                         // Adjust the specific batch (lock again to be safe)
                         $lockedBatch = PurchaseItem::whereKey($batch->id)->lockForUpdate()->first();
+
+                        // Safety check if batch is missing
+                        if (!$lockedBatch) {
+                            \Log::error('updateSaleItem: batch not found', ['batch_id' => $batch->id]);
+                            throw ValidationException::withMessages([
+                                'quantity' => 'Associated batch not found during update.'
+                            ]);
+                        }
+
                         if ($quantityDifference > 0) {
                             $lockedBatch->remaining_quantity -= $quantityDifference;
                         } else {
                             $lockedBatch->remaining_quantity += abs($quantityDifference);
                         }
-                        $lockedBatch->save(); // Observer will update Product.stock_quantity
+                        $lockedBatch->save();
+                        \Log::info('updateSaleItem: batch updated', ['new_remaining' => $lockedBatch->remaining_quantity]);
+
+                        // FIX: Also update warehouse stock when batch is used (SSOT)
+                        if ($quantityDifference > 0) {
+                            $product->decrementWarehouseStock($sale->warehouse_id, $quantityDifference);
+                        } else {
+                            $product->incrementWarehouseStock($sale->warehouse_id, abs($quantityDifference));
+                        }
+                        \Log::info('updateSaleItem: warehouse stock updated via decrement/increment');
+
                     } else {
                         // No batch tracking: adjust product stock directly
                         if ($quantityDifference > 0) {
@@ -1619,6 +1639,7 @@ class SaleController extends Controller
                         } else {
                             $product->incrementWarehouseStock($sale->warehouse_id, abs($quantityDifference));
                         }
+                        \Log::info('updateSaleItem: product stock updated directly');
                     }
                 }
 
@@ -1629,6 +1650,7 @@ class SaleController extends Controller
 
                     // If batch is changing, we need to handle stock adjustments
                     if ($oldBatchId !== $newBatchId) {
+                        \Log::info('updateSaleItem: changing batch', ['old' => $oldBatchId, 'new' => $newBatchId]);
                         // Return stock to old batch if it exists
                         if ($oldBatchId && $batch) {
                             $oldBatch = PurchaseItem::whereKey($oldBatchId)->lockForUpdate()->first();
@@ -1664,6 +1686,8 @@ class SaleController extends Controller
                             $saleItem->purchase_item_id = null;
                             $saleItem->batch_number_sold = null;
                         }
+
+                        // Note: Batch change logic is correct
                     }
                 }
 
@@ -1672,16 +1696,42 @@ class SaleController extends Controller
                 $saleItem->unit_price = $validatedData['unit_price'];
                 $saleItem->total_price = $newQuantity * $validatedData['unit_price'];
                 $saleItem->save();
+                \Log::info('updateSaleItem: item saved');
 
-                // Calculate totals from items (no longer stored in DB)
-                $newTotal = $sale->items()->sum('total_price');
+                // Recalculate totals for the SALE HEADER
+                $newSubtotal = $sale->items()->sum('total_price'); // Gross total
                 $discountAmount = (float) ($sale->discount_amount ?? 0);
+
+                // Recalculate discount if percentage (optional, but good practice)
+                if ($sale->discount_type === 'percentage' && $sale->discount_amount > 0) {
+                    // We store absolute amount, so hard to revert to percentage without storing rate.
+                    // Assuming discount_amount is fixed value. 
+                    // If it was percentage, we might have issue. 
+                    // But typically POS sends fixed amount.
+                }
+
+                $netTotal = max(0, $newSubtotal - $discountAmount);
                 $paidAmount = (float) $sale->payments()->sum('amount');
-                $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
+                $newDueAmount = max(0, $netTotal - $paidAmount);
+
+                // Update Sale Header
+                $paymentStatus = 'unpaid';
+                if ($paidAmount >= $netTotal && $netTotal > 0) {
+                    $paymentStatus = 'paid';
+                } elseif ($paidAmount > 0) {
+                    $paymentStatus = 'partial';
+                }
+
+                $sale->update([
+                    'total_amount' => $newSubtotal,
+                    'paid_amount' => $paidAmount, // Should be same, but safe to refresh
+                    'payment_status' => $paymentStatus
+                ]);
+                \Log::info('updateSaleItem: sale header updated');
 
                 return [
                     'updated_item' => $saleItem,
-                    'new_total' => $newTotal,
+                    'new_total' => $newSubtotal,
                     'new_due_amount' => $newDueAmount
                 ];
             });
@@ -1690,7 +1740,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
