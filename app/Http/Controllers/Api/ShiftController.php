@@ -41,15 +41,16 @@ class ShiftController extends Controller
      */
     public function index(Request $request)
     {
-        $shifts = Shift::orderBy('id', 'desc')
+        $shifts = Shift::with('user')->orderBy('id', 'desc')
             ->limit(100) // Limit to recent 100 shifts
-            ->get(['id', 'opened_at', 'closed_at']);
+            ->get(['id', 'opened_at', 'closed_at', 'user_id']);
 
         return response()->json([
             'data' => $shifts->map(function ($shift) {
                 return [
                     'id' => $shift->id,
-                    'name' => "الوردية #{$shift->id}",
+                    'name' => "الوردية #{$shift->id} - " . ($shift->user->name ?? 'Unknown'),
+                    'user_name' => $shift->user->name ?? 'Unknown',
                     'shift_date' => $shift->opened_at ? date('Y-m-d', strtotime($shift->opened_at)) : null,
                 ];
             }),
@@ -169,7 +170,7 @@ class ShiftController extends Controller
             ->orderBy('id', 'desc')
             ->first();
 
-        if (! $shift) {
+        if (!$shift) {
             return response()->json([
                 'message' => 'لا توجد وردية مفتوحة لإغلاقها.',
             ], 422);
