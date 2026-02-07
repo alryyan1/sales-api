@@ -150,17 +150,23 @@ class ReportController extends Controller
 
         // 1. Calculate Total Expenses from expenses table
         $expensesQuery = \App\Models\Expense::query();
-        if ($startDate) $expensesQuery->whereDate('expense_date', '>=', $startDate);
-        if ($endDate) $expensesQuery->whereDate('expense_date', '<=', $endDate);
-        if ($userId) $expensesQuery->where('user_id', $userId);
+        if ($startDate)
+            $expensesQuery->whereDate('expense_date', '>=', $startDate);
+        if ($endDate)
+            $expensesQuery->whereDate('expense_date', '<=', $endDate);
+        if ($userId)
+            $expensesQuery->where('user_id', $userId);
 
         $totalExpenses = (float) $expensesQuery->sum('amount');
 
         // 2. Calculate Total Refunds from sale_returns table
         $refundsQuery = \App\Models\SaleReturn::where('status', 'completed');
-        if ($startDate) $refundsQuery->whereDate('return_date', '>=', $startDate);
-        if ($endDate) $refundsQuery->whereDate('return_date', '<=', $endDate);
-        if ($userId) $refundsQuery->where('user_id', $userId);
+        if ($startDate)
+            $refundsQuery->whereDate('return_date', '>=', $startDate);
+        if ($endDate)
+            $refundsQuery->whereDate('return_date', '<=', $endDate);
+        if ($userId)
+            $refundsQuery->where('user_id', $userId);
 
         $totalRefunds = (float) $refundsQuery->sum('refunded_amount');
 
@@ -207,12 +213,14 @@ class ReportController extends Controller
         // ->with('category:id,name');
         // If 'include_batches' is true, eager load available batches
         if (filter_var($validated['include_batches'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
-            $query->with(['purchaseItems' => function ($query) {
-                $query->where('remaining_quantity', '>', 0)
-                    ->select(['id', 'product_id', 'batch_number', 'remaining_quantity', 'expiry_date', 'unit_cost', 'sale_price']) // Select specific batch fields
-                    ->orderBy('expiry_date', 'asc')
-                    ->orderBy('created_at', 'asc');
-            }]);
+            $query->with([
+                'purchaseItems' => function ($query) {
+                    $query->where('remaining_quantity', '>', 0)
+                        ->select(['id', 'product_id', 'batch_number', 'remaining_quantity', 'expiry_date', 'unit_cost', 'sale_price']) // Select specific batch fields
+                        ->orderBy('expiry_date', 'asc')
+                        ->orderBy('created_at', 'asc');
+                }
+            ]);
         }
         // --- Apply Filters ---
         if (!empty($validated['search'])) {
@@ -407,7 +415,7 @@ class ReportController extends Controller
         while ($currentDay->lte($endDate)) {
             $dayStr = $currentDay->toDateString();
             $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]);
-            
+
             // Calculate daily totals
             $dailySalesEntry = $dailySales->get($dayStr);
             $dailyExpensesEntry = $dailyExpenses->get($dayStr);
@@ -526,7 +534,7 @@ class ReportController extends Controller
         while ($currentDay->lte($endDate)) {
             $dayStr = $currentDay->toDateString();
             $paymentsForDay = $dailyPaymentsByMethod->get($dayStr) ?? collect([]);
-            
+
             $dailySalesEntry = $dailySales->get($dayStr);
             $dailyExpensesEntry = $dailyExpenses->get($dayStr);
             $dailyTotalSales = (float) ($dailySalesEntry->total_sales ?? 0);
@@ -1574,7 +1582,7 @@ class ReportController extends Controller
         }
 
         $monthName = $startDate->isoFormat('MMMM');
-        
+
         return response()->json([
             'year' => $year,
             'month' => $month,
@@ -1742,7 +1750,7 @@ class ReportController extends Controller
         // Generate Excel file
         $writer = new Xlsx($spreadsheet);
         $filename = 'monthly_expenses_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.xlsx';
-        
+
         $tempFile = tempnam(sys_get_temp_dir(), 'expenses_');
         $writer->save($tempFile);
 
