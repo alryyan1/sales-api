@@ -109,7 +109,13 @@ class SaleController extends Controller
      */
     public function listAll(Request $request)
     {
-        $query = Sale::with(['client:id,name', 'user:id,name', 'payments.user:id,name,username']);
+        $query = Sale::with([
+            'client:id,name',
+            'user:id,name',
+            'payments.user:id,name,username',
+            'items.product:id,name,sku,scientific_name',
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
+        ]);
 
         if ($shiftId = $request->input('shift_id')) {
             $query->where('shift_id', $shiftId);
@@ -154,7 +160,7 @@ class SaleController extends Controller
         // $this->authorize('createReturn', $sale); // Policy check if user can create return for this sale
 
         // Fetch items, calculate already returned quantity for each original sale item
-        $items = $sale->items()->with('product:id,name,sku')->get()->map(function ($saleItem) {
+        $items = $sale->items()->with('product:id,name,sku,scientific_name')->get()->map(function ($saleItem) {
             $alreadyReturnedQty = SaleReturnItem::where('original_sale_item_id', $saleItem->id)
                 ->whereHas('saleReturn', fn($q) => $q->where('status', '!=', 'cancelled'))
                 ->sum('quantity_returned');
@@ -268,7 +274,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku',
+                'items.product:id,name,sku,scientific_name',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
             ]);
@@ -304,7 +310,7 @@ class SaleController extends Controller
             'payments' => 'present|array',
             'payments.*.method' => [
                 'required_with:payments.*.amount',
-                Rule::in(['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'other', 'store_credit'])
+                Rule::in(['cash', 'bankak', 'fawry', 'ocash'])
             ],
             'payments.*.amount' => 'required_with:payments.*.method|numeric|min:0.01',
             'payments.*.payment_date' => 'required_with:payments.*.amount|date_format:Y-m-d',
@@ -550,7 +556,7 @@ class SaleController extends Controller
             'client:id,name,email',
             'user:id,name',
             'items',
-            'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
@@ -582,7 +588,7 @@ class SaleController extends Controller
             'client:id,name',
             'user:id,name',
             'items',
-            'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date'
@@ -653,7 +659,7 @@ class SaleController extends Controller
     {
         $validatedData = $request->validate([
             'payments' => 'required|array',
-            'payments.*.method' => 'nullable|string|in:cash,visa,mastercard,bank_transfer,mada,store_credit,other,refund',
+            'payments.*.method' => 'nullable|string|in:cash,bankak,fawry,ocash',
             'payments.*.amount' => 'nullable|numeric|min:0.01',
             'payments.*.payment_date' => 'nullable|date_format:Y-m-d',
             'payments.*.reference_number' => 'nullable|string|max:255',
@@ -688,7 +694,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'payments.user:id,name,username' // Load user relationship for payments
@@ -698,7 +704,7 @@ class SaleController extends Controller
 
             return response()->json([
                 'message' => $message,
-                'sale' => new SaleResource($sale->fresh())
+                'sale' => new SaleResource($sale)
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             Log::error('Error adding payment to sale: ' . $e->getMessage(), [
@@ -730,7 +736,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'payments.user:id,name,username' // Load user relationship for payments
@@ -757,7 +763,7 @@ class SaleController extends Controller
     public function addSinglePayment(Request $request, Sale $sale)
     {
         $validatedData = $request->validate([
-            'method' => 'required|string|in:cash,visa,mastercard,bank_transfer,mada,store_credit,other,refund',
+            'method' => 'required|string|in:cash,bankak,fawry,ocash',
             'amount' => 'required|numeric|min:0.01',
             'reference_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string|max:65535',
@@ -839,7 +845,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
                 'payments.user:id,name'
@@ -899,7 +905,6 @@ class SaleController extends Controller
             'product_id' => 'required|exists:products,id',
             'quantity' => 'required|integer|min:1',
             'unit_price' => 'required|numeric|min:0',
-            'purchase_item_id' => 'nullable|integer|exists:purchase_items,id',
         ]);
 
         try {
@@ -946,34 +951,14 @@ class SaleController extends Controller
                         : 0;
                 }
 
-                // Optional: use purchase_item_id for cost/batch reference only
-                $refBatch = null;
-                if (!empty($validatedData['purchase_item_id'])) {
-                    $refBatch = PurchaseItem::where('id', $validatedData['purchase_item_id'])
-                        ->where('product_id', $product->id)
-                        ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
-                        ->first();
-                }
-                if (!$refBatch) {
-                    $refBatch = PurchaseItem::where('product_id', $product->id)
-                        ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
-                        ->orderBy('expiry_date', 'asc')
-                        ->orderBy('created_at', 'asc')
-                        ->first();
-                }
-
-                $costPriceAtSale = $refBatch ? (float) ($refBatch->cost_per_sellable_unit ?? $refBatch->unit_cost ?? 0) : 0;
-                $batchNumberSold = $refBatch ? $refBatch->batch_number : null;
-                $purchaseItemId = $refBatch ? $refBatch->id : null;
-
                 $saleItem = $sale->items()->create([
                     'product_id' => $product->id,
-                    'purchase_item_id' => $purchaseItemId,
-                    'batch_number_sold' => $batchNumberSold,
+                    'purchase_item_id' => null,
+                    'batch_number_sold' => null,
                     'quantity' => $validatedData['quantity'],
                     'unit_price' => $resolvedUnitPrice,
                     'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
-                    'cost_price_at_sale' => $costPriceAtSale,
+                    'cost_price_at_sale' => 0,
                 ]);
                 $saleItems = [$saleItem];
 
@@ -994,7 +979,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
@@ -1123,7 +1108,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
@@ -1248,7 +1233,7 @@ class SaleController extends Controller
         $sale->load([
             'client:id,name,email,phone,address', // Load more client details
             'user:id,name', // Salesperson
-            'items.product:id,name,sku', // Product details for each item
+            'items.product:id,name,sku,scientific_name', // Product details for each item
             'items.purchaseItemBatch:id,batch_number', // Batch number sold from
             'payments' // Load payments made against this invoice
         ]);
@@ -1446,7 +1431,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name', // Load only what's needed for receipt
                 'user:id,name',
-                'items.product:id,name,sku',
+                'items.product:id,name,sku,scientific_name',
                 // No need to load purchaseItemBatch for thermal receipt unless showing batch no.
             ]);
 
@@ -1803,7 +1788,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
