@@ -240,7 +240,6 @@ class MigrateOldDeposits extends Command
                         'product_id' => $newProductId,
                         'batch_number' => $oldItem->batch,
                         'quantity' => $oldItem->quantity,
-                        'remaining_quantity' => $oldItem->quantity, // Initially same as quantity
                         'unit_cost' => $oldItem->cost,
                         'total_cost' => $totalCost,
                         'sale_price' => $oldItem->sell_price,

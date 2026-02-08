@@ -12,7 +12,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @property int $product_id
  * @property string|null $batch_number
  * @property int $quantity
- * @property int $remaining_quantity
  * @property string $unit_cost
  * @property string $total_cost
  * @property string|null $sale_price
@@ -35,7 +34,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereProductId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem wherePurchaseId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereQuantity($value)
- * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereRemainingQuantity($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereSalePrice($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereSalePriceStockingUnit($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereTotalCost($value)
@@ -53,7 +51,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  *     @OA\Property(property="product_id", type="integer", example=20),
  *     @OA\Property(property="batch_number", type="string", example="BATCH-123"),
  *     @OA\Property(property="quantity", type="integer", example=50, description="In stocking units"),
- *     @OA\Property(property="remaining_quantity", type="integer", example=500, description="In sellable units"),
  *     @OA\Property(property="unit_cost", type="number", format="float", example=10.00),
  *     @OA\Property(property="total_cost", type="number", format="float", example=500.00),
  *     @OA\Property(property="sale_price", type="number", format="float", example=15.00),
@@ -73,7 +70,6 @@ class PurchaseItem extends Model
         'product_id',
         'batch_number',
         'quantity',                 // Quantity of stocking_unit_name (e.g., boxes)
-        'remaining_quantity',       // Remaining quantity in sellable_unit_name (e.g., pieces)
         'unit_cost',                // Cost per stocking_unit_name (e.g., cost per box)
         'total_cost',               // quantity * unit_cost
         'sale_price',               // Intended sale price PER SELLABLE UNIT for this batch (required)
@@ -88,9 +84,8 @@ class PurchaseItem extends Model
         'total_cost' => 'decimal:2',
         'sale_price' => 'decimal:2',
         'sale_price_stocking_unit' => 'decimal:2',
-        'cost_per_sellable_unit' => 'decimal:2', // New
-        'expiry_date' => 'date',     // New
-        'remaining_quantity' => 'integer'
+        'cost_per_sellable_unit' => 'decimal:2',
+        'expiry_date' => 'date',
     ];
     /**
      * Get the parent purchase record.

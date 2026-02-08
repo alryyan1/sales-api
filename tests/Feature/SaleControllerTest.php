@@ -77,29 +77,18 @@ class SaleControllerTest extends TestCase
             ->where('product_id', $this->product->id)
             ->first();
         $this->assertNotNull($purchaseItem);
-        $this->assertEquals(100, $purchaseItem->remaining_quantity);
-        
-        // Refresh product to ensure relationships are loaded
+        // Verify warehouse stock was updated by the purchase (SSOT: product_warehouse)
         $this->product->refresh();
+        $this->assertGreaterThan(0, (int) $this->product->total_stock);
 
-        // The purchase API will attach product to warehouse and update stock_quantity
-        // Just refresh product to ensure relationships are loaded
-        $this->product->refresh();
-        
-        // Verify stock_quantity was updated by the purchase
-        $this->assertGreaterThan(0, $this->product->stock_quantity);
-        
-        // Verify the PurchaseItem is properly linked
+        // Verify the PurchaseItem exists and product has stock in warehouse
         $purchaseItemCheck = PurchaseItem::where('product_id', $this->product->id)
             ->whereHas('purchase', function($q) {
                 $q->where('warehouse_id', $this->warehouse->id)
                   ->where('status', 'received');
             })
             ->first();
-        
-        // Ensure countStock will find the PurchaseItem
         $this->assertNotNull($purchaseItemCheck, 'PurchaseItem should exist after purchase creation');
-        $this->assertGreaterThan(0, $purchaseItemCheck->remaining_quantity);
         
         // Verify countStock works on the product instance
         $stockCount = $this->product->countStock($this->warehouse->id);
@@ -323,7 +312,6 @@ class SaleControllerTest extends TestCase
             'purchase_id' => $purchase2->id,
             'product_id' => $product2->id,
             'quantity' => 50,
-            'remaining_quantity' => 50,
             'unit_cost' => 10,
             'total_cost' => 500,
             'sale_price' => 15,
@@ -436,7 +424,6 @@ class SaleControllerTest extends TestCase
             'purchase_id' => $purchase2->id,
             'product_id' => $this->product->id,
             'quantity' => 5,
-            'remaining_quantity' => 5,
             'unit_cost' => 10,
             'total_cost' => 50,
             'sale_price' => 15,

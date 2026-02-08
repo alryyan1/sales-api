@@ -131,7 +131,6 @@ class LifeCareProductsSeeder extends Seeder
                     'purchase_id' => $purchase->id,
                     'product_id' => $product->id,
                     'quantity' => $item['qty'],
-                    'remaining_quantity' => $item['qty'], // Since units_per_stocking_unit is 1
                     'unit_cost' => $item['price'],
                     'total_cost' => $totalCost,
                     'sale_price' => $item['price'] * 1.3, // Example markup 30%
@@ -139,11 +138,7 @@ class LifeCareProductsSeeder extends Seeder
                     'expiry_date' => Carbon::now()->addYears(2), // Default expiry
                 ]);
 
-                // Manually update product stock quantity if not handled by observers
-                // (Models usually rely on observers or periodic jobs, but for seeding it makes sense to set it)
-                $product->increment('stock_quantity', $item['qty']);
-                
-                // Also likely need to attach to warehouse if M-to-M exists
+                // Update product_warehouse (SSOT)
                 // The Product model has 'warehouses' relation
                 $existingPivot = $product->warehouses()->where('warehouse_id', $warehouse->id)->first();
                 if ($existingPivot) {

@@ -831,7 +831,6 @@ class MigrateMirganiDatabase extends Command
                             'product_id' => $productId,
                             'batch_number' => $oldItem->batch ?? $oldItem->batch_number ?? null,
                             'quantity' => $quantity,
-                            'remaining_quantity' => $remainingQuantity,
                             'unit_cost' => $unitCost,
                             'total_cost' => $totalCost,
                             'sale_price' => !empty($oldItem->sell_price) ? (float)$oldItem->sell_price : null,

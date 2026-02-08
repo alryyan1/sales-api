@@ -69,48 +69,21 @@ class StockAdjustmentController extends Controller
                     throw ValidationException::withMessages(['quantity_change' => "Adjustment results in negative stock for this warehouse. Available: {$currentWarehouseStock}."]);
                 }
 
-                // 2. Adjust Specific Batch (if provided)
+                // 2. Optional batch reference (for audit only; stock SSOT is product_warehouse)
                 if ($batchId) {
-                    $purchaseItem = PurchaseItem::lockForUpdate()->findOrFail($batchId);
-
-                    // Verify batch matches product
-                    if ($purchaseItem->product_id !== $product->id) {
-                        throw ValidationException::withMessages(['purchase_item_id' => 'Selected batch does not belong to the selected product.']);
+                    $purchaseItem = PurchaseItem::find($batchId);
+                    if ($purchaseItem) {
+                        if ($purchaseItem->product_id !== $product->id) {
+                            throw ValidationException::withMessages(['purchase_item_id' => 'Selected batch does not belong to the selected product.']);
+                        }
+                        if ($purchaseItem->purchase && $purchaseItem->purchase->warehouse_id != $warehouseId) {
+                            throw ValidationException::withMessages(['purchase_item_id' => 'Selected batch belongs to a different warehouse.']);
+                        }
                     }
-
-                    // Verify batch belongs to the warehouse (if we added warehouse_id to purchase_items/purchases)
-                    // Currently Purchase has warehouse_id. The batch belongs to a Purchase.
-                    if ($purchaseItem->purchase && $purchaseItem->purchase->warehouse_id != $warehouseId) {
-                        throw ValidationException::withMessages(['purchase_item_id' => 'Selected batch belongs to a different warehouse.']);
-                    }
-
-                    $batchQuantityBefore = $purchaseItem->remaining_quantity;
-                    $newBatchQuantity = $batchQuantityBefore + $quantityChange;
-
-                    if ($newBatchQuantity < 0) {
-                        throw ValidationException::withMessages(['quantity_change' => "Adjustment results in negative stock for batch #{$purchaseItem->batch_number}. Available: {$batchQuantityBefore}."]);
-                    }
-
-                    // Update batch
-                    $purchaseItem->remaining_quantity = $newBatchQuantity;
-                    $purchaseItem->save(); // Observer updates global Product stock
-
-                    // We also need to MANUALLY update the warehouse pivot, because the Observer might only update Global stock.
-                    // If PurchaseItem matches Warehouse -> Product Stock (Global) is sum of batches?
-                    // Usually: Global Stock = Sum of all Warehouse Pivot Stocks.
-                    // And Warehouse Pivot Stock = Sum of Batches in that Warehouse.
-
-                    // So we update the pivot:
-                    $product->warehouses()->updateExistingPivot($warehouseId, ['quantity' => $newWarehouseStock]);
-                } else {
-                    // 3. General Warehouse Adjustment (No specific batch)
-                    // This is risky if strict batch tracking is on, but allowed for "found" items or non-batch products.
-
-                    // Update Warehouse Pivot
-                    $product->warehouses()->updateExistingPivot($warehouseId, ['quantity' => $newWarehouseStock]);
-
-
                 }
+
+                // 3. Update warehouse stock (SSOT)
+                $product->warehouses()->updateExistingPivot($warehouseId, ['quantity' => $newWarehouseStock]);
 
                 // 4. Create Adjustment Record
                 $adjustment = StockAdjustment::create([

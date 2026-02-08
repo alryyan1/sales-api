@@ -170,7 +170,6 @@ class AddRandomStock extends Command
                         'product_id' => $product->id,
                         'batch_number' => $batchNumber,
                         'quantity' => $quantity,
-                        'remaining_quantity' => $totalSellableUnits,
                         'unit_cost' => $unitCost,
                         'total_cost' => $totalCost,
                         'cost_per_sellable_unit' => $costPerSellableUnit,
@@ -212,10 +211,11 @@ class AddRandomStock extends Command
             $purchase->stock_added_to_warehouse = true;
             $purchase->save();
 
-            // Update warehouse stock for each item (similar to PurchaseController logic)
+            // Update warehouse stock for each item (SSOT)
             foreach ($purchase->items as $item) {
                 $product = $item->product;
-                $qtyToAdd = $item->remaining_quantity; // Quantity in sellable units
+                $unitsPerStockingUnit = (int) ($product->units_per_stocking_unit ?? 1);
+                $qtyToAdd = $item->quantity * $unitsPerStockingUnit;
 
                 if ($product && $warehouseId) {
                     $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();

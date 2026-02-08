@@ -81,7 +81,6 @@ class MigrateOldPurchaseItems extends Command
                             'product_id' => $oldItem->item_id,
                             'batch_number' => $oldItem->batch,
                             'quantity' => $oldItem->quantity, // Quantity in STOCKING units
-                            'remaining_quantity' => $totalQuantityInSellableUnits, // Remaining in SELLABLE units
                             'unit_cost' => $costPerStockingUnit,
                             'cost_per_sellable_unit' => $oldItem->cost, // Old 'cost' was per sellable unit
                             'total_cost' => $oldItem->quantity * $costPerStockingUnit,
@@ -121,20 +120,22 @@ class MigrateOldPurchaseItems extends Command
             $bar2->finish();
             $this->info("\nPurchase totals updated.");
 
-            // --- Recalculate all product stocks (safer than incrementing) ---
-            $this->info("Recalculating all product stock quantities based on migrated batches...");
-            $productsToUpdate = Product::whereHas('purchaseItems')->get();
-            $bar3 = $this->output->createProgressBar($productsToUpdate->count());
+            // --- Sync product_warehouse from migrated purchase items ---
+            $this->info("Syncing product_warehouse from migrated batches...");
+            $items = \App\Models\PurchaseItem::with(['purchase', 'product'])->get();
+            $bar3 = $this->output->createProgressBar($items->count());
             $bar3->start();
-            foreach($productsToUpdate as $product) {
-                // This logic is the same as the PurchaseItemObserver
-                $totalStock = $product->purchaseItems()->sum('remaining_quantity');
-                $product->stock_quantity = $totalStock;
-                $product->saveQuietly(); // Use quietly to not trigger other events
+            foreach ($items as $item) {
+                $purchase = $item->purchase;
+                if ($purchase && $purchase->warehouse_id) {
+                    $product = $item->product;
+                    $units = (int) ($product->units_per_stocking_unit ?? 1);
+                    $product->incrementWarehouseStock($purchase->warehouse_id, $item->quantity * $units);
+                }
                 $bar3->advance();
             }
             $bar3->finish();
-            $this->info("\nProduct stock quantities updated.");
+            $this->info("\nProduct warehouse quantities synced.");
 
 
             $this->info("\nOld purchase items data migration complete!");

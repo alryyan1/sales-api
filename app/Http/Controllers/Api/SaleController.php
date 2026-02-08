@@ -42,7 +42,7 @@ class SaleController extends Controller
             // For today's sales, load items and payments and return all without pagination
             $query->with([
                 'items.product' => function ($query) {
-                    $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost']);
+                    $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost']);
                 },
                 'payments.user:id,name,username' // Load payments with user relationship for today's sales
             ]);
@@ -104,6 +104,32 @@ class SaleController extends Controller
     }
 
     /**
+     * Return all sales without pagination: by shift_id or by current date (today_only).
+     * Uses server date only; no front-end date params.
+     */
+    public function listAll(Request $request)
+    {
+        $query = Sale::with(['client:id,name', 'user:id,name', 'payments.user:id,name,username']);
+
+        if ($shiftId = $request->input('shift_id')) {
+            $query->where('shift_id', $shiftId);
+        } elseif ($request->boolean('today_only')) {
+            $query->whereDate('sale_date', Carbon::today());
+        } else {
+            return SaleResource::collection(collect());
+        }
+
+        $sales = $query->orderBy('id', 'desc')->get();
+
+        $sales->transform(function ($sale) {
+            $sale->has_returns = $sale->hasReturns();
+            return $sale;
+        });
+
+        return SaleResource::collection($sales);
+    }
+
+    /**
      * Get today's sales by created_at (for POS TodaySalesColumn)
      */
     public function getTodaySalesByCreatedAt(Request $request)
@@ -113,7 +139,7 @@ class SaleController extends Controller
             'client:id,name,email,phone,address,created_at,updated_at',
             'user:id,name',
             'items.product' => function ($query) {
-                $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost']);
+                $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost']);
             },
             'payments.user:id,name,username' // Load payments with user relationship
         ])
@@ -150,6 +176,7 @@ class SaleController extends Controller
         try {
             // Check for open shift before transaction
             $settings = (new SettingsService())->getAll();
+            
             $posMode = $settings['pos_mode'] ?? 'shift';
             // return $settings;
             $currentShift = null;
@@ -434,12 +461,11 @@ class SaleController extends Controller
 
         // 2. Process Sale Items and Stock (Total stock check, FIFO allocation or direct stock decrement)
         foreach ($mergedItems as $itemData) {
-            $product = Product::findOrFail($itemData['product_id']); // Ensure product exists
-            $requestedSellableUnits = (int) $itemData['quantity']; // Quantity customer wants, in sellable units
-            $unitSalePrice = (float) $itemData['unit_price']; // Price per sellable unit from request
-            $quantityFulfilledInSellableUnits = 0;
+            $product = Product::findOrFail($itemData['product_id']);
+            $requestedSellableUnits = (int) $itemData['quantity'];
+            $unitSalePrice = (float) $itemData['unit_price'];
 
-            // --- Total Stock Check (already done in performStockPreCheck, but double-check here) ---
+            // --- Stock check (product_warehouse SSOT) ---
             // Refresh product to get latest status (though countStock does a fresh query usually)
             $availableStock = $product->countStock($warehouseId);
 
@@ -470,120 +496,32 @@ class SaleController extends Controller
                 ]);
             }
 
-            // Fetch available batches for this product in the specified warehouse, ordered for FIFO allocation
-            // (e.g., oldest expiry first, then oldest purchase_item created_at)
-            // and lock them for update to prevent race conditions during concurrent sales.
-            $availableBatches = PurchaseItem::where('product_id', $product->id)
-                ->where('remaining_quantity', '>', 0) // remaining_quantity is in SELLABLE UNITS
+            // Stock is in product_warehouse only. Optionally pick a batch for cost/expiry reference.
+            $refBatch = PurchaseItem::where('product_id', $product->id)
                 ->whereHas('purchase', function ($q) use ($warehouseId) {
                     $q->where('warehouse_id', $warehouseId);
                 })
-                ->orderBy('expiry_date', 'asc')        // Prioritize expiring soonest
-                ->orderBy('created_at', 'asc')         // Then oldest purchase batch
-                ->lockForUpdate()                      // CRITICAL for concurrent stock updates
-                ->get();
+                ->orderBy('expiry_date', 'asc')
+                ->orderBy('created_at', 'asc')
+                ->first();
 
-            // Check if we have any batches available
-            if ($availableBatches->count() > 0) {
-                // --- Allocate from Batches (FIFO) ---
-                foreach ($availableBatches as $batch) {
-                    // If we've fulfilled the requested quantity for this sale item, stop processing batches
-                    if ($quantityFulfilledInSellableUnits >= $requestedSellableUnits) {
-                        break;
-                    }
+            $costPriceAtSale = $refBatch ? ($refBatch->cost_per_sellable_unit ?? 0) : 0;
+            $batchNumberSold = $refBatch ? $refBatch->batch_number : null;
+            $purchaseItemId = $refBatch ? $refBatch->id : null;
 
-                    // Determine how many units can be sold from this current batch
-                    $canSellFromThisBatchInSellableUnits = min(
-                        $requestedSellableUnits - $quantityFulfilledInSellableUnits, // How many more we still need to fulfill
-                        $batch->remaining_quantity                               // How many are actually left in this batch
-                    );
+            $saleHeader->items()->create([
+                'product_id' => $product->id,
+                'purchase_item_id' => $purchaseItemId,
+                'batch_number_sold' => $batchNumberSold,
+                'quantity' => $requestedSellableUnits,
+                'unit_price' => $unitSalePrice,
+                'cost_price_at_sale' => $costPriceAtSale,
+                'total_price' => $requestedSellableUnits * $unitSalePrice,
+            ]);
 
-                    if ($canSellFromThisBatchInSellableUnits > 0) {
-                        // Create the SaleItem record, linking it to the specific PurchaseItem (batch)
-                        $saleHeader->items()->create([
-                            'product_id' => $product->id,
-                            'purchase_item_id' => $batch->id, // Link to the specific batch
-                            'batch_number_sold' => $batch->batch_number, // Store batch number for easy display
-                            'quantity' => $canSellFromThisBatchInSellableUnits, // Quantity sold in SELLABLE units
-                            'unit_price' => $unitSalePrice, // Sale price per sellable unit (from request)
-                            'cost_price_at_sale' => $batch->cost_per_sellable_unit, // COGS component from the batch
-                            'total_price' => $canSellFromThisBatchInSellableUnits * $unitSalePrice,
-                        ]);
-
-                        // Decrement the remaining quantity of the batch (which is in sellable units)
-                        $batch->decrement('remaining_quantity', $canSellFromThisBatchInSellableUnits);
-                        // Refresh the batch to ensure the observer gets the latest data
-                        $batch->refresh();
-
-                        // Also decrement warehouse specific stock
-                        $product->decrementWarehouseStock($warehouseId, $canSellFromThisBatchInSellableUnits);
-
-                        // The PurchaseItemObserver is responsible for listening to this 'saved' event on PurchaseItem
-                        // and then recalculating and updating the total Product->stock_quantity (which is also in sellable units).
-                        // Refresh the product to ensure we have the latest stock_quantity after observer updates
-                        $product->refresh();
-
-                        // Update totals for the current sale
-                        $newTotalSaleAmount += $canSellFromThisBatchInSellableUnits * $unitSalePrice;
-                        $quantityFulfilledInSellableUnits += $canSellFromThisBatchInSellableUnits;
-
-                        Log::info("SaleItem created: Product ID {$product->id}, Batch ID {$batch->id}, Qty Sold: {$canSellFromThisBatchInSellableUnits}, Remaining in Batch: {$batch->fresh()->remaining_quantity}. Sale ID: {$saleHeader->id}");
-                    }
-                } // End loop through available batches
-
-                // Check if we still need to fulfill more quantity (batch allocation was insufficient)
-                if ($quantityFulfilledInSellableUnits < $requestedSellableUnits) {
-                    $remainingQuantity = $requestedSellableUnits - $quantityFulfilledInSellableUnits;
-
-                    // Create a sale item for the remaining quantity without batch tracking
-                    $saleHeader->items()->create([
-                        'product_id' => $product->id,
-                        'purchase_item_id' => null, // No batch tracking for this portion
-                        'batch_number_sold' => null, // No batch number
-                        'quantity' => $remainingQuantity, // Quantity sold in SELLABLE units
-                        'unit_price' => $unitSalePrice, // Sale price per sellable unit (from request)
-                        'cost_price_at_sale' => 0, // No cost tracking for non-batch items
-                        'total_price' => $remainingQuantity * $unitSalePrice,
-                    ]);
-
-                    // Decrement directly from product stock
-                    // Also decrement warehouse specific stock
-                    $product->decrementWarehouseStock($warehouseId, $remainingQuantity);
-
-                    // Update totals for the current sale
-                    $newTotalSaleAmount += $remainingQuantity * $unitSalePrice;
-                    $quantityFulfilledInSellableUnits += $remainingQuantity;
-
-                    Log::info("SaleItem created (no batch): Product ID {$product->id}, Qty Sold: {$remainingQuantity}, Direct stock decrement. Sale ID: {$saleHeader->id}");
-                }
-            } else {
-                // --- No batches available, decrement directly from product stock ---
-                $saleHeader->items()->create([
-                    'product_id' => $product->id,
-                    'purchase_item_id' => null, // No batch tracking
-                    'batch_number_sold' => null, // No batch number
-                    'quantity' => $requestedSellableUnits, // Quantity sold in SELLABLE units
-                    'unit_price' => $unitSalePrice, // Sale price per sellable unit (from request)
-                    'cost_price_at_sale' => 0, // No cost tracking for non-batch items
-                    'total_price' => $requestedSellableUnits * $unitSalePrice,
-                ]);
-
-                // Update totals for the current sale
-                $newTotalSaleAmount += $requestedSellableUnits * $unitSalePrice;
-                $quantityFulfilledInSellableUnits = $requestedSellableUnits;
-
-                Log::info("SaleItem created (no batch): Product ID {$product->id}, Qty Sold: {$requestedSellableUnits}, Direct stock decrement. Sale ID: {$saleHeader->id}");
-
-                // Decrement directly from product stock (RE-ADDED)
-                $product->decrementWarehouseStock($warehouseId, $requestedSellableUnits);
-            }
-
-            // Final verification that the requested quantity was fully met
-            if ($quantityFulfilledInSellableUnits < $requestedSellableUnits) {
-                Log::critical("Stock allocation discrepancy for Product ID {$product->id} on Sale ID {$saleHeader->id}. Requested: {$requestedSellableUnits}, Fulfilled: {$quantityFulfilledInSellableUnits}.");
-                throw new \Exception("Could not fulfill requested quantity for product '{$product->name}' due to an unexpected stock allocation issue. Please try again.");
-            }
-        } // End loop through $validatedData['items'] (main sale items from request)
+            $product->decrementWarehouseStock($warehouseId, $requestedSellableUnits);
+            $newTotalSaleAmount += $requestedSellableUnits * $unitSalePrice;
+        } // End loop through merged items
 
     }
     private function createPaymentRecords(array $validatedData, Sale $saleHeader, Request $request)
@@ -614,7 +552,7 @@ class SaleController extends Controller
             'items',
             'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
             'items.product.sellableUnit:id,name',
-            'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+            'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
             'payments.user:id,name,username' // Load user relationship for payments to get user_name
         ]);
@@ -646,7 +584,7 @@ class SaleController extends Controller
             'items',
             'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
             'items.product.sellableUnit:id,name',
-            'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+            'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date'
         ]);
         return response()->json(['sale' => new SaleResource($sale->fresh())]);
@@ -675,18 +613,8 @@ class SaleController extends Controller
                     $product = $saleItem->product;
                     $quantity = $saleItem->quantity;
 
-                    // If the sale item has a specific batch, return to that batch
-                    if ($saleItem->purchase_item_id) {
-                        $purchaseItem = PurchaseItem::find($saleItem->purchase_item_id);
-                        if ($purchaseItem) {
-                            $purchaseItem->increment('remaining_quantity', $quantity);
-                            // PurchaseItemObserver will update Product->stock_quantity
-                        } else {
-                            // Fallback: increment total product stock
-                            $product->incrementWarehouseStock($sale->warehouse_id, $quantity);
-                        }
-                    } else {
-                        // No specific batch, increment total product stock
+                    // Return stock to warehouse (SSOT)
+                    if ($sale->warehouse_id) {
                         $product->incrementWarehouseStock($sale->warehouse_id, $quantity);
                     }
                 }
@@ -762,7 +690,7 @@ class SaleController extends Controller
                 'items',
                 'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
                 'items.product.sellableUnit:id,name',
-                'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+                'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'payments.user:id,name,username' // Load user relationship for payments
             ]);
 
@@ -804,7 +732,7 @@ class SaleController extends Controller
                 'items',
                 'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
                 'items.product.sellableUnit:id,name',
-                'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+                'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'payments.user:id,name,username' // Load user relationship for payments
             ]);
 
@@ -912,7 +840,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
-                'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+                'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
                 'payments.user:id,name'
             ]);
@@ -995,154 +923,61 @@ class SaleController extends Controller
                     ];
                 }
 
-                // Check if product has any stock
-                if ($product->stock_quantity <= 0) {
+                $warehouseId = $sale->warehouse_id ?? 1;
+                $availableInWarehouse = $product->countStock($warehouseId);
+                $currentQuantityInThisSale = $sale->items()->where('product_id', $product->id)->sum('quantity');
+                $availableForThisAdd = $availableInWarehouse - $currentQuantityInThisSale;
+
+                if ($availableForThisAdd <= 0) {
                     throw ValidationException::withMessages([
-                        'product_id' => "Product '{$product->name}' is out of stock. Available quantity: 0"
+                        'product_id' => "Product '{$product->name}' is out of stock in warehouse. Available: 0"
+                    ]);
+                }
+                if ($validatedData['quantity'] > $availableForThisAdd) {
+                    throw ValidationException::withMessages([
+                        'quantity' => "Insufficient stock. Available: {$availableForThisAdd}, Requested: {$validatedData['quantity']}"
                     ]);
                 }
 
-                // Check stock availability - consider current sale items
-                $currentQuantityInThisSale = $sale->items()
-                    ->where('product_id', $product->id)
-                    ->sum('quantity');
-                $totalQuantityAfterAdd = $currentQuantityInThisSale + $validatedData['quantity'];
-                $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
-
-                if ($totalQuantityAfterAdd > $originalStockQuantity) {
-                    throw ValidationException::withMessages([
-                        'quantity' => "Insufficient stock. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterAdd}"
-                    ]);
-                }
-
-                // Determine unit price (fallback to product defaults if request sent 0)
                 $resolvedUnitPrice = (float) ($validatedData['unit_price'] ?? 0);
                 if ($resolvedUnitPrice <= 0) {
-                    // Use last sale price if > 0
-                    if ($product->last_sale_price_per_sellable_unit > 0) {
-                        $resolvedUnitPrice = (float) $product->last_sale_price_per_sellable_unit;
-                    }
-                    // Otherwise use suggested price if > 0
-                    elseif ($product->suggested_sale_price_per_sellable_unit > 0) {
-                        $resolvedUnitPrice = (float) $product->suggested_sale_price_per_sellable_unit;
-                    }
-                    // Otherwise try to find a price from available batches
-                    else {
-                        $firstBatch = $product->purchaseItemsWithStock()->where('remaining_quantity', '>', 0)->orderBy('expiry_date')->first();
-                        if ($firstBatch && $firstBatch->sale_price > 0) {
-                            $resolvedUnitPrice = (float) $firstBatch->sale_price;
-                        } else {
-                            $resolvedUnitPrice = 0;
-                        }
-                    }
+                    $resolvedUnitPrice = $product->last_sale_price_per_sellable_unit > 0
+                        ? (float) $product->last_sale_price_per_sellable_unit
+                        : 0;
                 }
 
-                // Check if specific batch is selected
-                if (isset($validatedData['purchase_item_id']) && $validatedData['purchase_item_id']) {
-                    $selectedBatch = PurchaseItem::where('id', $validatedData['purchase_item_id'])
+                // Optional: use purchase_item_id for cost/batch reference only
+                $refBatch = null;
+                if (!empty($validatedData['purchase_item_id'])) {
+                    $refBatch = PurchaseItem::where('id', $validatedData['purchase_item_id'])
                         ->where('product_id', $product->id)
-                        ->where('remaining_quantity', '>', 0)
+                        ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
                         ->first();
-
-                    if (!$selectedBatch) {
-                        throw ValidationException::withMessages([
-                            'purchase_item_id' => 'Selected batch not found or has insufficient stock.'
-                        ]);
-                    }
-
-                    if ($selectedBatch->remaining_quantity < $validatedData['quantity']) {
-                        throw ValidationException::withMessages([
-                            'purchase_item_id' => "Insufficient stock in selected batch. Available: {$selectedBatch->remaining_quantity}, requested: {$validatedData['quantity']}"
-                        ]);
-                    }
-
-                    // Create sale item for the selected batch
-                    $saleItem = $sale->items()->create([
-                        'product_id' => $product->id,
-                        'purchase_item_id' => $selectedBatch->id,
-                        'batch_number_sold' => $selectedBatch->batch_number,
-                        'quantity' => $validatedData['quantity'],
-                        'unit_price' => $resolvedUnitPrice,
-                        'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
-                        'cost_price_at_sale' => $selectedBatch->unit_cost,
-                    ]);
-
-                    $saleItems[] = $saleItem;
-                    $totalCost = $validatedData['quantity'] * $selectedBatch->unit_cost;
-
-                    // Update batch remaining quantity
-                    $selectedBatch->remaining_quantity -= $validatedData['quantity'];
-                    $selectedBatch->save();
-
-                    $remainingQuantity = 0; // All quantity allocated from selected batch
-                } else {
-                    // Auto-allocate from available batches (FIFO)
-                    $availableBatches = PurchaseItem::where('product_id', $product->id)
-                        ->where('remaining_quantity', '>', 0)
-                        ->whereHas('purchase', function ($q) use ($sale) {
-                            $q->where('warehouse_id', $sale->warehouse_id ?? 1); // Filter batches by warehouse
-                        })
+                }
+                if (!$refBatch) {
+                    $refBatch = PurchaseItem::where('product_id', $product->id)
+                        ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
                         ->orderBy('expiry_date', 'asc')
                         ->orderBy('created_at', 'asc')
-                        ->get();
-
-                    $remainingQuantity = $validatedData['quantity'];
-                    $totalCost = 0;
-
-                    // Allocate from batches first
-                    foreach ($availableBatches as $batch) {
-                        if ($remainingQuantity <= 0)
-                            break;
-
-                        $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
-
-                        // Create sale item for this batch
-                        $saleItem = $sale->items()->create([
-                            'product_id' => $product->id,
-                            'purchase_item_id' => $batch->id,
-                            'batch_number_sold' => $batch->batch_number,
-                            'quantity' => $canSellFromThisBatch,
-                            'unit_price' => $resolvedUnitPrice,
-                            'total_price' => $canSellFromThisBatch * $resolvedUnitPrice,
-                            'cost_price_at_sale' => $batch->unit_cost,
-                        ]);
-
-                        $saleItems[] = $saleItem;
-                        $totalCost += $canSellFromThisBatch * $batch->unit_cost;
-                        $remainingQuantity -= $canSellFromThisBatch;
-
-                        // Update batch remaining quantity
-                        $batch->remaining_quantity -= $canSellFromThisBatch;
-                        $batch->save();
-                    }
+                        ->first();
                 }
 
-                // If there's still remaining quantity, create item without batch
-                if ($remainingQuantity > 0) {
-                    $saleItem = $sale->items()->create([
-                        'product_id' => $product->id,
-                        'purchase_item_id' => null,
-                        'batch_number_sold' => null,
-                        'quantity' => $remainingQuantity,
-                        'unit_price' => $resolvedUnitPrice,
-                        'total_price' => $remainingQuantity * $resolvedUnitPrice,
-                        'cost_price_at_sale' => 0,
-                    ]);
-                    $saleItems[] = $saleItem;
-                }
+                $costPriceAtSale = $refBatch ? (float) ($refBatch->cost_per_sellable_unit ?? $refBatch->unit_cost ?? 0) : 0;
+                $batchNumberSold = $refBatch ? $refBatch->batch_number : null;
+                $purchaseItemId = $refBatch ? $refBatch->id : null;
 
+                $saleItem = $sale->items()->create([
+                    'product_id' => $product->id,
+                    'purchase_item_id' => $purchaseItemId,
+                    'batch_number_sold' => $batchNumberSold,
+                    'quantity' => $validatedData['quantity'],
+                    'unit_price' => $resolvedUnitPrice,
+                    'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
+                    'cost_price_at_sale' => $costPriceAtSale,
+                ]);
+                $saleItems = [$saleItem];
 
-
-                // UPDATE WAREHOUSE STOCK
-                $warehouseId = $sale->warehouse_id;
-                if ($warehouseId) {
-                    $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
-                    if ($pivot) {
-                        $product->warehouses()->updateExistingPivot($warehouseId, [
-                            'quantity' => max(0, $pivot->pivot->quantity - $validatedData['quantity'])
-                        ]);
-                    }
-                }
+                $product->decrementWarehouseStock($warehouseId, $validatedData['quantity']);
 
                 $newTotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');
@@ -1159,8 +994,8 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
-                'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
+                'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
             ]);
@@ -1222,118 +1057,46 @@ class SaleController extends Controller
                 $newQuantity = $validatedData['quantity'];
                 $quantityDifference = $newQuantity - $oldQuantity;
 
-                // If increasing quantity, check stock availability
+                $warehouseId = $sale->warehouse_id ?? 1;
                 if ($quantityDifference > 0) {
-                    if ($batch) {
-                        // Lock the batch row to ensure consistent check/update
-                        $lockedBatch = PurchaseItem::whereKey($batch->id)->lockForUpdate()->first();
-                        if (!$lockedBatch) {
-                            throw ValidationException::withMessages([
-                                'quantity' => 'Associated batch not found.'
-                            ]);
-                        }
-                        // Must have enough remaining in this specific batch
-                        if ($lockedBatch->remaining_quantity < $quantityDifference) {
-                            throw ValidationException::withMessages([
-                                'quantity' => "Insufficient batch stock. Batch '{$lockedBatch->batch_number}' available: {$lockedBatch->remaining_quantity}, requested additional: {$quantityDifference}"
-                            ]);
-                        }
-                    } else {
-                        // No batch: rely on product total stock
-                        if ($product->stock_quantity < $quantityDifference) {
-                            throw ValidationException::withMessages([
-                                'quantity' => "Insufficient stock for '{$product->name}'. Available: {$product->stock_quantity}, requested additional: {$quantityDifference}"
-                            ]);
-                        }
+                    $availableInWarehouse = $product->countStock($warehouseId);
+                    $currentInOtherItems = $sale->items()
+                        ->where('product_id', $product->id)
+                        ->where('id', '!=', $saleItem->id)
+                        ->sum('quantity');
+                    $availableForThisItem = $availableInWarehouse - $currentInOtherItems;
+                    if ($availableForThisItem < $newQuantity) {
+                        throw ValidationException::withMessages([
+                            'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested: {$newQuantity}"
+                        ]);
                     }
                 }
 
-                // Handle stock changes first (so observers update product totals where applicable)
                 if ($quantityDifference !== 0) {
-                    \Log::info('updateSaleItem: handling stock change', ['diff' => $quantityDifference, 'batch_id' => $batch ? $batch->id : 'none']);
-                    if ($batch) {
-                        // Adjust the specific batch (lock again to be safe)
-                        $lockedBatch = PurchaseItem::whereKey($batch->id)->lockForUpdate()->first();
-
-                        // Safety check if batch is missing
-                        if (!$lockedBatch) {
-                            \Log::error('updateSaleItem: batch not found', ['batch_id' => $batch->id]);
-                            throw ValidationException::withMessages([
-                                'quantity' => 'Associated batch not found during update.'
-                            ]);
-                        }
-
-                        if ($quantityDifference > 0) {
-                            $lockedBatch->remaining_quantity -= $quantityDifference;
-                        } else {
-                            $lockedBatch->remaining_quantity += abs($quantityDifference);
-                        }
-                        $lockedBatch->save();
-                        \Log::info('updateSaleItem: batch updated', ['new_remaining' => $lockedBatch->remaining_quantity]);
-
-                        // FIX: Also update warehouse stock when batch is used (SSOT)
-                        if ($quantityDifference > 0) {
-                            $product->decrementWarehouseStock($sale->warehouse_id, $quantityDifference);
-                        } else {
-                            $product->incrementWarehouseStock($sale->warehouse_id, abs($quantityDifference));
-                        }
-                        \Log::info('updateSaleItem: warehouse stock updated via decrement/increment');
+                    if ($quantityDifference > 0) {
+                        $product->decrementWarehouseStock($warehouseId, $quantityDifference);
                     } else {
-                        // No batch tracking: adjust product stock directly
-                        if ($quantityDifference > 0) {
-                            $product->decrementWarehouseStock($sale->warehouse_id, $quantityDifference);
-                        } else {
-                            $product->incrementWarehouseStock($sale->warehouse_id, abs($quantityDifference));
-                        }
-                        \Log::info('updateSaleItem: product stock updated directly');
+                        $product->incrementWarehouseStock($warehouseId, abs($quantityDifference));
                     }
                 }
 
-                // Handle batch change if provided
-                if (isset($validatedData['purchase_item_id'])) {
+                // Optional: update batch reference (cost/expiry only; no batch quantity)
+                if (array_key_exists('purchase_item_id', $validatedData)) {
                     $newBatchId = $validatedData['purchase_item_id'];
-                    $oldBatchId = $saleItem->purchase_item_id;
-
-                    // If batch is changing, we need to handle stock adjustments
-                    if ($oldBatchId !== $newBatchId) {
-                        \Log::info('updateSaleItem: changing batch', ['old' => $oldBatchId, 'new' => $newBatchId]);
-                        // Return stock to old batch if it exists
-                        if ($oldBatchId && $batch) {
-                            $oldBatch = PurchaseItem::whereKey($oldBatchId)->lockForUpdate()->first();
-                            if ($oldBatch) {
-                                $oldBatch->remaining_quantity += $oldQuantity;
-                                $oldBatch->save();
-                            }
-                        }
-
-                        // Deduct stock from new batch if provided
-                        if ($newBatchId) {
-                            $newBatch = PurchaseItem::whereKey($newBatchId)->lockForUpdate()->first();
-                            if (!$newBatch) {
-                                throw ValidationException::withMessages([
-                                    'purchase_item_id' => 'Selected batch not found.'
-                                ]);
-                            }
-
-                            if ($newBatch->remaining_quantity < $newQuantity) {
-                                throw ValidationException::withMessages([
-                                    'purchase_item_id' => "Insufficient stock in selected batch. Available: {$newBatch->remaining_quantity}, requested: {$newQuantity}"
-                                ]);
-                            }
-
-                            $newBatch->remaining_quantity -= $newQuantity;
-                            $newBatch->save();
-
-                            // Update batch information
-                            $saleItem->purchase_item_id = $newBatchId;
+                    if ($newBatchId) {
+                        $newBatch = PurchaseItem::whereKey($newBatchId)
+                            ->where('product_id', $product->id)
+                            ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
+                            ->first();
+                        if ($newBatch) {
+                            $saleItem->purchase_item_id = $newBatch->id;
                             $saleItem->batch_number_sold = $newBatch->batch_number;
-                        } else {
-                            // No batch selected, clear batch information
-                            $saleItem->purchase_item_id = null;
-                            $saleItem->batch_number_sold = null;
+                            $saleItem->cost_price_at_sale = $newBatch->cost_per_sellable_unit ?? $newBatch->unit_cost ?? 0;
                         }
-
-                        // Note: Batch change logic is correct
+                    } else {
+                        $saleItem->purchase_item_id = null;
+                        $saleItem->batch_number_sold = null;
+                        $saleItem->cost_price_at_sale = 0;
                     }
                 }
 
@@ -1361,7 +1124,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
-                'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+                'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
             ]);
@@ -1403,22 +1166,9 @@ class SaleController extends Controller
                 $product = $saleItem->product;
                 $purchaseItem = $saleItem->purchaseItemBatch;
 
-                // Return quantity to inventory
-                if ($purchaseItem) {
-                    // Return to the specific batch
-                    $purchaseItem->remaining_quantity += $saleItem->quantity;
-                    $purchaseItem->save();
-
-                    Log::info("Returned {$saleItem->quantity} units to batch {$purchaseItem->batch_number} for product " . ($product ? $product->name : 'Unknown'));
-                } else {
-                    // If no specific batch, we need to handle this case
-                    // For now, we'll log a warning
-                    Log::warning("Sale item {$saleItem->id} has no associated purchase item batch");
-                }
-
-                // Update product stock quantity (this will be handled by the observer)
-                // The PurchaseItemObserver will automatically update product.stock_quantity
-                $product->incrementWarehouseStock($sale->warehouse_id, $saleItem->quantity);
+                // Return quantity to warehouse (SSOT)
+                $warehouseId = $sale->warehouse_id ?? 1;
+                $product->incrementWarehouseStock($warehouseId, $saleItem->quantity);
 
                 // Delete the sale item first
                 $deletedQuantity = $saleItem->quantity;
@@ -1988,90 +1738,49 @@ class SaleController extends Controller
                             continue;
                         }
 
-                        // Check if product has any stock
-                        if ($product->stock_quantity <= 0) {
-                            $errors[] = "Product '{$product->name}' is out of stock. Available quantity: 0";
+                        $warehouseId = $sale->warehouse_id ?? 1;
+                        $availableInWarehouse = $product->countStock($warehouseId);
+                        $currentQuantityInThisSale = $sale->items()->where('product_id', $product->id)->sum('quantity');
+                        $availableForThisAdd = $availableInWarehouse - $currentQuantityInThisSale;
+
+                        if ($availableForThisAdd <= 0) {
+                            $errors[] = "Product '{$product->name}' is out of stock in warehouse. Available: 0";
+                            continue;
+                        }
+                        if ($itemData['quantity'] > $availableForThisAdd) {
+                            $errors[] = "Insufficient stock for '{$product->name}'. Available: {$availableForThisAdd}, Requested: {$itemData['quantity']}";
                             continue;
                         }
 
-                        // Check stock availability - consider current sale items
-                        $currentQuantityInThisSale = $sale->items()
-                            ->where('product_id', $product->id)
-                            ->sum('quantity');
-                        $totalQuantityAfterAdd = $currentQuantityInThisSale + $itemData['quantity'];
-                        $originalStockQuantity = $product->stock_quantity + $currentQuantityInThisSale;
-
-                        if ($totalQuantityAfterAdd > $originalStockQuantity) {
-                            $errors[] = "Insufficient stock for '{$product->name}'. Available: {$originalStockQuantity}, Requested total: {$totalQuantityAfterAdd}";
-                            continue;
-                        }
-
-                        // Resolve unit price with backend fallback if 0/empty comes from client
                         $resolvedUnitPrice = (float) ($itemData['unit_price'] ?? 0);
                         if ($resolvedUnitPrice <= 0) {
-                            $fallback = $product->last_sale_price_per_sellable_unit
-                                ?? $product->suggested_sale_price_per_sellable_unit
-                                ?? 0;
-                            $resolvedUnitPrice = (float) $fallback;
+                            $resolvedUnitPrice = $product->last_sale_price_per_sellable_unit > 0
+                                ? (float) $product->last_sale_price_per_sellable_unit
+                                : 0;
                         }
 
-                        // Find available batches (FIFO)
-                        $availableBatches = PurchaseItem::where('product_id', $product->id)
-                            ->where('remaining_quantity', '>', 0)
+                        $refBatch = PurchaseItem::where('product_id', $product->id)
+                            ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
                             ->orderBy('expiry_date', 'asc')
                             ->orderBy('created_at', 'asc')
-                            ->get();
+                            ->first();
+                        $costPriceAtSale = $refBatch ? (float) ($refBatch->cost_per_sellable_unit ?? $refBatch->unit_cost ?? 0) : 0;
+                        $batchNumberSold = $refBatch ? $refBatch->batch_number : null;
+                        $purchaseItemId = $refBatch ? $refBatch->id : null;
 
-                        $remainingQuantity = $itemData['quantity'];
-                        $saleItems = [];
-
-                        // Allocate from batches first
-                        foreach ($availableBatches as $batch) {
-                            if ($remainingQuantity <= 0)
-                                break;
-
-                            $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
-
-                            // Create sale item for this batch
-                            $saleItem = $sale->items()->create([
-                                'product_id' => $product->id,
-                                'purchase_item_id' => $batch->id,
-                                'batch_number_sold' => $batch->batch_number,
-                                'quantity' => $canSellFromThisBatch,
-                                'unit_price' => $resolvedUnitPrice,
-                                'total_price' => $canSellFromThisBatch * $resolvedUnitPrice,
-                                'cost_price_at_sale' => $batch->unit_cost,
-                            ]);
-
-                            $saleItems[] = $saleItem;
-                            $remainingQuantity -= $canSellFromThisBatch;
-
-                            // Update batch remaining quantity
-                            $batch->remaining_quantity -= $canSellFromThisBatch;
-                            $batch->save();
-                        }
-
-                        // If there's still remaining quantity, create item without batch
-                        if ($remainingQuantity > 0) {
-                            $saleItem = $sale->items()->create([
-                                'product_id' => $product->id,
-                                'purchase_item_id' => null,
-                                'batch_number_sold' => null,
-                                'quantity' => $remainingQuantity,
-                                'unit_price' => $resolvedUnitPrice,
-                                'total_price' => $remainingQuantity * $resolvedUnitPrice,
-                                'cost_price_at_sale' => 0,
-                            ]);
-                            $saleItems[] = $saleItem;
-                        }
-
-
-
-                        $addedItems = array_merge($addedItems, $saleItems);
+                        $saleItem = $sale->items()->create([
+                            'product_id' => $product->id,
+                            'purchase_item_id' => $purchaseItemId,
+                            'batch_number_sold' => $batchNumberSold,
+                            'quantity' => $itemData['quantity'],
+                            'unit_price' => $resolvedUnitPrice,
+                            'total_price' => $itemData['quantity'] * $resolvedUnitPrice,
+                            'cost_price_at_sale' => $costPriceAtSale,
+                        ]);
+                        $addedItems[] = $saleItem;
                         $totalAdded++;
 
-                        // Update product stock (RE-ADDED)
-                        $product->decrementWarehouseStock($sale->warehouse_id, $itemData['quantity']);
+                        $product->decrementWarehouseStock($warehouseId, $itemData['quantity']);
                     } catch (\Exception $e) {
                         $errors[] = "Failed to add product at index {$index}: " . $e->getMessage();
                     }
@@ -2095,7 +1804,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
-                'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
+                'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
             ]);

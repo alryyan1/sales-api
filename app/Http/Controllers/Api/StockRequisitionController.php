@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests; // For policies
+use Carbon\Carbon;
 
 class StockRequisitionController extends Controller
 {
@@ -193,13 +194,22 @@ class StockRequisitionController extends Controller
                 }
 
                 if (empty($procItemData['issued_from_purchase_item_id'])) {
-                    $itemStockErrors["items.{$index}.issued_from_purchase_item_id"] = ["A batch must be selected to issue stock."];
+                    $itemStockErrors["items.{$index}.issued_from_purchase_item_id"] = ["A batch must be selected to issue stock (for warehouse reference)."];
                 } else {
-                    $batch = PurchaseItem::find($procItemData['issued_from_purchase_item_id']);
+                    $batch = PurchaseItem::with('purchase')->find($procItemData['issued_from_purchase_item_id']);
                     if (!$batch || $batch->product_id !== $originalReqItem->product_id) {
                         $itemStockErrors["items.{$index}.issued_from_purchase_item_id"] = ["Invalid batch selected for product."];
-                    } elseif ($batch->remaining_quantity < $procItemData['issued_quantity']) {
-                        $itemStockErrors["items.{$index}.issued_quantity"] = ["Insufficient stock in selected batch '{$batch->batch_number}'. Available: {$batch->remaining_quantity}."];
+                    } else {
+                        $warehouseId = $batch->purchase->warehouse_id ?? null;
+                        if (!$warehouseId) {
+                            $itemStockErrors["items.{$index}.issued_from_purchase_item_id"] = ["Selected batch has no warehouse."];
+                        } else {
+                            $product = Product::find($originalReqItem->product_id);
+                            $available = $product ? $product->countStock($warehouseId) : 0;
+                            if ($available < $procItemData['issued_quantity']) {
+                                $itemStockErrors["items.{$index}.issued_quantity"] = ["Insufficient stock in warehouse for '{$originalReqItem->product->name}'. Available: {$available}, requested: {$procItemData['issued_quantity']}."];
+                            }
+                        }
                     }
                 }
             }
@@ -222,9 +232,17 @@ class StockRequisitionController extends Controller
                     $itemToUpdate->item_notes = $procItemData['item_notes'] ?? $itemToUpdate->item_notes; // Keep old if not provided
 
                     if ($procItemData['status'] === 'issued' && $procItemData['issued_quantity'] > 0) {
-                        $batch = PurchaseItem::lockForUpdate()->find($procItemData['issued_from_purchase_item_id']);
-                        if (!$batch || $batch->remaining_quantity < $procItemData['issued_quantity']) {
-                            // This check is also done above, but crucial to have inside transaction with lock
+                        $batch = PurchaseItem::with('purchase')->find($procItemData['issued_from_purchase_item_id']);
+                        if (!$batch || $batch->product_id !== $itemToUpdate->product_id) {
+                            throw ValidationException::withMessages(["items" => ["Invalid or missing batch for an issued item."]]);
+                        }
+                        $warehouseId = $batch->purchase->warehouse_id ?? null;
+                        if (!$warehouseId) {
+                            throw ValidationException::withMessages(["items" => ["Selected batch has no warehouse."]]);
+                        }
+                        $product = Product::find($itemToUpdate->product_id);
+                        $available = $product ? $product->countStock($warehouseId) : 0;
+                        if ($available < $procItemData['issued_quantity']) {
                             throw ValidationException::withMessages(["items" => ["Stock became unavailable for an item during processing."]]);
                         }
 
@@ -232,11 +250,8 @@ class StockRequisitionController extends Controller
                         $itemToUpdate->issued_from_purchase_item_id = $batch->id;
                         $itemToUpdate->issued_batch_number = $batch->batch_number;
 
-                        // Deduct stock from the batch
-                        $batch->decrement('remaining_quantity', $procItemData['issued_quantity']);
-                        // PurchaseItemObserver will update Product->stock_quantity
-                        Log::info("Stock requisition {$stockRequisition->id}, Item {$itemToUpdate->id}: Issued {$itemToUpdate->issued_quantity} of Product {$itemToUpdate->product_id} from Batch {$batch->id} ({$batch->batch_number}).");
-
+                        $product->decrementWarehouseStock($warehouseId, $procItemData['issued_quantity']);
+                        Log::info("Stock requisition {$stockRequisition->id}, Item {$itemToUpdate->id}: Issued {$itemToUpdate->issued_quantity} of Product {$itemToUpdate->product_id} from warehouse {$warehouseId} (batch ref: {$batch->batch_number}).");
                     } elseif ($procItemData['status'] === 'rejected_item') {
                         // If an item was previously issued and now rejected, stock should be reversed.
                         // This part is complex if allowing re-processing. For now, assume initial processing.

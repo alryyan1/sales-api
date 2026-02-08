@@ -89,7 +89,6 @@ class PurchaseStatusStockTest extends TestCase
             'purchase_id' => $purchase->id,
             'product_id' => $this->product->id,
             'quantity' => 5, // 5 Boxes
-            'remaining_quantity' => 50, // 50 Items (Sellable)
             'unit_cost' => 100,
             'total_cost' => 500,
             'sale_price' => 20
@@ -130,7 +129,6 @@ class PurchaseStatusStockTest extends TestCase
             'purchase_id' => $purchase->id,
             'product_id' => $this->product->id,
             'quantity' => 5, // 5 Boxes
-            'remaining_quantity' => 50, // 50 Items
             'unit_cost' => 100,
             'total_cost' => 500,
             'sale_price' => 20
@@ -173,7 +171,6 @@ class PurchaseStatusStockTest extends TestCase
             'purchase_id' => $purchase->id,
             'product_id' => $this->product->id,
             'quantity' => 5,
-            'remaining_quantity' => 50,
             'unit_cost' => 100,
             'total_cost' => 500,
             'sale_price' => 20

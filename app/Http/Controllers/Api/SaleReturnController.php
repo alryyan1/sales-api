@@ -169,15 +169,7 @@ class SaleReturnController extends Controller
                             Log::warning("SaleReturn: Original sale #{$originalSale->id} has no warehouse_id. Could not restore stock to a specific warehouse.");
                         }
 
-                        // 2. Update Batch Stock (PurchaseItem) - For FIFO/Expiry Management
-                        if ($returnToBatchId) {
-                            $batchToReturnTo = PurchaseItem::lockForUpdate()->find($returnToBatchId);
-                            if ($batchToReturnTo) {
-                                $batchToReturnTo->increment('remaining_quantity', $quantityReturned);
-                            } else {
-                                Log::warning("SaleReturn: Batch ID {$returnToBatchId} not found to return stock for product {$product->id}.");
-                            }
-                        }
+                        // Batch reference (return_to_purchase_item_id) kept for reporting only; stock SSOT is product_warehouse.
                     }
                 }
 

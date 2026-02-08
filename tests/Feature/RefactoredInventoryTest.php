@@ -68,15 +68,11 @@ class RefactoredInventoryTest extends TestCase
         $batch1 = $purchase1->items()->create([
             'product_id' => $product->id,
             'quantity' => 10,
-            'remaining_quantity' => 10, // Explicitly set remaining
             'unit_cost' => 50,
             'unit_price' => 100,
             'quantity_sold' => 0
         ]);
-        // Trigger observer manually if needed, but 'create' should handle it if attached. 
-        // Our PurchaseItemObserver logic: "created" or "updated" -> updateProductStock
-        // Note: Observer triggers on 'saved' often.
-        // Let's verify warehouse quantity increased.
+        $product->incrementWarehouseStock($warehouse->id, 10);
 
         // Batch 2: 10 units @ $55
         $purchase2 = Purchase::create([
@@ -89,13 +85,13 @@ class RefactoredInventoryTest extends TestCase
         $batch2 = $purchase2->items()->create([
             'product_id' => $product->id,
             'quantity' => 10,
-            'remaining_quantity' => 10,
             'unit_cost' => 55,
             'unit_price' => 100,
             'quantity_sold' => 0
         ]);
+        $product->incrementWarehouseStock($warehouse->id, 10);
 
-        // Refresh product to check total stock
+        // Refresh product to check total stock (SSOT: product_warehouse)
         $this->assertEquals(20, $product->fresh()->total_stock, 'Total stock should be 20 after purchases.');
         $this->assertEquals(20, $product->getWarehouseStock($warehouse->id), 'Warehouse stock should be 20.');
 

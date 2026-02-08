@@ -234,37 +234,34 @@ class PurchaseController extends Controller
 
                 $calculatedTotalAmount = 0;
 
-                // 2. Loop through items, create PurchaseItem, and set remaining_quantity
+                // 2. Loop through items, create PurchaseItem (stock is in product_warehouse only)
                 if (!empty($validatedData['items'])) {
                     foreach ($validatedData['items'] as $itemData) {
-                        $product = Product::findOrFail($itemData['product_id']); // Load the product
+                        $product = Product::findOrFail($itemData['product_id']);
                         $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
 
                         $quantityInStockingUnits = $itemData['quantity'];
                         $unitCostPerStockingUnit = $itemData['unit_cost'];
                         $totalCostForStockingUnits = $quantityInStockingUnits * $unitCostPerStockingUnit;
 
-                        // Calculate values in sellable units
                         $totalSellableUnitsPurchased = $quantityInStockingUnits * $unitsPerStockingUnit;
                         $costPerSellableUnit = ($unitsPerStockingUnit > 0) ? ($unitCostPerStockingUnit / $unitsPerStockingUnit) : 0;
 
-                        $calculatedTotalAmount += $totalCostForStockingUnits; // Overall purchase total
+                        $calculatedTotalAmount += $totalCostForStockingUnits;
 
                         $purchase->items()->create([
                             'product_id' => $product->id,
                             'batch_number' => $itemData['batch_number'] ?? null,
-                            'quantity' => $quantityInStockingUnits,          // Store original purchased qty in stocking units
-                            'remaining_quantity' => $totalSellableUnitsPurchased, // Store remaining in SELLABLE units
-                            'unit_cost' => $unitCostPerStockingUnit,        // Store cost per STOCKING unit
-                            'cost_per_sellable_unit' => $costPerSellableUnit, // Store cost per SELLABLE unit
-                            'total_cost' => $totalCostForStockingUnits,     // Total cost for this line
-                            'sale_price' => $itemData['sale_price'], // Required intended sale price per SELLABLE UNIT
+                            'quantity' => $quantityInStockingUnits,
+                            'unit_cost' => $unitCostPerStockingUnit,
+                            'cost_per_sellable_unit' => $costPerSellableUnit,
+                            'total_cost' => $totalCostForStockingUnits,
+                            'sale_price' => $itemData['sale_price'],
                             'sale_price_stocking_unit' => $itemData['sale_price_stocking_unit'] ?? null,
                             'expiry_date' => $itemData['expiry_date'] ?? null,
                         ]);
-                        // Product.stock_quantity (total sellable units) is updated by PurchaseItemObserver
 
-                        // UPDATE WAREHOUSE STOCK
+                        // UPDATE WAREHOUSE STOCK (SSOT)
                         // We must also update the product_warehouse pivot table to reflect this new stock
                         $warehouseId = $purchase->warehouse_id;
                         if ($warehouseId && $validatedData['status'] === 'received') {
@@ -412,7 +409,8 @@ class PurchaseController extends Controller
                 foreach ($purchase->items as $item) {
                     $product = $item->product;
                     $warehouseId = $purchase->warehouse_id;
-                    $qtyToAdd = $item->remaining_quantity; // Use remaining_quantity = original sellable qty
+                    $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
+                    $qtyToAdd = $item->quantity * $unitsPerStockingUnit; // Original sellable qty
 
                     if ($product && $warehouseId) {
                         $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
@@ -443,23 +441,8 @@ class PurchaseController extends Controller
                 foreach ($purchase->items as $item) {
                     $product = $item->product;
                     $warehouseId = $purchase->warehouse_id;
-                    $qtyToRemove = $item->remaining_quantity;
-
-                    // If item was sold, remaining_quantity < original. 
-                    // Technically we should remove what we ADDED (which is original).
-                    // But if we remove original, and user sold some, stock goes negative. 
-
-                    // BETTER LOGIC: If we un-receive, we should probably ensure no sales happened.
-                    // But for simple start:
-                    // We deduct the *current* remaining quantity of the batch? 
-                    // No, that leaves 'ghost' stock from sales.
-
-                    // Correct Reversal: Deduct the AMOUNT we added originally.
-                    // If that results in negative stock, so be it (user oversight).
-                    // However, we need to know original add amount.
-                    // The item->quantity is stocking units. 
                     $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
-                    $originalSellableQty = $item->quantity * $unitsPerStockingUnit;
+                    $originalSellableQty = $item->quantity * $unitsPerStockingUnit; // Revert what we added
 
                     if ($product && $warehouseId) {
                         $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
@@ -614,11 +597,9 @@ class PurchaseController extends Controller
                     'sale_price' => $validatedData['sale_price'],
                     'sale_price_stocking_unit' => $validatedData['sale_price_stocking_unit'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
-                    // Remaining must be in SELLABLE units: stocking qty * units_per_stocking_unit
-                    'remaining_quantity' => $totalSellableUnitsPurchased,
                 ]);
 
-                // UPDATE WAREHOUSE STOCK
+                // UPDATE WAREHOUSE STOCK (SSOT)
                 $warehouseId = $purchase->warehouse_id;
                 if ($warehouseId && $purchase->status === 'received') {
                     $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
@@ -678,16 +659,12 @@ class PurchaseController extends Controller
 
         try {
             DB::transaction(function () use ($purchase, $purchaseItem, $validatedData) {
-                // Calculate the difference in quantity for stock adjustment
-                $quantityDifference = (int)$validatedData['quantity'] - (int)$purchaseItem->quantity;
-                // Recalculate remaining quantity in SELLABLE units based on product units_per_stocking_unit
                 $product = Product::findOrFail($validatedData['product_id']);
                 $unitsPerStockingUnit = $product->units_per_stocking_unit ?: 1;
-                $newRemainingSellable = (int)$validatedData['quantity'] * $unitsPerStockingUnit;
-
-                // UPDATE WAREHOUSE STOCK (Adjust for difference)
                 $quantityDifference = (int)$validatedData['quantity'] - (int)$purchaseItem->quantity;
                 $diffSellable = $quantityDifference * $unitsPerStockingUnit;
+
+                // UPDATE WAREHOUSE STOCK (Adjust for difference)
 
                 if ($diffSellable != 0 && $purchase->warehouse_id && $purchase->status === 'received') {
                     $pivot = $product->warehouses()->where('warehouse_id', $purchase->warehouse_id)->first();
@@ -706,17 +683,15 @@ class PurchaseController extends Controller
                     }
                 }
 
-                // Update the purchase item
+                // Update the purchase item (stock lives in product_warehouse only)
                 $purchaseItem->update([
                     'product_id' => $validatedData['product_id'],
                     'batch_number' => $validatedData['batch_number'] ?? null,
                     'quantity' => $validatedData['quantity'],
                     'unit_cost' => $validatedData['unit_cost'],
-                    'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'], // Recalculate total cost
+                    'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'],
                     'sale_price' => $validatedData['sale_price'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
-                    // Store remaining in SELLABLE units (stocking qty * units_per_stocking_unit)
-                    'remaining_quantity' => $newRemainingSellable,
                 ]);
 
                 // Update purchase total amount
@@ -758,16 +733,10 @@ class PurchaseController extends Controller
                 $product = $purchaseItem->product;
                 // Note: using $purchaseItem->product might fail if it's already soft deleted? No, we are in transaction before delete.
 
-                // We need to calculate how much sellable quantity was added by this item originally.
-                // It was stored in remaining_quantity initially, but might have been sold down. 
-                // However, if we delete a purchase item that has been partially sold... that's dangerous.
-                // The constraint check (lines below) prevents deleting if sales exist. 
-                // So remaining_quantity SHOULD be equal to original quantity (in sellable units).
-
+                // Original sellable quantity added by this item (SSOT is product_warehouse; batch is metadata only).
                 if ($product && $warehouseId && $purchase->status === 'received') {
-                    // Recalculate original sellable quantity just to be safe, or trust remaining_quantity?
-                    // If sales exist, we can't delete (due to FK). So remaining_quantity is safe to use.
-                    $qtyToRemove = $purchaseItem->remaining_quantity;
+                    $unitsPerStockingUnit = (int) ($product->units_per_stocking_unit ?: 1);
+                    $qtyToRemove = $purchaseItem->quantity * $unitsPerStockingUnit;
 
                     $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
                     if ($pivot) {
@@ -821,7 +790,8 @@ class PurchaseController extends Controller
                     $product = $item->product;
 
                     if ($product && $warehouseId && $purchase->status === 'received') {
-                        $qtyToRemove = $item->remaining_quantity; // Should be 0 if quantity is 0
+                        $unitsPerStockingUnit = (int) ($product->units_per_stocking_unit ?: 1);
+                        $qtyToRemove = $item->quantity * $unitsPerStockingUnit;
                         $pivot = $product->warehouses()->where('warehouse_id', $warehouseId)->first();
                         if ($pivot) {
                             $product->warehouses()->updateExistingPivot($warehouseId, [
@@ -879,7 +849,6 @@ class PurchaseController extends Controller
                         'sale_price' => $product->suggested_sale_price_per_sellable_unit ?? 0,
                         'sale_price_stocking_unit' => $product->suggested_sale_price ?? null,
                         'expiry_date' => null,
-                        'remaining_quantity' => 0,
                     ]);
                     $addedCount++;
                 }

@@ -216,6 +216,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/purchases/{purchase}/add-all-missing-products', [PurchaseController::class, 'addAllMissingProducts'])->name('api.purchases.addAllMissingProducts');
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
   Route::get('/sales/today-by-created-at', [SaleController::class, 'getTodaySalesByCreatedAt'])->name('api.sales.todayByCreatedAt');
+  Route::get('/sales/list-all', [SaleController::class, 'listAll'])->name('api.sales.listAll');
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class);
   Route::post('/sales/create-empty', [SaleController::class, 'createEmptySale'])->name('api.sales.createEmpty');

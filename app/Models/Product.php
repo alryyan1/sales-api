@@ -221,33 +221,38 @@ class Product extends Model
     }
 
     /**
-     * @deprecated Use total_stock accessor instead. This sums from purchase items (batches).
+     * @deprecated Use total_stock accessor instead. Alias for product_warehouse total.
      */
     public function getTotalStockQuantityAttribute(): int
     {
-        // This sums the remaining quantities from all batches of this product
-        return (int) $this->purchaseItems()->sum('remaining_quantity');
-    }
-    public function scopeHasPurchaseItemsWithStock($query)
-    {
-        return $query->whereHas('purchaseItems', function ($q) {
-            $q->where('remaining_quantity', '>', 0);
-        });
-    }
-    public function purchaseItemsWithStock(): HasMany
-    {
-        return $this->hasMany(PurchaseItem::class)->where('remaining_quantity', '>', 0)->orderBy('expiry_date', 'asc');
+        return (int) $this->total_stock;
     }
 
     /**
-     * If NOT using an Observer, this accessor calculates total stock on demand.
-     * This is less efficient for querying/filtering than having a dedicated updated column.
-     * If using PurchaseItemObserver, this accessor becomes less critical but can be a fallback.
-     * Note: $this->calculated_total_stock
+     * Scope: products that have stock in at least one warehouse (product_warehouse SSOT).
+     */
+    public function scopeHasPurchaseItemsWithStock($query)
+    {
+        return $query->whereHas('warehouses', function ($q) {
+            $q->where('product_warehouse.quantity', '>', 0);
+        });
+    }
+
+    /**
+     * Batches (purchase items) for this product, for cost/expiry reference. Ordered by expiry.
+     * Stock quantity is from product_warehouse only.
+     */
+    public function purchaseItemsWithStock(): HasMany
+    {
+        return $this->hasMany(PurchaseItem::class)->orderBy('expiry_date', 'asc');
+    }
+
+    /**
+     * Alias for total_stock (product_warehouse sum).
      */
     public function getCalculatedTotalStockAttribute(): int
     {
-        return (int) $this->purchaseItems()->sum('remaining_quantity');
+        return (int) $this->total_stock;
     }
 
 
@@ -413,7 +418,6 @@ class Product extends Model
         }
 
         $earliestExpiry = $this->purchaseItems()
-            ->where('remaining_quantity', '>', 0)
             ->whereNotNull('expiry_date')
             ->orderBy('expiry_date', 'asc')
             ->value('expiry_date');
@@ -479,26 +483,27 @@ class Product extends Model
      * @param int $warehouseId
      * @return int
      */
+    /**
+     * Pending stock: quantity that would be added when pending purchases are received (original sellable qty).
+     */
     public function countPendingStock(int $warehouseId): int
     {
-        return (int) PurchaseItem::where('product_id', $this->id)
+        $items = PurchaseItem::where('product_id', $this->id)
             ->whereHas('purchase', function ($q) use ($warehouseId) {
-                $q->where('warehouse_id', $warehouseId)
-                    ->where('status', 'pending');
+                $q->where('warehouse_id', $warehouseId)->where('status', 'pending');
             })
-            ->sum('remaining_quantity');
+            ->with('product:id,units_per_stocking_unit')
+            ->get();
+        return (int) $items->sum(fn ($item) => $item->quantity * (($item->product->units_per_stocking_unit ?? 1) ?: 1));
     }
 
     /**
-     * Scope a query to include stock from a specific warehouse.
+     * Scope: products that have stock in the given warehouse (product_warehouse SSOT).
      */
     public function scopeInStockAt($query, int $warehouseId)
     {
-        return $query->whereHas('purchaseItems', function ($q) use ($warehouseId) {
-            $q->where('remaining_quantity', '>', 0)
-                ->whereHas('purchase', function ($pq) use ($warehouseId) {
-                    $pq->where('warehouse_id', $warehouseId);
-                });
+        return $query->whereHas('warehouses', function ($q) use ($warehouseId) {
+            $q->where('warehouse_id', $warehouseId)->where('product_warehouse.quantity', '>', 0);
         });
     }
 }

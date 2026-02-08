@@ -60,7 +60,9 @@ class ExpiryAlertNotification extends Notification
                 'batch_number' => $batchNumber,
                 'expiry_date' => $expiryDate,
                 'days_until_expiry' => $this->daysUntilExpiry,
-                'remaining_quantity' => $this->batch->remaining_quantity,
+                'quantity_in_stock' => $this->batch->purchase && $this->batch->product
+                    ? $this->batch->product->countStock($this->batch->purchase->warehouse_id)
+                    : null,
             ],
         ];
     }

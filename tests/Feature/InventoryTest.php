@@ -95,14 +95,13 @@ class InventoryTest extends TestCase
 
         $response->assertStatus(201);
 
-        // Verify PurchaseItem was created with correct remaining_quantity
+        // Verify PurchaseItem was created
         $purchaseItem = PurchaseItem::where('product_id', $this->product->id)->first();
         $this->assertNotNull($purchaseItem);
-        $this->assertEquals($expectedSellableUnits, $purchaseItem->remaining_quantity);
 
-        // Verify product stock_quantity increased
+        // Verify product total_stock (from product_warehouse) increased
         $this->product->refresh();
-        $this->assertEquals($initialStock + $expectedSellableUnits, $this->product->stock_quantity);
+        $this->assertEquals($initialStock + $expectedSellableUnits, (int) $this->product->total_stock);
 
         // Verify warehouse stock increased
         $pivot = $this->product->warehouses()->where('warehouse_id', $this->warehouse->id)->first();
@@ -181,7 +180,6 @@ class InventoryTest extends TestCase
             'purchase_id' => $purchase->id,
             'product_id' => $this->product->id,
             'quantity' => $purchaseQuantity,
-            'remaining_quantity' => $expectedSellableUnits,
             'unit_cost' => 10,
             'total_cost' => 500,
             'sale_price' => 15,
@@ -197,9 +195,9 @@ class InventoryTest extends TestCase
 
         $response->assertStatus(200);
 
-        // Verify stock increased
+        // Verify stock increased (SSOT: product_warehouse)
         $this->product->refresh();
-        $this->assertEquals($initialStock + $expectedSellableUnits, $this->product->stock_quantity);
+        $this->assertEquals($initialStock + $expectedSellableUnits, (int) $this->product->total_stock);
 
         // Verify warehouse stock increased
         $pivot = $this->product->warehouses()->where('warehouse_id', $this->warehouse->id)->first();
@@ -233,18 +231,16 @@ class InventoryTest extends TestCase
             'purchase_id' => $purchase->id,
             'product_id' => $this->product->id,
             'quantity' => $purchaseQuantity,
-            'remaining_quantity' => $expectedSellableUnits,
             'unit_cost' => 10,
             'total_cost' => 500,
             'sale_price' => 15,
             'cost_per_sellable_unit' => 10 / $unitsPerStockingUnit,
         ]);
 
-        // Add stock to warehouse pivot
+        // Add stock to warehouse pivot (SSOT)
         $this->product->warehouses()->attach($this->warehouse->id, ['quantity' => $expectedSellableUnits]);
-        $this->product->update(['stock_quantity' => $expectedSellableUnits]);
 
-        $initialStock = $this->product->stock_quantity;
+        $initialStock = (int) $this->product->total_stock;
 
         // Change status to pending
         $response = $this->putJson("/api/purchases/{$purchase->id}", [
@@ -423,11 +419,7 @@ class InventoryTest extends TestCase
         $pivot = $this->product->warehouses()->where('warehouse_id', $this->warehouse->id)->first();
         $this->assertEquals($expectedSellableUnits - $saleQuantity, (int) $pivot->pivot->quantity);
 
-        // Verify PurchaseItem remaining_quantity decreased
-        $purchaseItem = PurchaseItem::where('product_id', $this->product->id)->first();
-        $this->assertEquals($expectedSellableUnits - $saleQuantity, $purchaseItem->remaining_quantity);
-
-        // Verify countStock returns correct value
+        // Verify countStock returns correct value (SSOT: product_warehouse)
         $this->assertEquals($expectedSellableUnits - $saleQuantity, $this->product->countStock($this->warehouse->id));
     }
 
@@ -604,16 +596,8 @@ class InventoryTest extends TestCase
 
         $saleResponse->assertStatus(201);
 
-        // Verify batch1 was consumed first (FIFO - oldest expiry first)
-        $batch1->refresh();
-        $batch2->refresh();
-        
-        // Batch1 should have been reduced (FIFO allocation)
-        $this->assertLessThan($batch1Quantity, $batch1->remaining_quantity);
-        // Batch2 should remain untouched since batch1 had enough
-        $this->assertEquals($batch2Quantity, $batch2->remaining_quantity);
-
-        // Verify sale item is linked to a batch
+        // Stock is tracked in product_warehouse only; batch is reference for cost/expiry.
+        // Verify sale item is linked to a batch (for reference)
         $sale = Sale::latest()->first();
         $saleItem = $sale->items()->where('product_id', $this->product->id)->first();
         $this->assertNotNull($saleItem);
@@ -745,14 +729,10 @@ class InventoryTest extends TestCase
 
         $saleResponse->assertStatus(201);
 
-        // Verify final stock
+        // Verify final stock (SSOT: product_warehouse)
         $this->product->refresh();
-        $this->assertEquals($expectedSellableUnits - $saleQuantity, $this->product->stock_quantity);
+        $this->assertEquals($expectedSellableUnits - $saleQuantity, (int) $this->product->total_stock);
         $this->assertEquals($expectedSellableUnits - $saleQuantity, $this->product->countStock($this->warehouse->id));
-
-        // Verify PurchaseItem remaining_quantity
-        $purchaseItem = PurchaseItem::where('product_id', $this->product->id)->first();
-        $this->assertEquals($expectedSellableUnits - $saleQuantity, $purchaseItem->remaining_quantity);
 
         // Verify warehouse pivot
         $pivot = $this->product->warehouses()->where('warehouse_id', $this->warehouse->id)->first();
@@ -829,10 +809,8 @@ class InventoryTest extends TestCase
             ->orderBy('id')
             ->get();
 
-        // First batch should be partially consumed (FIFO - 50 - 40 = 10 remaining)
-        $this->assertEquals(10, $purchaseItems[0]->remaining_quantity);
-        // Second batch should remain untouched (50 units)
-        $this->assertEquals(50, $purchaseItems[1]->remaining_quantity);
+        // Stock is in product_warehouse; total should reflect sale
+        $this->assertEquals(10 + 50 - 40, (int) $this->product->total_stock);
     }
 
     /** @test */
@@ -864,8 +842,7 @@ class InventoryTest extends TestCase
         $pivot = $this->product->warehouses()->where('warehouse_id', $this->warehouse->id)->first();
 
         // All should match
-        $this->assertEquals($expectedSellableUnits, $this->product->stock_quantity);
-        $this->assertEquals($expectedSellableUnits, $purchaseItem->remaining_quantity);
+        $this->assertEquals($expectedSellableUnits, (int) $this->product->total_stock);
         $this->assertEquals($expectedSellableUnits, (int) $pivot->pivot->quantity);
         $this->assertEquals($expectedSellableUnits, $this->product->countStock($this->warehouse->id));
 
@@ -896,8 +873,7 @@ class InventoryTest extends TestCase
 
         $expectedRemaining = $expectedSellableUnits - $saleQuantity;
 
-        $this->assertEquals($expectedRemaining, $this->product->stock_quantity);
-        $this->assertEquals($expectedRemaining, $purchaseItem->remaining_quantity);
+        $this->assertEquals($expectedRemaining, (int) $this->product->total_stock);
         $this->assertEquals($expectedRemaining, (int) $pivot->pivot->quantity);
         $this->assertEquals($expectedRemaining, $this->product->countStock($this->warehouse->id));
     }
@@ -927,13 +903,9 @@ class InventoryTest extends TestCase
         ]);
         $purchaseResponse->assertStatus(201);
 
-        // Verify PurchaseItem has correct remaining_quantity (in sellable units)
-        $purchaseItem = PurchaseItem::where('product_id', $this->product2->id)->first();
-        $this->assertEquals($expectedSellableUnits, $purchaseItem->remaining_quantity);
-
-        // Verify product stock_quantity (should be in sellable units)
+        // Verify product total_stock (SSOT: product_warehouse)
         $this->product2->refresh();
-        $this->assertEquals($expectedSellableUnits, $this->product2->stock_quantity);
+        $this->assertEquals($expectedSellableUnits, (int) $this->product2->total_stock);
 
         // Verify warehouse stock
         $pivot = $this->product2->warehouses()->where('warehouse_id', $this->warehouse->id)->first();
@@ -966,8 +938,7 @@ class InventoryTest extends TestCase
 
         $expectedRemaining = $expectedSellableUnits - $saleQuantity; // 50 - 20 = 30 pieces
 
-        $this->assertEquals($expectedRemaining, $this->product2->stock_quantity);
-        $this->assertEquals($expectedRemaining, $purchaseItem->remaining_quantity);
+        $this->assertEquals($expectedRemaining, (int) $this->product2->total_stock);
         $this->assertEquals($expectedRemaining, (int) $pivot->pivot->quantity);
     }
 }

@@ -35,17 +35,11 @@ class ResetInventory extends Command
 
         try {
             DB::transaction(function () {
-                // 1. Reset Products Global Stock
-                $updatedProducts = DB::table('products')->update(['stock_quantity' => 0]);
-                $this->info("Types of products reset: {$updatedProducts}");
+                // 1. Product-level stock is derived from product_warehouse; no direct column to reset.
 
-                // 2. Reset Warehouse Specific Stock
+                // 2. Reset Warehouse Specific Stock (SSOT)
                 $updatedWarehouses = DB::table('product_warehouse')->update(['quantity' => 0]);
                 $this->info("Warehouse records reset: {$updatedWarehouses}");
-
-                // 3. Reset Purchase Items Remaining Quantity (Effectively marking them as consumed)
-                $updatedItems = DB::table('purchase_items')->update(['remaining_quantity' => 0]);
-                $this->info("Purchase batches reset: {$updatedItems}");
             });
 
             $this->info('Inventory reset successfully. All stocks are now 0.');

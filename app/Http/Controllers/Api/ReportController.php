@@ -205,8 +205,7 @@ class ReportController extends Controller
         if (filter_var($validated['include_batches'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
             $query->with([
                 'purchaseItems' => function ($query) {
-                    $query->where('remaining_quantity', '>', 0)
-                        ->select(['id', 'product_id', 'batch_number', 'remaining_quantity', 'expiry_date', 'unit_cost', 'sale_price']) // Select specific batch fields
+                    $query->select(['id', 'product_id', 'batch_number', 'expiry_date', 'unit_cost', 'sale_price'])
                         ->orderBy('expiry_date', 'asc')
                         ->orderBy('created_at', 'asc');
                 }
@@ -264,7 +263,7 @@ class ReportController extends Controller
             'product_id' => 'nullable|integer|exists:products,id',
             // 'category_id' => 'nullable|integer|exists:categories,id', // If categories implemented
             'per_page' => 'nullable|integer|min:5|max:100',
-            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'remaining_quantity', 'purchase_items.created_at'])], // Allowed sort fields
+            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'purchase_items.created_at'])],
             'sort_direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
         ]);
 
@@ -279,10 +278,10 @@ class ReportController extends Controller
 
         // --- Query Building ---
         $query = PurchaseItem::query()
-            ->with(['product:id,name,sku,sellable_unit_name']) // Eager load necessary product details
-            ->whereNotNull('expiry_date')                 // Only items with an expiry date
-            ->where('remaining_quantity', '>', 0)       // Only items with stock remaining
-            ->whereBetween('expiry_date', [$today, $expiryCutoffDate]); // Expiring within the threshold (inclusive)
+            ->with(['product:id,name,sku,sellable_unit_name'])
+            ->whereNotNull('expiry_date')
+            ->whereHas('product', fn ($q) => $q->whereHas('warehouses', fn ($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->whereBetween('expiry_date', [$today, $expiryCutoffDate]);
 
         // --- Apply Filters ---
         if (!empty($validated['product_id'])) {
@@ -910,12 +909,17 @@ class ReportController extends Controller
             ? Carbon::parse($validated['end_date'])->endOfDay()
             : null;
 
-        if ($startDate) {
-            $query->whereDate('sale_date', '>=', $startDate);
+        if (!empty($validated['shift_id'])) {
+            $query->where('shift_id', $validated['shift_id']);
+        } else {
+            if ($startDate) {
+                $query->whereDate('sale_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $query->whereDate('sale_date', '<=', $endDate);
+            }
         }
-        if ($endDate) {
-            $query->whereDate('sale_date', '<=', $endDate);
-        }
+
         if (!empty($validated['client_id'])) {
             $query->where('client_id', $validated['client_id']);
         }
@@ -924,6 +928,19 @@ class ReportController extends Controller
         }
         if (!empty($validated['shift_id'])) {
             $query->where('shift_id', $validated['shift_id']);
+        }
+        if (!empty($validated['status'])) {
+            $query->where('status', $validated['status']);
+        }
+        if (array_key_exists('has_discount', $validated)) {
+            $hasDiscount = filter_var($validated['has_discount'], FILTER_VALIDATE_BOOLEAN);
+            if ($hasDiscount) {
+                $query->where('discount_amount', '>', 0);
+            } else {
+                $query->where(function ($q) {
+                    $q->whereNull('discount_amount')->orWhere('discount_amount', '<=', 0);
+                });
+            }
         }
         $sales = $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc')->get();
         $sales->load(['items', 'payments']);
@@ -936,11 +953,16 @@ class ReportController extends Controller
 
         // Calculate Total Expenses for the period
         $expensesQuery = \App\Models\Expense::query();
-        if ($startDate) {
-            $expensesQuery->whereDate('expense_date', '>=', $startDate);
-        }
-        if ($endDate) {
-            $expensesQuery->whereDate('expense_date', '<=', $endDate);
+
+        if (!empty($validated['shift_id'])) {
+            $expensesQuery->where('shift_id', $validated['shift_id']);
+        } else {
+            if ($startDate) {
+                $expensesQuery->whereDate('expense_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $expensesQuery->whereDate('expense_date', '<=', $endDate);
+            }
         }
         // Apply user filter if provided
         if (!empty($validated['user_id'])) {
