@@ -31,6 +31,10 @@ class ExpenseController extends Controller
             $query->where('shift_id', $shiftId);
         }
 
+        if ($userId = $request->input('user_id')) {
+            $query->where('user_id', $userId);
+        }
+
         if ($dateFrom = $request->input('date_from')) {
             $query->whereDate('expense_date', '>=', $dateFrom);
         }
@@ -105,6 +109,50 @@ class ExpenseController extends Controller
 
     public function destroy(Expense $expense)
     {
+        // Check for linked SaleReturn
+        if (\Illuminate\Support\Str::startsWith($expense->reference ?? '', 'SALE-RETURN-')) {
+            $saleReturnId = str_replace('SALE-RETURN-', '', $expense->reference);
+
+            if ($saleReturnId) {
+                // 1. Cancel the SaleReturn
+                $saleReturn = \App\Models\SaleReturn::find($saleReturnId);
+                if ($saleReturn) {
+                    $saleReturn->update(['status' => 'cancelled']);
+                    \Illuminate\Support\Facades\Log::info("SaleReturn #{$saleReturnId} cancelled via expense deletion #{$expense->id}");
+
+                    // 2. Delete the associated Refund Payment on the original sale
+                    // Payment reference format from SaleReturnController: "REFUND-{id}"
+                    $paymentReference = "REFUND-{$saleReturnId}";
+
+                    // We need to find the payment. It should be on the original sale of the return.
+                    $originalSale = $saleReturn->originalSale;
+
+                    if ($originalSale) {
+                        $payment = $originalSale->payments()->where('reference_number', $paymentReference)->first();
+                        if ($payment) {
+                            $payment->delete();
+                            // Update the sale's paid_amount
+                            $totalPaid = $originalSale->payments()->sum('amount');
+                            $originalSale->update(['paid_amount' => $totalPaid]);
+                            \Illuminate\Support\Facades\Log::info("Payment #{$payment->id} deleted via expense deletion #{$expense->id}");
+                        }
+
+                        // 3. Update Original Sale "is_returned" status
+                        // Check if there are any OTHER completed returns for this sale
+                        $otherReturnsCount = \App\Models\SaleReturn::where('original_sale_id', $originalSale->id)
+                            ->where('id', '!=', $saleReturnId) // Exclude the one we just cancelled
+                            ->where('status', 'completed')
+                            ->count();
+
+                        if ($otherReturnsCount === 0) {
+                            $originalSale->is_returned = false;
+                            $originalSale->save();
+                        }
+                    }
+                }
+            }
+        }
+
         $expense->delete();
         return response()->noContent();
     }

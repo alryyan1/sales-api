@@ -1248,6 +1248,44 @@ class SaleController extends Controller
             DB::transaction(function () use ($sale, $paymentId) {
                 // Find and delete the specific payment
                 $payment = $sale->payments()->findOrFail($paymentId);
+
+                // --- Handle Refund Deletion Cleanup ---
+                if ($payment->method === 'refund' && \Illuminate\Support\Str::startsWith($payment->reference_number ?? '', 'REFUND-')) {
+                    $saleReturnId = str_replace('REFUND-', '', $payment->reference_number);
+
+                    if ($saleReturnId) {
+                        // 1. Cancel the SaleReturn
+                        $saleReturn = \App\Models\SaleReturn::find($saleReturnId);
+                        if ($saleReturn) {
+                            $saleReturn->update(['status' => 'cancelled']);
+
+                            // Log the cancellation
+                            Log::info("SaleReturn #{$saleReturnId} cancelled via payment deletion on Sale #{$sale->id}");
+                        }
+
+                        // 2. Delete the associated Expense
+                        // Expense reference format from SaleReturnDialog: "SALE-RETURN-{id}"
+                        $expenseReference = "SALE-RETURN-{$saleReturnId}";
+                        $expense = \App\Models\Expense::where('reference', $expenseReference)->first();
+                        if ($expense) {
+                            $expense->delete();
+                            Log::info("Expense #{$expense->id} deleted via payment deletion on Sale #{$sale->id}");
+                        }
+
+                        // 3. Update Original Sale "is_returned" status
+                        // Check if there are any OTHER completed returns for this sale
+                        $otherReturnsCount = \App\Models\SaleReturn::where('original_sale_id', $sale->id)
+                            ->where('id', '!=', $saleReturnId) // Exclude the one we just cancelled
+                            ->where('status', 'completed')
+                            ->count();
+
+                        if ($otherReturnsCount === 0) {
+                            $sale->is_returned = false;
+                            $sale->save(); // Save immediately as we are in transaction
+                        }
+                    }
+                }
+
                 $payment->delete();
 
                 // Update the sale's paid_amount
@@ -1321,32 +1359,14 @@ class SaleController extends Controller
             $result = DB::transaction(function () use ($validatedData, $sale) {
                 $product = Product::findOrFail($validatedData['product_id']);
 
-                // Check if product already exists in the sale
-                $existingSaleItem = $sale->items()
-                    ->where('product_id', $validatedData['product_id'])
-                    ->first();
-
-                if ($existingSaleItem) {
-                    // Product already exists - do nothing
-                    // Calculate totals from items/payments
-                    $currentTotal = (float) $sale->items()->sum('total_price');
-                    $discountAmount = (float) ($sale->discount_amount ?? 0);
-                    $paidAmount = (float) $sale->payments()->sum('amount');
-                    $dueAmount = max(0, $currentTotal - $discountAmount - $paidAmount);
-                    return [
-                        'sale_items' => [],
-                        'new_total' => $currentTotal,
-                        'new_due_amount' => $dueAmount,
-                        'product_already_exists' => true
-                    ];
-                }
-
                 // Check if product has any stock
                 if ($product->stock_quantity <= 0) {
                     throw ValidationException::withMessages([
                         'product_id' => "Product '{$product->name}' is out of stock. Available quantity: 0"
                     ]);
                 }
+
+                $saleItems = [];
 
                 // Check stock availability - consider current sale items
                 $currentQuantityInThisSale = $sale->items()
@@ -1402,16 +1422,27 @@ class SaleController extends Controller
                         ]);
                     }
 
-                    // Create sale item for the selected batch
-                    $saleItem = $sale->items()->create([
-                        'product_id' => $product->id,
-                        'purchase_item_id' => $selectedBatch->id,
-                        'batch_number_sold' => $selectedBatch->batch_number,
-                        'quantity' => $validatedData['quantity'],
-                        'unit_price' => $resolvedUnitPrice,
-                        'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
-                        'cost_price_at_sale' => $selectedBatch->unit_cost,
-                    ]);
+                    // Find existing sale item for this batch or create new
+                    $saleItem = $sale->items()
+                        ->where('product_id', $product->id)
+                        ->where('purchase_item_id', $selectedBatch->id)
+                        ->first();
+
+                    if ($saleItem) {
+                        $saleItem->quantity += $validatedData['quantity'];
+                        $saleItem->total_price += ($validatedData['quantity'] * $resolvedUnitPrice);
+                        $saleItem->save();
+                    } else {
+                        $saleItem = $sale->items()->create([
+                            'product_id' => $product->id,
+                            'purchase_item_id' => $selectedBatch->id,
+                            'batch_number_sold' => $selectedBatch->batch_number,
+                            'quantity' => $validatedData['quantity'],
+                            'unit_price' => $resolvedUnitPrice,
+                            'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
+                            'cost_price_at_sale' => $selectedBatch->unit_cost,
+                        ]);
+                    }
 
                     $saleItems[] = $saleItem;
                     $totalCost = $validatedData['quantity'] * $selectedBatch->unit_cost;
@@ -1442,16 +1473,27 @@ class SaleController extends Controller
 
                         $canSellFromThisBatch = min($remainingQuantity, $batch->remaining_quantity);
 
-                        // Create sale item for this batch
-                        $saleItem = $sale->items()->create([
-                            'product_id' => $product->id,
-                            'purchase_item_id' => $batch->id,
-                            'batch_number_sold' => $batch->batch_number,
-                            'quantity' => $canSellFromThisBatch,
-                            'unit_price' => $resolvedUnitPrice,
-                            'total_price' => $canSellFromThisBatch * $resolvedUnitPrice,
-                            'cost_price_at_sale' => $batch->unit_cost,
-                        ]);
+                        // Find existing sale item for this batch or create new
+                        $saleItem = $sale->items()
+                            ->where('product_id', $product->id)
+                            ->where('purchase_item_id', $batch->id)
+                            ->first();
+
+                        if ($saleItem) {
+                            $saleItem->quantity += $canSellFromThisBatch;
+                            $saleItem->total_price += ($canSellFromThisBatch * $resolvedUnitPrice);
+                            $saleItem->save();
+                        } else {
+                            $saleItem = $sale->items()->create([
+                                'product_id' => $product->id,
+                                'purchase_item_id' => $batch->id,
+                                'batch_number_sold' => $batch->batch_number,
+                                'quantity' => $canSellFromThisBatch,
+                                'unit_price' => $resolvedUnitPrice,
+                                'total_price' => $canSellFromThisBatch * $resolvedUnitPrice,
+                                'cost_price_at_sale' => $batch->unit_cost,
+                            ]);
+                        }
 
                         $saleItems[] = $saleItem;
                         $totalCost += $canSellFromThisBatch * $batch->unit_cost;
@@ -1507,7 +1549,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,stock_quantity,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,stock_alert_level,sellable_unit_id',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,remaining_quantity,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'

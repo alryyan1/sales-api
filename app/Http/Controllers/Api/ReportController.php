@@ -919,20 +919,22 @@ class ReportController extends Controller
             ? Carbon::parse($validated['end_date'])->endOfDay()
             : null;
 
-        if ($startDate) {
-            $query->whereDate('sale_date', '>=', $startDate);
+        if (!empty($validated['shift_id'])) {
+            $query->where('shift_id', $validated['shift_id']);
+        } else {
+            if ($startDate) {
+                $query->whereDate('sale_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $query->whereDate('sale_date', '<=', $endDate);
+            }
         }
-        if ($endDate) {
-            $query->whereDate('sale_date', '<=', $endDate);
-        }
+
         if (!empty($validated['client_id'])) {
             $query->where('client_id', $validated['client_id']);
         }
         if (!empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
-        }
-        if (!empty($validated['shift_id'])) {
-            $query->where('shift_id', $validated['shift_id']);
         }
         if (!empty($validated['status'])) {
             $query->where('status', $validated['status']);
@@ -959,11 +961,16 @@ class ReportController extends Controller
 
         // Calculate Total Expenses for the period
         $expensesQuery = \App\Models\Expense::query();
-        if ($startDate) {
-            $expensesQuery->whereDate('expense_date', '>=', $startDate);
-        }
-        if ($endDate) {
-            $expensesQuery->whereDate('expense_date', '<=', $endDate);
+
+        if (!empty($validated['shift_id'])) {
+            $expensesQuery->where('shift_id', $validated['shift_id']);
+        } else {
+            if ($startDate) {
+                $expensesQuery->whereDate('expense_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $expensesQuery->whereDate('expense_date', '<=', $endDate);
+            }
         }
         // Apply user filter if provided
         if (!empty($validated['user_id'])) {
