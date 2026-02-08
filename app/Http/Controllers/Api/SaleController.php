@@ -23,40 +23,16 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
-/**
- * @OA\Tag(
- *     name="Sales",
- *     description="Sales management endpoints"
- * )
- */
 class SaleController extends Controller
 {
-    /**
-     * @OA\Get(
-     *     path="/api/sales",
-     *     summary="List all sales",
-     *     description="Get a paginated list of sales with optional filtering.",
-     *     operationId="getSales",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\Parameter(name="search", in="query", required=false, @OA\Schema(type="string")),
-     *     @OA\Parameter(name="page", in="query", required=false, @OA\Schema(type="integer")),
-     *     @OA\Parameter(name="per_page", in="query", required=false, @OA\Schema(type="integer")),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Sales retrieved successfully"
-     *     )
-     * )
-     */
     public function index(Request $request)
     {
         $query = Sale::with(['client:id,name', 'user:id,name']);
 
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
-                $q->where('invoice_number', 'like', "%{$search}%")
-                    ->orWhere('id', $search)
-                    ->orWhere('sale_order_number', 'like', "%{$search}%")
+                $q->where('id', $search)
+                    ->orWhere('number', 'like', "%{$search}%")
                     ->orWhereHas('client', fn($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
             });
         }
@@ -164,37 +140,11 @@ class SaleController extends Controller
         return SaleItemResource::collection($items); // Or a custom resource
     }
 
-    /**
-     * @OA\Post(
-     *     path="/api/sales/create-empty",
-     *     summary="Create an empty sale (draft)",
-     *     description="Creates a new sale record with no items, effectively a draft/cart for POS.",
-     *     operationId="createEmptySale",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
-     *             @OA\Property(property="sale_date", type="string", format="date", example="2023-10-25"),
-     *             @OA\Property(property="notes", type="string", nullable=true)
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=201,
-     *         description="Sale created",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="sale", type="object")
-     *         )
-     *     )
-     * )
-     */
     public function createEmptySale(Request $request)
     {
         $validatedData = $request->validate([
             'client_id' => 'nullable|exists:clients,id',
             'sale_date' => 'nullable|date_format:Y-m-d',
-            'notes' => 'nullable|string|max:65535',
         ]);
 
         try {
@@ -204,9 +154,7 @@ class SaleController extends Controller
             // return $settings;
             $currentShift = null;
             if ($posMode === 'shift') {
-                $currentShift = Shift::where('user_id', $request->user()->id)
-                    ->whereNull('closed_at')
-                    ->orderBy('id', 'desc')
+                $currentShift = Shift::orderBy('id', 'desc')
                     ->first();
 
                 if (!$currentShift) {
@@ -223,9 +171,7 @@ class SaleController extends Controller
                     'user_id' => $request->user()->id,
                     'warehouse_id' => $request->user()->warehouse_id ?? 1,
                     'shift_id' => $currentShift->id,
-                    'sale_date' => $validatedData['sale_date'],
-                    'invoice_number' => null, // Will be generated when completed
-                    'notes' => $validatedData['notes'] ?? null,
+                    'sale_date' => $validatedData['sale_date'] ?? now()->toDateString(),
                 ]);
 
                 return $saleHeader;
@@ -234,9 +180,6 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku',
-                'items.purchaseItemBatch:id,batch_number,unit_cost',
-                'payments.user:id,name'
             ]);
 
             // Fire event for notifications
@@ -244,82 +187,16 @@ class SaleController extends Controller
 
             return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
         } catch (\Throwable $e) {
-            Log::error("Empty sale creation error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-            $payload = [
-                'message' => 'Failed to create empty sale. ' . $e->getMessage(),
-            ];
+    
 
-            if (config('app.debug')) {
-                $payload['exception'] = class_basename($e);
-                $payload['file'] = $e->getFile();
-                $payload['line'] = $e->getLine();
-                $payload['trace'] = collect($e->getTrace())->take(5)->map(function ($trace) {
-                    return [
-                        'file' => $trace['file'] ?? null,
-                        'line' => $trace['line'] ?? null,
-                        'function' => $trace['function'] ?? null,
-                        'class' => $trace['class'] ?? null,
-                    ];
-                })->toArray();
-            }
-
-            return response()->json($payload, Response::HTTP_INTERNAL_SERVER_ERROR);
+            return response()->json($e->getMessage(), Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
-    /**
-     * @OA\Post(
-     *     path="/api/sales",
-     *     summary="Create a new sale (Complete)",
-     *     description="Create a new completed sale with items and payments in one request.",
-     *     operationId="storeSale",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             required={"sale_date", "items", "payments"},
-     *             @OA\Property(property="client_id", type="integer", nullable=true),
-     *             @OA\Property(property="sale_date", type="string", format="date"),
-     *             @OA\Property(property="items", type="array", @OA\Items(
-     *                 @OA\Property(property="product_id", type="integer"),
-     *                 @OA\Property(property="quantity", type="integer"),
-     *                 @OA\Property(property="unit_price", type="number", format="float")
-     *             )),
-     *             @OA\Property(property="payments", type="array", @OA\Items(
-     *                 @OA\Property(property="method", type="string"),
-     *                 @OA\Property(property="amount", type="number", format="float"),
-     *                 @OA\Property(property="payment_date", type="string", format="date")
-     *             ))
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=201,
-     *         description="Sale created"
-     *     )
-     * )
-     */
     public function store(Request $request)
     {
         $validatedData = $this->validateSaleRequest($request);
 
-        // --- IDEMPOTENCY CHECK ---
-        if (!empty($validatedData['offline_id'])) {
-            $existingSale = Sale::where('offline_id', $validatedData['offline_id'])->first();
-            if ($existingSale) {
-                $existingSale->load([
-                    'client:id,name',
-                    'user:id,name',
-                    'items.product:id,name,sku',
-                    'items.purchaseItemBatch:id,batch_number,unit_cost',
-                    'payments.user:id,name'
-                ]);
-                return response()->json([
-                    'sale' => new SaleResource($existingSale),
-                    'message' => 'Sale already exists (processed via offline_id)'
-                ], Response::HTTP_OK);
-            }
-        }
 
         // Check for open shift only if pos_mode is 'shift'
         $settings = (new SettingsService())->getAll();
@@ -356,40 +233,7 @@ class SaleController extends Controller
 
                 $this->createPaymentRecords($validatedData, $saleHeader, $request);
 
-                // Update Sale Header with final totals
-                // Note: total_amount in DB requested by user. We use amountAfterDiscount as the "Total" to pay?
-                // Or total_amount = subtotal? User requested "total_amount, tax, discount, paid_amount".
-                // Usually total_amount is gross.
-                // Let's store:
-                // total_amount = $calculatedTotals['subtotal']
-                // discount = $calculatedTotals['discountAmount']
-                // tax = 0 (for now, unless calculated)
-                // but wait, createSaleHeader already sets discount_amount.
-                // I will update total_amount and paid_amount.
-                // And payment_status.
-
-                $paidAmount = $saleHeader->payments()->sum('amount');
-                $netAmount = $calculatedTotals['subtotal'] - $calculatedTotals['discountAmount']; // + tax if any
-
-                $paymentStatus = 'unpaid';
-                if ($paidAmount >= $netAmount && $netAmount > 0) {
-                    $paymentStatus = 'paid';
-                } elseif ($paidAmount > 0) {
-                    $paymentStatus = 'partial';
-                }
-
-                // Calculate total cost
-                $totalCost = $saleHeader->items()->get()->sum(function ($item) {
-                    return $item->cost_price_at_sale * $item->quantity;
-                });
-
-                $saleHeader->update([
-                    'total_amount' => $calculatedTotals['subtotal'], // Gross total
-                    'paid_amount' => $paidAmount,
-                    'payment_status' => $paymentStatus,
-                    // 'total_cost' => $totalCost,
-                    // 'tax' => 0, // already defaulted
-                ]);
+                // total_amount, paid_amount, discount_amount columns dropped; derived from items and payments
 
                 return $saleHeader;
             });
@@ -421,20 +265,15 @@ class SaleController extends Controller
     private function validateSaleRequest(Request $request)
     {
         return $request->validate([
-            'offline_id' => 'nullable|string|max:255',
             'warehouse_id' => 'nullable|exists:warehouses,id', // Warehouse for the sale
             'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
             'shift_id' => 'nullable|exists:shifts,id', // Shift ID - null for days mode, set for shift mode
             'sale_date' => 'nullable|date_format:Y-m-d',
-            'invoice_number' => 'nullable|string|max:255|unique:sales,invoice_number',
-            'notes' => 'nullable|string|max:65535',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1', // Quantity of sellable units
             'items.*.unit_price' => 'required|numeric|min:0', // Sale price PER SELLABLE UNIT
-            'discount_amount' => 'nullable|numeric|min:0', // Discount amount
-            'discount_type' => 'nullable|in:percentage,fixed', // Discount type
-
+            'discount_amount' => 'nullable|numeric|min:0', // Discount amount (fixed); percentage computed from request if needed
             'payments' => 'present|array',
             'payments.*.method' => [
                 'required_with:payments.*.amount',
@@ -507,11 +346,7 @@ class SaleController extends Controller
         // Calculate discount
         $discountAmount = 0;
         if (isset($validatedData['discount_amount']) && $validatedData['discount_amount'] > 0) {
-            if (isset($validatedData['discount_type']) && $validatedData['discount_type'] === 'percentage') {
-                $discountAmount = $subtotal * ($validatedData['discount_amount'] / 100);
-            } else {
-                $discountAmount = min($validatedData['discount_amount'], $subtotal); // Ensure discount doesn't exceed subtotal
-            }
+            $discountAmount = min((float) $validatedData['discount_amount'], $subtotal); // Fixed discount, cap at subtotal
         }
 
         // Calculate amount after discount (net amount)
@@ -567,17 +402,11 @@ class SaleController extends Controller
         }
 
         $saleData = [
-            'offline_id' => $validatedData['offline_id'] ?? null,
             'warehouse_id' => $validatedData['warehouse_id'] ?? $request->user()->warehouse_id ?? 1,
             'client_id' => $validatedData['client_id'] ?? null,
             'user_id' => $request->user()->id,
             'shift_id' => $shiftId, // Can be null for days mode
             'sale_date' => $validatedData['sale_date'],
-            'invoice_number' => $validatedData['invoice_number'] ?? null,
-            'notes' => $validatedData['notes'] ?? null,
-            'discount_amount' => $calculatedTotals['discountAmount'],
-            'discount_type' => $validatedData['discount_type'] ?? null,
-            // 'total_cost' => 0, // Initialize total cost
         ];
 
         return Sale::create($saleData);
@@ -807,30 +636,7 @@ class SaleController extends Controller
         $validatedData = $request->validate([
             'client_id' => 'sometimes|required|exists:clients,id',
             'sale_date' => 'sometimes|required|date_format:Y-m-d',
-            'invoice_number' => ['sometimes', 'nullable', 'string', 'max:255', Rule::unique('sales')->ignore($sale->id)],
-            'status' => ['sometimes', 'required', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
-            'paid_amount' => 'sometimes|required|numeric|min:0|max:99999999.99', // Validate against new total if items were editable
-            'notes' => 'sometimes|nullable|string|max:65535',
-            // 'items' validation would be here if item editing was allowed
         ]);
-
-        // If items were editable, you'd need complex logic here to:
-        // 1. Calculate current total_amount before item changes.
-        // 2. Calculate stock changes (revert old items, apply new items).
-        // 3. Update/delete/create items.
-        // 4. Recalculate new total_amount.
-        // 5. ALL WITHIN A TRANSACTION.
-
-        // For this simplified version, we only update header fields.
-        // The frontend form should also restrict item editing for completed/non-draft sales.
-        // Paid amount should not exceed net amount (gross - discount)
-        // Calculate totals from items since they're no longer stored
-        $currentTotal = (float) $sale->items()->sum('total_price');
-        $discountAmount = (float) ($sale->discount_amount ?? 0);
-        $currentNet = max(0, $currentTotal - $discountAmount);
-        if (isset($validatedData['paid_amount']) && $validatedData['paid_amount'] > $currentNet) {
-            throw ValidationException::withMessages(['paid_amount' => ['Paid amount cannot exceed the net sale amount after discount.']]);
-        }
 
         $sale->update($validatedData);
 
@@ -947,10 +753,6 @@ class SaleController extends Controller
                         }
                     }
                 }
-
-                // Update the sale's paid_amount
-                $totalPaid = $sale->payments()->sum('amount');
-                $sale->update(['paid_amount' => $totalPaid]);
             });
 
             // Reload the sale with payments
@@ -993,9 +795,6 @@ class SaleController extends Controller
             DB::transaction(function () use ($sale) {
                 // Delete all existing payments for this sale
                 $sale->payments()->delete();
-
-                // Update the sale's paid_amount to 0
-                $sale->update(['paid_amount' => 0]);
             });
 
             // Reload the sale with payments
@@ -1027,37 +826,6 @@ class SaleController extends Controller
         }
     }
 
-    /**
-     * @OA\Post(
-     *     path="/api/sales/{sale}/payments/single",
-     *     summary="Add a payment",
-     *     description="Add a single payment transaction to the sale.",
-     *     operationId="addSinglePayment",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\Parameter(
-     *         name="sale",
-     *         in="path",
-     *         description="Sale ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             required={"method", "amount"},
-     *             @OA\Property(property="method", type="string", enum={"cash", "visa", "mastercard", "bank_transfer", "mada", "store_credit", "other", "refund"}),
-     *             @OA\Property(property="amount", type="number", format="float", example=100.0),
-     *             @OA\Property(property="reference_number", type="string", nullable=true),
-     *             @OA\Property(property="notes", type="string", nullable=true)
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=201,
-     *         description="Payment added"
-     *     )
-     * )
-     */
     public function addSinglePayment(Request $request, Sale $sale)
     {
         $validatedData = $request->validate([
@@ -1078,10 +846,6 @@ class SaleController extends Controller
                     'reference_number' => $validatedData['reference_number'] ?? null,
                     'notes' => $validatedData['notes'] ?? null,
                 ]);
-
-                // Update the sale's paid_amount
-                $totalPaid = $sale->payments()->sum('amount');
-                $sale->update(['paid_amount' => $totalPaid]);
             });
 
             return response()->json([
@@ -1101,41 +865,6 @@ class SaleController extends Controller
         }
     }
 
-
-
-
-    /**
-     * @OA\Put(
-     *     path="/api/sales/{sale}/discount",
-     *     summary="Update sale discount",
-     *     description="Update the discount amount and type for a sale. Recalculates totals.",
-     *     operationId="updateSaleDiscount",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\Parameter(
-     *         name="sale",
-     *         in="path",
-     *         description="Sale ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             required={"discount_amount", "discount_type"},
-     *             @OA\Property(property="discount_amount", type="number", format="float", example=10.0),
-     *             @OA\Property(property="discount_type", type="string", enum={"percentage", "fixed"})
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Discount updated",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="sale", type="object")
-     *         )
-     *     )
-     * )
-     */
     public function updateDiscount(Request $request, Sale $sale)
     {
         $validated = $request->validate([
@@ -1175,12 +904,7 @@ class SaleController extends Controller
 
                 $totalAfterDiscount = $subtotal - $discountValue;
 
-                // Persist changes (only discount fields, totals computed from items)
-                $sale->update([
-                    'discount_amount' => $discountValue,  // absolute discount value
-                    'discount_type' => $validated['discount_type'],
-                    // total_amount, subtotal, paid_amount are computed, not stored
-                ]);
+                // discount_amount column dropped; discount not persisted (due = items total - payments)
             });
 
             // Reload relevant relations for client consumption
@@ -1214,34 +938,6 @@ class SaleController extends Controller
         }
     }
 
-    /**
-     * @OA\Delete(
-     *     path="/api/sales/{sale}/payments/{payment}",
-     *     summary="Delete a payment",
-     *     description="Delete a specific payment from a sale.",
-     *     operationId="deleteSalePayment",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\Parameter(
-     *         name="sale",
-     *         in="path",
-     *         description="Sale ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\Parameter(
-     *         name="payment",
-     *         in="path",
-     *         description="Payment ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Payment deleted"
-     *     )
-     * )
-     */
     public function deleteSinglePayment(Sale $sale, $paymentId)
     {
         try {
@@ -1249,10 +945,6 @@ class SaleController extends Controller
                 // Find and delete the specific payment
                 $payment = $sale->payments()->findOrFail($paymentId);
                 $payment->delete();
-
-                // Update the sale's paid_amount
-                $totalPaid = $sale->payments()->sum('amount');
-                $sale->update(['paid_amount' => $totalPaid]);
             });
 
             return response()->json([
@@ -1273,41 +965,6 @@ class SaleController extends Controller
         }
     }
 
-    /**
-     * @OA\Post(
-     *     path="/api/sales/{sale}/items",
-     *     summary="Add item to sale",
-     *     description="Add a product item to an existing sale. Handles stock validation.",
-     *     operationId="addSaleItem",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\Parameter(
-     *         name="sale",
-     *         in="path",
-     *         description="Sale ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             required={"product_id", "quantity", "unit_price"},
-     *             @OA\Property(property="product_id", type="integer", example=10),
-     *             @OA\Property(property="quantity", type="integer", example=1),
-     *             @OA\Property(property="unit_price", type="number", format="float", example=50.0),
-     *             @OA\Property(property="purchase_item_id", type="integer", nullable=true, description="Optional specific batch ID")
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=201,
-     *         description="Item added",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="sale", type="object"),
-     *             @OA\Property(property="added_items", type="array", @OA\Items(type="object"))
-     *         )
-     *     )
-     * )
-     */
     public function addSaleItem(Request $request, Sale $sale)
     {
         $validatedData = $request->validate([
@@ -1327,12 +984,9 @@ class SaleController extends Controller
                     ->first();
 
                 if ($existingSaleItem) {
-                    // Product already exists - do nothing
-                    // Calculate totals from items/payments
                     $currentTotal = (float) $sale->items()->sum('total_price');
-                    $discountAmount = (float) ($sale->discount_amount ?? 0);
                     $paidAmount = (float) $sale->payments()->sum('amount');
-                    $dueAmount = max(0, $currentTotal - $discountAmount - $paidAmount);
+                    $dueAmount = max(0, $currentTotal - $paidAmount);
                     return [
                         'sale_items' => [],
                         'new_total' => $currentTotal,
@@ -1490,11 +1144,9 @@ class SaleController extends Controller
                     }
                 }
 
-                // Calculate totals from items (no longer stored in DB)
-                $newTotal = $sale->items()->sum('total_price');
-                $discountAmount = (float) ($sale->discount_amount ?? 0);
+                $newTotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');
-                $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
+                $newDueAmount = max(0, $newTotal - $paidAmount);
 
                 return [
                     'sale_items' => $saleItems,
@@ -1552,47 +1204,6 @@ class SaleController extends Controller
         }
     }
 
-    /**
-     * @OA\Put(
-     *     path="/api/sales/{sale}/items/{saleItem}",
-     *     summary="Update sale item quantity/price",
-     *     description="Update the quantity or price of a sale item. Stock is adjusted automatically.",
-     *     operationId="updateSaleItem",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\Parameter(
-     *         name="sale",
-     *         in="path",
-     *         description="Sale ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\Parameter(
-     *         name="saleItem",
-     *         in="path",
-     *         description="Sale Item ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\RequestBody(
-     *         required=true,
-     *         @OA\JsonContent(
-     *             required={"quantity", "unit_price"},
-     *             @OA\Property(property="quantity", type="integer", example=2),
-     *             @OA\Property(property="unit_price", type="number", format="float", example=50.0),
-     *             @OA\Property(property="purchase_item_id", type="integer", nullable=true)
-     *         )
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Item updated",
-     *         @OA\JsonContent(
-     *             @OA\Property(property="updated_item", type="object"),
-     *             @OA\Property(property="sale", type="object")
-     *         )
-     *     )
-     * )
-     */
     public function updateSaleItem(Request $request, Sale $sale, $saleItemId)
     {
         $validatedData = $request->validate([
@@ -1667,7 +1278,6 @@ class SaleController extends Controller
                             $product->incrementWarehouseStock($sale->warehouse_id, abs($quantityDifference));
                         }
                         \Log::info('updateSaleItem: warehouse stock updated via decrement/increment');
-
                     } else {
                         // No batch tracking: adjust product stock directly
                         if ($quantityDifference > 0) {
@@ -1734,35 +1344,9 @@ class SaleController extends Controller
                 $saleItem->save();
                 \Log::info('updateSaleItem: item saved');
 
-                // Recalculate totals for the SALE HEADER
-                $newSubtotal = $sale->items()->sum('total_price'); // Gross total
-                $discountAmount = (float) ($sale->discount_amount ?? 0);
-
-                // Recalculate discount if percentage (optional, but good practice)
-                if ($sale->discount_type === 'percentage' && $sale->discount_amount > 0) {
-                    // We store absolute amount, so hard to revert to percentage without storing rate.
-                    // Assuming discount_amount is fixed value. 
-                    // If it was percentage, we might have issue. 
-                    // But typically POS sends fixed amount.
-                }
-
-                $netTotal = max(0, $newSubtotal - $discountAmount);
+                $newSubtotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');
-                $newDueAmount = max(0, $netTotal - $paidAmount);
-
-                // Update Sale Header
-                $paymentStatus = 'unpaid';
-                if ($paidAmount >= $netTotal && $netTotal > 0) {
-                    $paymentStatus = 'paid';
-                } elseif ($paidAmount > 0) {
-                    $paymentStatus = 'partial';
-                }
-
-                $sale->update([
-                    'total_amount' => $newSubtotal,
-                    'paid_amount' => $paidAmount, // Should be same, but safe to refresh
-                    'payment_status' => $paymentStatus
-                ]);
+                $newDueAmount = max(0, $newSubtotal - $paidAmount);
                 \Log::info('updateSaleItem: sale header updated');
 
                 return [
@@ -1804,34 +1388,6 @@ class SaleController extends Controller
         }
     }
 
-    /**
-     * @OA\Delete(
-     *     path="/api/sales/{sale}/items/{saleItem}",
-     *     summary="Delete sale item",
-     *     description="Remove an item from the sale and return stock to inventory.",
-     *     operationId="deleteSaleItem",
-     *     tags={"Sales"},
-     *     security={{"bearerAuth": {}}},
-     *     @OA\Parameter(
-     *         name="sale",
-     *         in="path",
-     *         description="Sale ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\Parameter(
-     *         name="saleItem",
-     *         in="path",
-     *         description="Sale Item ID",
-     *         required=true,
-     *         @OA\Schema(type="integer")
-     *     ),
-     *     @OA\Response(
-     *         response=200,
-     *         description="Item deleted"
-     *     )
-     * )
-     */
     public function deleteSaleItem(Request $request, Sale $sale, $saleItemId)
     {
         try {
@@ -1961,7 +1517,7 @@ class SaleController extends Controller
 
 
         // --- Set PDF Metadata ---
-        $pdf->SetTitle('فاتورة مبيعات - ' . ($sale->invoice_number ?: $sale->id));
+        $pdf->SetTitle('فاتورة مبيعات - ' . $sale->id);
         $pdf->SetSubject('فاتورة مبيعات');
         // SetAuthor is done in MyCustomTCPDF constructor
 
@@ -1977,7 +1533,7 @@ class SaleController extends Controller
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
         $pdf->Cell(90, 6, $companyName, 0, 0, 'R'); // Width 90mm, align right
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
-        $pdf->Cell(0, 6, 'رقم الفاتورة: ' . ($sale->invoice_number ?: $invoicePrefix . $sale->id), 0, 1, 'L'); // Align left
+        $pdf->Cell(0, 6, 'رقم الفاتورة: ' . ($invoicePrefix . $sale->id), 0, 1, 'L'); // Align left
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
         $pdf->MultiCell(90, 5, $companyAddress, 0, 'R', 0, 0, null, null, true, 0, false, true, 0, 'T');
@@ -2069,21 +1625,14 @@ class SaleController extends Controller
         $col1Width = array_sum($w_items) - $w_items[0]; // Width for labels
         $col2Width = $w_items[0]; // Width for amounts
 
-        // Compute totals from items and payments (no longer stored in DB)
         $subtotalValue = (float) ($sale->items?->sum('total_price') ?? 0);
-        $discountValue = (float) ($sale->discount_amount ?? 0);
-        $netTotal = max(0, $subtotalValue - $discountValue);
         $paidValue = (float) ($sale->payments?->sum('amount') ?? 0);
+        $netTotal = $subtotalValue;
         $due = max(0, $netTotal - $paidValue);
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
         $pdf->Cell($col1Width, 6, 'المجموع الفرعي:', 'LTR', 0, 'L', false);
         $pdf->Cell($col2Width, 6, number_format($subtotalValue, 0), 'TR', 1, 'R', false);
-
-        if ($discountValue > 0) {
-            $pdf->Cell($col1Width, 6, 'الخصم:', 'LR', 0, 'L', false);
-            $pdf->Cell($col2Width, 6, '-' . number_format($discountValue, 0), 'R', 1, 'R', false);
-        }
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
         $pdf->SetFillColor(220, 220, 220);
@@ -2130,7 +1679,7 @@ class SaleController extends Controller
         $pdf->MultiCell(0, 5, $terms, 0, 'C', 0, 1);
 
         // --- Output PDF ---
-        $pdfFileName = 'invoice_' . ($sale->invoice_number ?: $sale->id) . '_' . now()->format('Ymd') . '.pdf';
+        $pdfFileName = 'invoice_' . $sale->id . '_' . now()->format('Ymd') . '.pdf';
         $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
 
         return response($pdfContent, 200)
@@ -2214,7 +1763,7 @@ class SaleController extends Controller
 
             // --- Invoice Info ---
             $pdf->SetFont('dejavusans', '', 7);
-            $pdf->Cell(0, 4, 'فاتورة رقم: ' . ($sale->invoice_number ?: 'S-' . $sale->id), 0, 1, 'R');
+            $pdf->Cell(0, 4, 'فاتورة رقم: S-' . $sale->id, 0, 1, 'R');
             $pdf->Cell(0, 4, 'التاريخ: ' . Carbon::parse($sale->sale_date)->format('Y/m/d') . ' ' . Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
             if ($sale->client) {
                 $pdf->Cell(0, 4, 'العميل: ' . $sale->client->name, 0, 1, 'R');
@@ -2264,21 +1813,14 @@ class SaleController extends Controller
             $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
             $pdf->Ln(1);
 
-            // --- Totals --- (with discount) computed from items and payments
             $itemsSubtotal = (float) ($sale->items?->sum('total_price') ?? 0);
-            $gross = $itemsSubtotal;
-            $discountAmount = (float) ($sale->discount_amount ?? 0);
-            $finalTotal = max(0, $gross - $discountAmount);
             $paidAmount = (float) ($sale->payments?->sum('amount') ?? 0);
+            $finalTotal = $itemsSubtotal;
             $due = max(0, $finalTotal - $paidAmount);
 
             $pdf->SetFont('dejavusans', 'B', 8);
             $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
             $pdf->Cell(26, 5, number_format($itemsSubtotal, 0), 0, 1, 'R');
-
-            $pdf->SetFont('dejavusans', '', 8);
-            $pdf->Cell(46, 5, 'الخصم:', 0, 0, 'R');
-            $pdf->Cell(26, 5, '-' . number_format($discountAmount, 0), 0, 1, 'R');
 
             $pdf->SetFont('dejavusans', 'B', 9);
             $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
@@ -2315,7 +1857,7 @@ class SaleController extends Controller
             $pdf->MultiCell(0, 4, $thermalFooter, 0, 'C', 0, 1);
 
             // --- Output PDF ---
-            $pdfFileName = 'thermal_invoice_' . ($sale->invoice_number ?: $sale->id) . '.pdf';
+            $pdfFileName = 'thermal_invoice_' . $sale->id . '.pdf';
             $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
 
             return response($pdfContent, 200)
@@ -2535,11 +2077,9 @@ class SaleController extends Controller
                     }
                 }
 
-                // Calculate totals from items (no longer stored in DB)
-                $newTotal = $sale->items()->sum('total_price');
-                $discountAmount = (float) ($sale->discount_amount ?? 0);
+                $newTotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');
-                $newDueAmount = max(0, $newTotal - $discountAmount - $paidAmount);
+                $newDueAmount = max(0, $newTotal - $paidAmount);
 
                 return [
                     'added_items' => $addedItems,

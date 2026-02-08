@@ -23,7 +23,7 @@ class SaleReturnController extends Controller
     {
         DB::enableQueryLog(); // Enable query log
 
-        $query = SaleReturn::with(['client:id,name', 'originalSale:id,invoice_number']);
+        $query = SaleReturn::with(['client:id,name', 'originalSale:id,number']);
 
         // Add filters
         if ($request->has('start_date')) {
@@ -230,7 +230,7 @@ class SaleReturnController extends Controller
         // $this->authorize('view', $saleReturn); // Policy
         $saleReturn->load([
             'client:id,name',
-            'originalSale:id,invoice_number',
+            'originalSale:id,number',
             'user:id,name',
             'items',
             'items.product:id,name,sku',

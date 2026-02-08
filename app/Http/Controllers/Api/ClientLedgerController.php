@@ -51,7 +51,7 @@ class ClientLedgerController extends Controller
             $saleEntries = $sales->map(function ($sale) {
                 // Compute sale total from items minus discount
                 $itemsTotal = (float) $sale->items->sum('total_price');
-                $discount = (float) ($sale->discount_amount ?? 0);
+                $discount = 0;
                 $saleTotal = max(0.0, $itemsTotal - $discount);
                 return [
                     'id' => 'sale_' . $sale->id,
@@ -62,8 +62,8 @@ class ClientLedgerController extends Controller
                     'debit' => $saleTotal,
                     'credit' => 0,
                     'balance' => null,
-                    'reference' => $sale->invoice_number,
-                    'notes' => $sale->notes,
+                    'reference' => 'S-' . $sale->id,
+                    'notes' => null,
                     'created_at' => $sale->created_at,
                 ];
             });
@@ -92,7 +92,7 @@ class ClientLedgerController extends Controller
 
             $totalSales = (float) $sales->sum(function ($sale) {
                 $itemsTotal = (float) $sale->items->sum('total_price');
-                $discount = (float) ($sale->discount_amount ?? 0);
+                $discount = 0;
                 return max(0.0, $itemsTotal - $discount);
             });
             $totalPayments = (float) $payments->sum('credit');
@@ -170,10 +170,6 @@ class ClientLedgerController extends Controller
                         'reference_number' => $validated['reference_number'] ?? null,
                         'notes' => $validated['notes'] ?? null,
                     ]);
-
-                    // Update sale paid_amount to reflect sum of payments
-                    $sale->paid_amount = $sale->payments()->sum('amount');
-                    $sale->save();
 
                     $totalApplied += $apply;
                     $remaining -= $apply;

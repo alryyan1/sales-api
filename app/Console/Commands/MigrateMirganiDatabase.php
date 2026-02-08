@@ -881,9 +881,8 @@ class MigrateMirganiDatabase extends Command
         DB::connection('mirgani')->table($oldTable)->orderBy('id')->chunk($this->option('chunk'), function ($oldSales) use (&$migrated, &$skipped, $isDryRun, $bar) {
             foreach ($oldSales as $oldSale) {
                 try {
-                    // Check if exists by invoice number
-                    $invoiceNumber = $oldSale->invoice_number ?? null;
-                    if ($invoiceNumber && Sale::where('invoice_number', $invoiceNumber)->exists()) {
+                    // Skip if we already migrated this old sale id
+                    if (isset($this->saleIdMap[$oldSale->id])) {
                         $skipped++;
                         $bar->advance();
                         continue;
@@ -913,13 +912,6 @@ class MigrateMirganiDatabase extends Command
                             'client_id' => $clientId,
                             'user_id' => $userId,
                             'sale_date' => $saleDate,
-                            'invoice_number' => $invoiceNumber,
-                            'total_amount' => $totalAmount,
-                            'paid_amount' => $paidAmount,
-                            'discount_amount' => (float)($oldSale->discount ?? $oldSale->discount_amount ?? 0),
-                            'discount_type' => $oldSale->discount_type ?? null,
-                            'notes' => $oldSale->notes ?? null,
-                            'status' => 'completed',
                             'is_returned' => isset($oldSale->is_returned) ? (bool)$oldSale->is_returned : false,
                             'created_at' => isset($oldSale->created_at) ? Carbon::parse($oldSale->created_at) : now(),
                             'updated_at' => isset($oldSale->updated_at) ? Carbon::parse($oldSale->updated_at) : now(),

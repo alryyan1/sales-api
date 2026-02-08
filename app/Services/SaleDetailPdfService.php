@@ -74,18 +74,16 @@ class SaleDetailPdfService
         $pdf->SetFont('arial', '', 10);
         $pdf->Cell(50, 7, Carbon::parse($sale->sale_date)->format('Y-m-d'), 'B', 1, 'L');
         
-        if ($sale->invoice_number) {
-            $pdf->SetFont('arial', 'B', 10);
-            $pdf->Cell(60, 7, 'رقم الفاتورة:', 'B', 0, 'R');
-            $pdf->SetFont('arial', '', 10);
-            $pdf->Cell(50, 7, $sale->invoice_number, 'B', 1, 'L');
-        }
-        
-        if ($sale->sale_order_number) {
+        $pdf->SetFont('arial', 'B', 10);
+        $pdf->Cell(60, 7, 'رقم الفاتورة:', 'B', 0, 'R');
+        $pdf->SetFont('arial', '', 10);
+        $pdf->Cell(50, 7, 'S-' . $sale->id, 'B', 1, 'L');
+
+        if ($sale->number !== null) {
             $pdf->SetFont('arial', 'B', 10);
             $pdf->Cell(60, 7, 'رقم الطلب:', 'B', 0, 'R');
             $pdf->SetFont('arial', '', 10);
-            $pdf->Cell(50, 7, $sale->sale_order_number, 'B', 1, 'L');
+            $pdf->Cell(50, 7, (string) $sale->number, 'B', 1, 'L');
         }
         
         if ($sale->client) {
@@ -167,24 +165,19 @@ class SaleDetailPdfService
         $pdf->SetFont('arial', '', 10);
         $pdf->Cell(50, 7, number_format($subtotal, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
         
-        if ($sale->discount_amount && $sale->discount_amount > 0) {
-            $pdf->SetFont('arial', 'B', 10);
-            $pdf->Cell(90, 7, 'الخصم (' . ($sale->discount_type === 'percentage' ? $sale->discount_amount . '%' : 'ثابت') . '):', 'B', 0, 'R');
-            $pdf->SetFont('arial', '', 10);
-            $pdf->Cell(50, 7, number_format($sale->discount_amount, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
-        }
-        
+        $itemsTotal = (float) $sale->items->sum('total_price');
+        $paidTotal = (float) $sale->payments->sum('amount');
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(90, 7, 'المبلغ الإجمالي:', 'B', 0, 'R');
         $pdf->SetFont('arial', '', 10);
-        $pdf->Cell(50, 7, number_format($sale->total_amount, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
+        $pdf->Cell(50, 7, number_format($itemsTotal, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
         
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(90, 7, 'المدفوع:', 'B', 0, 'R');
         $pdf->SetFont('arial', '', 10);
-        $pdf->Cell(50, 7, number_format($sale->paid_amount ?? 0, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
+        $pdf->Cell(50, 7, number_format($paidTotal, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
         
-        $dueAmount = ($sale->due_amount ?? ($sale->total_amount - ($sale->paid_amount ?? 0)));
+        $dueAmount = max(0, $itemsTotal - $paidTotal);
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(90, 7, 'المستحق:', 'B', 0, 'R');
         $pdf->SetFont('arial', '', 10);

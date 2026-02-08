@@ -113,7 +113,6 @@ class RefactoredInventoryTest extends TestCase
             ],
             'payment_method' => 'cash',
             'amount_paid' => 1500,
-            'payment_status' => 'paid',
             'sale_date' => now()->toDateTimeString()
         ];
 

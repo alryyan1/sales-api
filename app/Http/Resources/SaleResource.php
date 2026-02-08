@@ -16,7 +16,7 @@ class SaleResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'sale_order_number' => $this->sale_order_number,
+            'number' => $this->number,
             // Client Info
             'client_id' => $this->client_id,
             'client_name' => $this->whenLoaded('client', fn() => $this->client?->name), // Use optional chaining
@@ -28,15 +28,11 @@ class SaleResource extends JsonResource
              'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
 
             'sale_date' => $this->sale_date->format('Y-m-d'),
-            'invoice_number' => $this->invoice_number,
             'is_returned' => $this->is_returned ?? false,
 
-            // Computed financial fields
-            // total_amount is now derived from items (sum of total_price) for backward compatibility
+            // Computed financial fields (columns dropped; derived from items and payments)
             'total_amount' => $this->items->sum('total_price'),
-            'discount_amount' => $this->discount_amount,
-            'discount_type' => $this->discount_type,
-            'notes' => $this->notes,
+            'discount_amount' => 0,
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
             'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null, // Include if needed
 

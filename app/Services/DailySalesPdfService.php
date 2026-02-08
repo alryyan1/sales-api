@@ -377,7 +377,7 @@ class DailySalesPdfService
             $fillColor = ($rowCount % 2 == 0) ? [255, 255, 255] : [248, 249, 250];
             $pdf->SetFillColor($fillColor[0], $fillColor[1], $fillColor[2]);
             
-            $pdf->Cell($column_width, 8, ($sale->sale_order_number ?? $sale->id), 'TB', 0, 'C', true);
+            $pdf->Cell($column_width, 8, ($sale->number ?? $sale->id), 'TB', 0, 'C', true);
             $pdf->Cell($column_width, 8, Carbon::parse($sale->created_at)->format('H:i'), 'TB', 0, 'C', true);
             $pdf->Cell($column_width, 8, ($sale->client ? $sale->client->name : 'بدون عميل'), 'TB', 0, 'C', true);
             if ($showUserColumn) {

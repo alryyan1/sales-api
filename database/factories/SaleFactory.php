@@ -10,7 +10,6 @@ use App\Models\SaleItem; // Need SaleItem factory within configure()
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\DB;     // For potential transactions
 use Illuminate\Support\Facades\Log;    // For logging issues
-use Illuminate\Support\Str;    // For invoice number
 
 /**
  * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\Sale>
@@ -38,8 +37,6 @@ class SaleFactory extends Factory
             'client_id' => $client->id,
             'user_id' => $user->id,
             'sale_date' => fake()->dateTimeBetween('-1 year', 'now')->format('Y-m-d'),
-            'invoice_number' => 'INV-' . Str::upper(Str::random(8)),
-            'notes' => fake()->optional(0.4)->sentence(),
         ];
     }
 

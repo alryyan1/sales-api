@@ -72,15 +72,15 @@ class InventoryLogController extends Controller
                 'prod.sku as product_sku',
                 'si.batch_number_sold as batch_number', // Or pi_batch.batch_number
                 DB::raw('si.quantity * -1 as quantity_change'), // Negative for sales
-                's.invoice_number as document_reference',
+                DB::raw("CONCAT('S-', s.id) as document_reference"),
                 's.id as document_id',
                 'u.name as user_name',
-                's.notes as reason_notes',
+                DB::raw('NULL as reason_notes'),
                 'w.name as warehouse_name',
                 'w.id as warehouse_id'
             )
             ->join('warehouses as w', 's.warehouse_id', '=', 'w.id')
-            ->whereIn('s.status', ['completed', 'pending']); // Count completed/pending sales
+            ->whereNotNull('s.id'); // All sales (status column removed)
 
         // --- Stock Adjustments ---
         $adjustmentsQuery = DB::table('stock_adjustments as sa')

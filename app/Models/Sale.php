@@ -9,14 +9,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property int $id
- * @property int|null $sale_order_number
+ * @property int|null $number
  * @property int|null $client_id
  * @property int|null $user_id
  * @property \Illuminate\Support\Carbon $sale_date
- * @property string|null $invoice_number
- * @property string|null $discount_amount
- * @property string|null $discount_type
- * @property string|null $notes
  * @property bool $is_returned
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
@@ -36,17 +32,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @method static \Illuminate\Database\Eloquent\Builder|Sale query()
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereClientId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereCreatedAt($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale whereDiscountAmount($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale whereDiscountType($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereId($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale whereInvoiceNumber($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale whereNotes($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale wherePaidAmount($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereSaleDate($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale whereSaleOrderNumber($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale whereStatus($value)
+ * @method static \Illuminate\Database\Eloquent\Builder|Sale whereNumber($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereSubtotal($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Sale whereTotalAmount($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereIsReturned($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUpdatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUserId($value)
@@ -57,34 +46,18 @@ class Sale extends Model
     use HasFactory;
 
     protected $fillable = [
-        'offline_id',
         'warehouse_id',
         'client_id',
         'user_id',
         'shift_id',
         'sale_date',
-        'invoice_number',
-        'notes',
-        'total_amount',
-        'tax',
-        'discount',
-        'paid_amount',
-        'discount_amount', // Keep existing
-        'discount_type',
-        'sale_order_number',
-        'payment_status',
-        'status',
+        'number',
         'is_returned',
         'total_cost',
     ];
 
     protected $casts = [
         'sale_date' => 'date',
-        'total_amount' => 'decimal:2',
-        'tax' => 'decimal:2',
-        'discount' => 'decimal:2',
-        'paid_amount' => 'decimal:2',
-        'discount_amount' => 'decimal:2',
         'is_returned' => 'boolean',
     ];
 
@@ -147,32 +120,24 @@ class Sale extends Model
     }
 
     /**
-     * Boot method to auto-generate sale_order_number
-     * Order numbers are unique per shift (shift_id + sale_order_number)
+     * Boot method to auto-generate number (unique per shift).
      */
     protected static function boot()
     {
         parent::boot();
 
         static::creating(function ($sale) {
-            if (empty($sale->sale_order_number)) {
-                // Get the next order number for the current shift
-                // If no shift_id, fall back to date-based numbering for backward compatibility
+            if (empty($sale->number)) {
                 if ($sale->shift_id) {
-                    // Lock the shift record to ensure sequential order numbering and prevent duplicates
                     Shift::where('id', $sale->shift_id)->lockForUpdate()->first();
-
-                    $maxOrderNumber = static::where('shift_id', $sale->shift_id)
-                        ->max('sale_order_number') ?? 0;
-                    $sale->sale_order_number = $maxOrderNumber + 1;
+                    $maxOrderNumber = static::where('shift_id', $sale->shift_id)->max('number') ?? 0;
+                    $sale->number = $maxOrderNumber + 1;
                 } else {
-                    // Fallback: use date-based numbering if no shift_id
-                    // Use sale_date for consistency (it's the business date, not the created_at timestamp)
                     $saleDate = $sale->sale_date ?? now()->toDateString();
                     $maxOrderNumber = static::whereDate('sale_date', $saleDate)
                         ->whereNull('shift_id')
-                        ->max('sale_order_number') ?? 0;
-                    $sale->sale_order_number = $maxOrderNumber + 1;
+                        ->max('number') ?? 0;
+                    $sale->number = $maxOrderNumber + 1;
                 }
             }
         });
@@ -184,13 +149,11 @@ class Sale extends Model
         return (float) $this->payments()->sum('amount');
     }
 
-    // Accessor for due amount
+    // Accessor for due amount (total from items, paid from payments; discount column removed)
     public function getCalculatedDueAmountAttribute(): float
     {
-        // Gross total is now derived from items
         $itemsTotal = (float) $this->items()->sum('total_price');
-        $discount = (float) ($this->discount_amount ?? 0);
         $paid = $this->getCalculatedPaidAmountAttribute();
-        return (float) max(0, $itemsTotal - $discount - $paid);
+        return (float) max(0, $itemsTotal - $paid);
     }
 }

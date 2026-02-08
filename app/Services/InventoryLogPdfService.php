@@ -244,12 +244,12 @@ class InventoryLogPdfService
                 'prod.sku as product_sku',
                 'si.batch_number_sold as batch_number',
                 DB::raw('si.quantity * -1 as quantity_change'),
-                's.invoice_number as document_reference',
+                DB::raw("CONCAT('S-', s.id) as document_reference"),
                 's.id as document_id',
                 'u.name as user_name',
-                's.notes as reason_notes'
+                DB::raw('NULL as reason_notes')
             )
-            ->whereIn('s.status', ['completed', 'pending']);
+            ->whereNotNull('s.id');
 
         // Stock Adjustments Query
         $adjustmentsQuery = DB::table('stock_adjustments as sa')

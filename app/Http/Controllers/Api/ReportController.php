@@ -109,17 +109,7 @@ class ReportController extends Controller
             });
         }
 
-        // Has Discount Filter
-        if (array_key_exists('has_discount', $validated)) {
-            $hasDiscount = filter_var($validated['has_discount'], FILTER_VALIDATE_BOOLEAN);
-            if ($hasDiscount) {
-                $query->where('discount_amount', '>', 0);
-            } else {
-                $query->where(function ($q) {
-                    $q->whereNull('discount_amount')->orWhere('discount_amount', '<=', 0);
-                });
-            }
-        }
+        // has_discount filter removed (discount_amount column dropped)
 
         // --- Sorting (Default: Newest first) ---
         $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc'); // Sort by date then ID
@@ -356,13 +346,14 @@ class ReportController extends Controller
         $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
         $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
 
-        // --- 1. Get Daily Total Sales (invoiced amount) ---
-        $dailySales = Sale::query()
+        // --- 1. Get Daily Total Sales (from sale_items) ---
+        $dailySales = SaleItem::query()
+            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
             ->select(
-                DB::raw('DATE(COALESCE(sale_date, created_at)) as sale_day'),
-                DB::raw('SUM(total_amount) as total_sales')
+                DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at)) as sale_day'),
+                DB::raw('SUM(sale_items.total_price) as total_sales')
             )
-            ->whereBetween(DB::raw('DATE(COALESCE(sale_date, created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
+            ->whereBetween(DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
             ->groupBy('sale_day')
             ->get()
             ->keyBy('sale_day');
@@ -783,7 +774,6 @@ class ReportController extends Controller
             ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
             ->leftJoin('products', 'sale_items.product_id', '=', 'products.id')
             ->whereBetween(DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at))'), [$start->toDateString(), $end->toDateString()])
-            ->whereIn('sales.status', ['completed', 'pending', 'draft'])
             ->groupBy('sale_items.product_id', 'products.name')
             ->select(
                 'sale_items.product_id',
@@ -838,9 +828,11 @@ class ReportController extends Controller
         // Note: Filtering by product_id for total revenue is complex, as a sale can have multiple products.
         // You'd typically calculate revenue per product separately if needed.
 
-        // We sum total_amount from the Sale header as it represents the total billed amount
-        $totalRevenue = $revenueQuery->whereIn('status', ['completed', 'pending']) // Include pending or only completed? Depends on accounting practice. Let's include pending for now.
-            ->sum('total_amount');
+        $totalRevenue = (float) SaleItem::query()
+            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+            ->whereBetween('sales.sale_date', [$startDate, $endDate])
+            ->when(!empty($validated['client_id']), fn ($q) => $q->where('sales.client_id', $validated['client_id']))
+            ->sum('sale_items.total_price');
 
 
         // --- Calculate Cost of Goods Sold (COGS) ---
@@ -851,8 +843,7 @@ class ReportController extends Controller
             // Join with the *specific* purchase_item (batch) the sale item came from
             // Use leftJoin in case the link is somehow broken (though constraint should prevent)
             ->leftJoin('purchase_items', 'sale_items.purchase_item_id', '=', 'purchase_items.id')
-            ->whereBetween('sales.sale_date', [$startDate, $endDate])
-            ->whereIn('sales.status', ['completed', 'pending']); // Match revenue status inclusion
+            ->whereBetween('sales.sale_date', [$startDate, $endDate]);
 
 
         // Apply filters if provided
@@ -934,28 +925,14 @@ class ReportController extends Controller
         if (!empty($validated['shift_id'])) {
             $query->where('shift_id', $validated['shift_id']);
         }
-        if (!empty($validated['status'])) {
-            $query->where('status', $validated['status']);
-        }
-        if (array_key_exists('has_discount', $validated)) {
-            $hasDiscount = filter_var($validated['has_discount'], FILTER_VALIDATE_BOOLEAN);
-            if ($hasDiscount) {
-                $query->where('discount_amount', '>', 0);
-            } else {
-                $query->where(function ($q) {
-                    $q->whereNull('discount_amount')->orWhere('discount_amount', '<=', 0);
-                });
-            }
-        }
-
         $sales = $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc')->get();
+        $sales->load(['items', 'payments']);
 
-        // Calculate Summary Statistics
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
         $totalSales = $sales->count();
-        $totalAmount = $sales->sum('total_amount');
-        $totalPaid = $sales->sum('paid_amount');
-        $totalDiscount = $sales->sum('discount_amount');
-        $totalDue = $totalAmount - $totalDiscount - $totalPaid;
+        $totalDiscount = 0;
+        $totalDue = max(0, $totalAmount - $totalPaid);
 
         // Calculate Total Expenses for the period
         $expensesQuery = \App\Models\Expense::query();
@@ -1046,28 +1023,19 @@ class ReportController extends Controller
 
     private function calculateSalesSummary($sales)
     {
+        $sales->load(['items', 'payments']);
         $totalSales = $sales->count();
-        $totalAmount = $sales->sum('total_amount');
-        $totalPaid = $sales->sum('paid_amount');
-        $totalDue = $totalAmount - $totalPaid;
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
+        $totalDue = max(0, $totalAmount - $totalPaid);
 
-        $statusBreakdown = $sales->groupBy('status')->map->count();
-        $completedSales = $statusBreakdown->get('completed', 0);
-        $pendingSales = $statusBreakdown->get('pending', 0);
-        $draftSales = $statusBreakdown->get('draft', 0);
-        $cancelledSales = $statusBreakdown->get('cancelled', 0);
-
-        $completionRate = $totalSales > 0 ? ($completedSales / $totalSales) * 100 : 0;
-
-        // Payment method breakdown
         $paymentMethods = $sales->flatMap->payments->groupBy('method')->map->sum('amount');
 
-        // Top clients
         $topClients = $sales->groupBy('client_id')
             ->map(function ($clientSales) {
                 return [
                     'name' => $clientSales->first()->client?->name ?? 'Unknown',
-                    'total' => $clientSales->sum('total_amount'),
+                    'total' => (float) $clientSales->sum(fn ($s) => $s->items->sum('total_price')),
                     'count' => $clientSales->count()
                 ];
             })
@@ -1079,13 +1047,8 @@ class ReportController extends Controller
             'total_amount' => $totalAmount,
             'total_paid' => $totalPaid,
             'total_due' => $totalDue,
-            'completion_rate' => $completionRate,
-            'status_breakdown' => [
-                'completed' => $completedSales,
-                'pending' => $pendingSales,
-                'draft' => $draftSales,
-                'cancelled' => $cancelledSales
-            ],
+            'completion_rate' => 0,
+            'status_breakdown' => [],
             'payment_methods' => $paymentMethods,
             'top_clients' => $topClients
         ];
@@ -1287,43 +1250,33 @@ class ReportController extends Controller
         $fill = false;
 
         foreach ($sales as $sale) {
-            // Calculate discount (if any)
-            $discount = 0;
-            if (isset($sale->discount_amount) && $sale->discount_amount > 0) {
-                $discount = $sale->discount_amount;
-            }
+            $saleTotal = (float) $sale->items->sum('total_price');
+            $salePaid = (float) $sale->payments->sum('amount');
 
-            // Get sale items names with quantity (optimized for smaller column)
             $itemNames = $sale->items->map(function ($item) {
                 $productName = $item->product?->name ?? 'Unknown';
                 $quantity = $item->quantity ?? 1;
                 return $productName . ' (x' . $quantity . ')';
             })->implode(', ');
 
-            // Truncate item names for smaller column width
             if (strlen($itemNames) > 30) {
                 $itemNames = substr($itemNames, 0, 27) . '...';
             }
 
-            // Status color coding with enhanced colors
-            $statusColor = $this->getStatusColor($sale->status);
+            $statusColor = $this->getStatusColor('completed');
 
-            // Format currency with proper alignment
-            $totalAmount = number_format($sale->total_amount, 0);
-            $paidAmount = number_format($sale->paid_amount, 0);
-            $discountAmount = number_format($discount, 0);
+            $totalAmount = number_format($saleTotal, 0);
+            $paidAmount = number_format($salePaid, 0);
+            $discountAmount = '0';
 
-            // Format date for smaller column (compact format)
             $saleDate = Carbon::parse($sale->sale_date)->format('M d, H:i');
 
-            // Get user name with fallback (truncate if too long)
             $userName = $sale->user?->name ?? 'System';
             if (strlen($userName) > 20) {
                 $userName = substr($userName, 0, 17) . '...';
             }
 
-            // Compact transaction ID with status
-            $transactionId = '#' . $sale->id . ' (' . substr(ucfirst($sale->status), 0, 3) . ')';
+            $transactionId = '#' . $sale->id;
 
             $rowData = [
                 $transactionId,
@@ -1349,15 +1302,14 @@ class ReportController extends Controller
 
     private function generateProfessionalSummaryRow($pdf, $sales, $columnWidths)
     {
-        // Enhanced summary row with better styling
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
-        $pdf->SetFillColor(70, 130, 180); // Steel blue background
-        $pdf->SetTextColor(255, 255, 255); // White text
+        $pdf->SetFillColor(70, 130, 180);
+        $pdf->SetTextColor(255, 255, 255);
 
-        $totalAmount = $sales->sum('total_amount');
-        $totalPaid = $sales->sum('paid_amount');
-        $totalDiscount = $sales->sum('discount_amount');
-        $totalDue = $totalAmount - $totalPaid;
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
+        $totalDiscount = 0;
+        $totalDue = max(0, $totalAmount - $totalPaid);
 
         $summaryData = [
             'TOTAL',
@@ -1380,24 +1332,20 @@ class ReportController extends Controller
 
     private function generateSalesStatistics($pdf, $sales)
     {
-        // Additional professional statistics
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
         $pdf->Cell(0, 8, 'Transaction Analysis', 0, 1, 'L');
         $pdf->Ln(3);
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
 
-        // Calculate additional statistics
-        $totalAmount = $sales->sum('total_amount');
-        $totalPaid = $sales->sum('paid_amount');
-        $totalDue = $totalAmount - $totalPaid;
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
+        $totalDue = max(0, $totalAmount - $totalPaid);
         $avgSaleValue = $sales->count() > 0 ? $totalAmount / $sales->count() : 0;
         $paymentRate = $totalAmount > 0 ? ($totalPaid / $totalAmount) * 100 : 0;
 
-        // Status breakdown
-        $statusBreakdown = $sales->groupBy('status')->map->count();
-        $completedCount = $statusBreakdown->get('completed', 0);
-        $pendingCount = $statusBreakdown->get('pending', 0);
+        $completedCount = $sales->count();
+        $pendingCount = 0;
 
         // Create statistics in a professional format
         $statsData = [

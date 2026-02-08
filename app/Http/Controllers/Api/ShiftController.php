@@ -42,7 +42,6 @@ class ShiftController extends Controller
     public function index(Request $request)
     {
         $shifts = Shift::with('user')->orderBy('id', 'desc')
-            ->limit(100) // Limit to recent 100 shifts
             ->get(['id', 'opened_at', 'closed_at', 'user_id']);
 
         return response()->json([
@@ -86,10 +85,7 @@ class ShiftController extends Controller
      */
     public function current(Request $request)
     {
-        $user = $request->user();
-
         $shift = Shift::with(['user', 'closedByUser'])
-            ->where('user_id', $user->id)
             ->orderBy('id', 'desc')
             ->first();
 
