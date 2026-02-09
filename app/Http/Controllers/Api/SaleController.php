@@ -1436,10 +1436,10 @@ class SaleController extends Controller
             ]);
 
             // --- PDF Setup for Thermal (e.g., 80mm width) ---
-            // Dynamic height: base + items + payments
+            // Dynamic height: base + items + payments + space for barcode at bottom
             $itemsCount = $sale->items?->count() ?? 0;
             $paymentsCount = $sale->payments?->count() ?? 0;
-            $pageHeightMm = 105 + (5 * $itemsCount) + (5 * $paymentsCount);
+            $pageHeightMm = 125 + (5 * $itemsCount) + (5 * $paymentsCount);
 
             // Log::info("Generating thermal PDF for Sale {$sale->id}. Height: {$pageHeightMm}mm");
 
@@ -1485,10 +1485,10 @@ class SaleController extends Controller
                 }
             }
 
-            $pdf->SetFont('dejavusans', 'B', 10); // Or your preferred Arabic thermal font
+            $pdf->SetFont('arial', 'B', 10); // Or your preferred Arabic thermal font
             $pdf->MultiCell(0, 5, $companyName, 0, 'C', 0, 1);
             if ($companyPhone) {
-                $pdf->SetFont('dejavusans', '', 8);
+                $pdf->SetFont('arial', '', 8);
                 $pdf->MultiCell(0, 4, 'الهاتف: ' . $companyPhone, 0, 'C', 0, 1);
             }
             // if ($vatNumber) {
@@ -1497,7 +1497,7 @@ class SaleController extends Controller
             $pdf->Ln(2);
 
             // --- Invoice Info ---
-            $pdf->SetFont('dejavusans', '', 7);
+            $pdf->SetFont('arial', '', 7);
             $pdf->Cell(0, 4, 'فاتورة رقم: S-' . $sale->id, 0, 1, 'R');
             $pdf->Cell(0, 4, 'التاريخ: ' . Carbon::parse($sale->sale_date)->format('Y/m/d') . ' ' . Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
             if ($sale->client) {
@@ -1513,7 +1513,7 @@ class SaleController extends Controller
             // --- Items Header ---
             // Text: Item | Qty | Price | Total
             // Align: R  | C   | R     | R
-            $pdf->SetFont('dejavusans', 'B', 7);
+            $pdf->SetFont('arial', 'B', 7);
             $pdf->Cell(18, 5, 'الإجمالي', 0, 0, 'R'); // Total
             $pdf->Cell(18, 5, 'السعر', 0, 0, 'R');    // Price
             $pdf->Cell(10, 5, 'كمية', 0, 0, 'C');   // Qty
@@ -1523,7 +1523,7 @@ class SaleController extends Controller
             $pdf->Ln(0.5);
 
             // --- Items Loop ---
-            $pdf->SetFont('dejavusans', '', 7);
+            $pdf->SetFont('arial', '', 7);
             foreach ($sale->items as $item) {
                 $productName = $item->product?->name ?: 'Product N/A';
                 // Truncate or wrap product name if too long for thermal width
@@ -1553,27 +1553,27 @@ class SaleController extends Controller
             $finalTotal = $itemsSubtotal;
             $due = max(0, $finalTotal - $paidAmount);
 
-            $pdf->SetFont('dejavusans', 'B', 8);
+            $pdf->SetFont('arial', 'B', 8);
             $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
             $pdf->Cell(26, 5, number_format($itemsSubtotal, 0), 0, 1, 'R');
 
-            $pdf->SetFont('dejavusans', 'B', 9);
+            $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
             $pdf->Cell(26, 6, number_format($finalTotal, 0), 0, 1, 'R');
 
-            $pdf->SetFont('dejavusans', '', 8);
+            $pdf->SetFont('arial', '', 8);
             $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
             $pdf->Cell(26, 5, number_format($paidAmount, 0), 0, 1, 'R');
-            $pdf->SetFont('dejavusans', 'B', 8);
+            $pdf->SetFont('arial', 'B', 8);
             $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
             $pdf->Cell(26, 5, number_format($due, 0), 0, 1, 'R');
             $pdf->Ln(1);
 
             // --- Payment Methods Used ---
             if ($sale->payments && $sale->payments->count() > 0) {
-                $pdf->SetFont('dejavusans', 'B', 7);
+                $pdf->SetFont('arial', 'B', 7);
                 $pdf->Cell(0, 4, 'طرق الدفع:', 0, 1, 'R');
-                $pdf->SetFont('dejavusans', '', 7);
+                $pdf->SetFont('arial', '', 7);
                 foreach ($sale->payments as $payment) {
                     $methodLabel = $payment->method;
                     if (function_exists('config')) {
@@ -1587,9 +1587,22 @@ class SaleController extends Controller
 
 
             // --- Footer Message ---
-            $pdf->SetFont('dejavusans', '', 7);
+            $pdf->SetFont('arial', '', 7);
             $thermalFooter = $settingsThermal['invoice_thermal_footer'] ?? config('app_settings.invoice_thermal_footer', 'شكراً لزيارتكم!');
             $pdf->MultiCell(0, 4, $thermalFooter, 0, 'C', 0, 1);
+
+            // --- Barcode at bottom (invoice/sale identifier for scanning) ---
+            $pdf->Ln(3);
+            $barcodeCode = $sale->id;
+            $barcodeW = 60;
+            $barcodeH = 10;
+            $pageW = $pdf->getPageWidth();
+            $barcodeX = ($pageW - $barcodeW) / 2;
+            $barcodeY = $pdf->GetY();
+            $pdf->write1DBarcode("$barcodeCode", 'C128', 50, $barcodeY, $barcodeW, $barcodeH, null, [], 'N');
+            $pdf->Ln(2);
+            $pdf->SetFont('arial', '', 6);
+            $pdf->Cell(0, 3, $barcodeCode, 0, 1, 'C');
 
             // --- Output PDF ---
             $pdfFileName = 'thermal_invoice_' . $sale->id . '.pdf';

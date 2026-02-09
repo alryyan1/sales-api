@@ -7,6 +7,7 @@ use App\Http\Resources\ProductResource;
 use App\Http\Resources\PurchaseItemResource;
 use Illuminate\Http\Request;
 use App\Models\Sale; // Import the Sale model
+use App\Models\Shift;
 use App\Http\Resources\SaleResource; // Reuse SaleResource for formatting
 use App\Models\Payment;
 use App\Models\Product;
@@ -970,7 +971,26 @@ class ReportController extends Controller
         }
         $totalExpenses = (float) $expensesQuery->sum('amount');
 
-        // Payment methods breakdown
+        // Expense breakdown by payment method (cash / bank) for popup-style summary
+        $expensesForBreakdown = \App\Models\Expense::query();
+        if (!empty($validated['shift_id'])) {
+            $expensesForBreakdown->where('shift_id', $validated['shift_id']);
+        } else {
+            if ($startDate) {
+                $expensesForBreakdown->whereDate('expense_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $expensesForBreakdown->whereDate('expense_date', '<=', $endDate);
+            }
+        }
+        if (!empty($validated['user_id'])) {
+            $expensesForBreakdown->where('user_id', $validated['user_id']);
+        }
+        $expensesByMethod = $expensesForBreakdown->get()->groupBy('payment_method')->map->sum('amount');
+        $expenseCash = (float) ($expensesByMethod['cash'] ?? 0);
+        $expenseBank = (float) ($expensesByMethod['bank'] ?? 0);
+
+        // Payment methods breakdown (sales payments: cash, bankak, etc.)
         $paymentMethods = [];
         foreach ($sales as $sale) {
             foreach ($sale->payments as $payment) {
@@ -982,6 +1002,12 @@ class ReportController extends Controller
             }
         }
 
+        // Load shift when filtering by shift_id (for popup-style header)
+        $shift = null;
+        if (!empty($validated['shift_id'])) {
+            $shift = Shift::with('user')->find($validated['shift_id']);
+        }
+
         // Generate PDF using service
         $pdfService = new SalesReportPdfService();
         $summaryStats = [
@@ -991,6 +1017,13 @@ class ReportController extends Controller
             'totalDue' => $totalDue,
             'totalDiscount' => $totalDiscount,
             'totalExpenses' => $totalExpenses,
+            'expenseCash' => $expenseCash,
+            'expenseBank' => $expenseBank,
+            'shift' => $shift ? [
+                'id' => $shift->id,
+                'opened_at' => $shift->opened_at?->format('Y-m-d H:i'),
+                'user_name' => $shift->user?->name,
+            ] : null,
         ];
 
         // Get base URL for hyperlinks
