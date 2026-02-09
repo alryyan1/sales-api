@@ -210,7 +210,7 @@ class UserController extends Controller
         // Check authorization
         $this->authorize('viewAny', User::class);
 
-        // Define navigation structure matching frontend navItems.ts
+        // Define navigation structure matching current frontend routes/navItems.ts
         $navigationItems = [
             [
                 'category' => 'لوحة التحكم',
@@ -221,8 +221,7 @@ class UserController extends Controller
             [
                 'category' => 'المبيعات',
                 'items' => [
-                    ['route' => '/sales/pos-offline', 'label' => 'نقطة البيع (Offline)'],
-                    ['route' => '/sales/pos', 'label' => 'نقطة البيع (Online)'],
+                    ['route' => '/sales/pos-blank', 'label' => 'نقطة البيع الموحدة'],
                     ['route' => '/sales/returns', 'label' => 'مردودات المبيعات'],
                     ['route' => '/clients', 'label' => 'العملاء']
                 ]
@@ -233,12 +232,13 @@ class UserController extends Controller
                     ['route' => '/products', 'label' => 'المنتجات'],
                     ['route' => '/inventory/adjustments', 'label' => 'تعديلات المخزون'],
                     ['route' => '/inventory/transfers', 'label' => 'تحويل المخزون'],
-                    ['route' => '/suppliers', 'label' => 'الموردون']
+                    ['route' => '/inventory/counts', 'label' => 'جرد المخزون']
                 ]
             ],
             [
                 'category' => 'المشتريات',
                 'items' => [
+                    ['route' => '/suppliers', 'label' => 'الموردون'],
                     ['route' => '/purchases', 'label' => 'قائمة المشتريات']
                 ]
             ],
