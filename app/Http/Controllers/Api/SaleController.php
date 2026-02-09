@@ -917,14 +917,51 @@ class SaleController extends Controller
                     ->first();
 
                 if ($existingSaleItem) {
-                    $currentTotal = (float) $sale->items()->sum('total_price');
+                    // Increase quantity of existing item
+                    $warehouseId = $sale->warehouse_id ?? 1;
+                    $oldQuantity = $existingSaleItem->quantity;
+                    $additionalQuantity = $validatedData['quantity'];
+                    $newQuantity = $oldQuantity + $additionalQuantity;
+
+                    // Check stock availability for the additional quantity
+                    $availableInWarehouse = $product->countStock($warehouseId);
+                    $currentInOtherItems = $sale->items()
+                        ->where('product_id', $product->id)
+                        ->where('id', '!=', $existingSaleItem->id)
+                        ->sum('quantity');
+                    $availableForThisItem = $availableInWarehouse - $currentInOtherItems;
+
+                    if ($availableForThisItem < $newQuantity) {
+                        throw ValidationException::withMessages([
+                            'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested total: {$newQuantity}"
+                        ]);
+                    }
+
+                    // Decrement warehouse stock by the additional quantity
+                    $product->decrementWarehouseStock($warehouseId, $additionalQuantity);
+
+                    // Update unit price if provided (otherwise keep existing)
+                    $resolvedUnitPrice = (float) ($validatedData['unit_price'] ?? 0);
+                    if ($resolvedUnitPrice > 0) {
+                        $existingSaleItem->unit_price = $resolvedUnitPrice;
+                    } else {
+                        $resolvedUnitPrice = (float) $existingSaleItem->unit_price;
+                    }
+
+                    // Update quantity and total price
+                    $existingSaleItem->quantity = $newQuantity;
+                    $existingSaleItem->total_price = $newQuantity * $resolvedUnitPrice;
+                    $existingSaleItem->save();
+
+                    $newTotal = (float) $sale->items()->sum('total_price');
                     $paidAmount = (float) $sale->payments()->sum('amount');
-                    $dueAmount = max(0, $currentTotal - $paidAmount);
+                    $newDueAmount = max(0, $newTotal - $paidAmount);
+
                     return [
-                        'sale_items' => [],
-                        'new_total' => $currentTotal,
-                        'new_due_amount' => $dueAmount,
-                        'product_already_exists' => true
+                        'sale_items' => [$existingSaleItem],
+                        'new_total' => $newTotal,
+                        'new_due_amount' => $newDueAmount,
+                        'quantity_increased' => true
                     ];
                 }
 
@@ -985,12 +1022,12 @@ class SaleController extends Controller
                 'payments.user:id,name'
             ]);
 
-            // Check if product already existed
-            if (isset($result['product_already_exists']) && $result['product_already_exists']) {
+            // Check if quantity was increased for existing item
+            if (isset($result['quantity_increased']) && $result['quantity_increased']) {
                 return response()->json([
-                    'message' => 'Product already exists in sale',
+                    'message' => 'Sale item quantity increased successfully',
                     'sale' => new SaleResource($sale),
-                    'added_items' => []
+                    'added_items' => SaleItemResource::collection($result['sale_items'])
                 ], Response::HTTP_OK);
             }
 
@@ -1497,7 +1534,7 @@ class SaleController extends Controller
             $pdf->Ln(2);
 
             // --- Invoice Info ---
-            $pdf->SetFont('arial', '', 7);
+            $pdf->SetFont('arial', '', 9);
             $pdf->Cell(0, 4, 'فاتورة رقم: S-' . $sale->id, 0, 1, 'R');
             $pdf->Cell(0, 4, 'التاريخ: ' . Carbon::parse($sale->sale_date)->format('Y/m/d') . ' ' . Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
             if ($sale->client) {
@@ -1513,7 +1550,7 @@ class SaleController extends Controller
             // --- Items Header ---
             // Text: Item | Qty | Price | Total
             // Align: R  | C   | R     | R
-            $pdf->SetFont('arial', 'B', 7);
+            $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell(18, 5, 'الإجمالي', 0, 0, 'R'); // Total
             $pdf->Cell(18, 5, 'السعر', 0, 0, 'R');    // Price
             $pdf->Cell(10, 5, 'كمية', 0, 0, 'C');   // Qty
@@ -1523,7 +1560,7 @@ class SaleController extends Controller
             $pdf->Ln(0.5);
 
             // --- Items Loop ---
-            $pdf->SetFont('arial', '', 7);
+            $pdf->SetFont('arial', '', 9);
             foreach ($sale->items as $item) {
                 $productName = $item->product?->name ?: 'Product N/A';
                 // Truncate or wrap product name if too long for thermal width
@@ -1553,7 +1590,7 @@ class SaleController extends Controller
             $finalTotal = $itemsSubtotal;
             $due = max(0, $finalTotal - $paidAmount);
 
-            $pdf->SetFont('arial', 'B', 8);
+            $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
             $pdf->Cell(26, 5, number_format($itemsSubtotal, 0), 0, 1, 'R');
 
