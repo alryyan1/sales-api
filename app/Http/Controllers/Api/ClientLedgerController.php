@@ -49,9 +49,9 @@ class ClientLedgerController extends Controller
 
             // Build sale entries
             $saleEntries = $sales->map(function ($sale) {
-                // Compute sale total from items minus discount
+                // Compute sale total from items minus discount (stored as amount)
                 $itemsTotal = (float) $sale->items->sum('total_price');
-                $discount = 0;
+                $discount = (float) ($sale->discount_amount ?? 0);
                 $saleTotal = max(0.0, $itemsTotal - $discount);
                 return [
                     'id' => 'sale_' . $sale->id,
@@ -92,7 +92,7 @@ class ClientLedgerController extends Controller
 
             $totalSales = (float) $sales->sum(function ($sale) {
                 $itemsTotal = (float) $sale->items->sum('total_price');
-                $discount = 0;
+                $discount = (float) ($sale->discount_amount ?? 0);
                 return max(0.0, $itemsTotal - $discount);
             });
             $totalPayments = (float) $payments->sum('credit');

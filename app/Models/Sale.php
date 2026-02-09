@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int|null $user_id
  * @property \Illuminate\Support\Carbon $sale_date
  * @property bool $is_returned
+ * @property float|string|null $discount_amount
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property-read \App\Models\Client|null $client
@@ -54,11 +55,13 @@ class Sale extends Model
         'number',
         'is_returned',
         'total_cost',
+        'discount_amount',
     ];
 
     protected $casts = [
         'sale_date' => 'date',
         'is_returned' => 'boolean',
+        'discount_amount' => 'decimal:2',
     ];
 
     /**
@@ -149,11 +152,12 @@ class Sale extends Model
         return (float) $this->payments()->sum('amount');
     }
 
-    // Accessor for due amount (total from items, paid from payments; discount column removed)
+    // Accessor for due amount (subtotal - discount_amount - paid)
     public function getCalculatedDueAmountAttribute(): float
     {
         $itemsTotal = (float) $this->items()->sum('total_price');
+        $discount = (float) ($this->discount_amount ?? 0);
         $paid = $this->getCalculatedPaidAmountAttribute();
-        return (float) max(0, $itemsTotal - $paid);
+        return (float) max(0, $itemsTotal - $discount - $paid);
     }
 }

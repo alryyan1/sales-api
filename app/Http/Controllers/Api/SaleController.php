@@ -266,7 +266,8 @@ class SaleController extends Controller
 
                 $this->createPaymentRecords($validatedData, $saleHeader, $request);
 
-                // total_amount, paid_amount, discount_amount columns dropped; derived from items and payments
+                // Persist discount as amount only
+                $saleHeader->update(['discount_amount' => round($calculatedTotals['discountAmount'], 2)]);
 
                 return $saleHeader;
             });
@@ -306,7 +307,8 @@ class SaleController extends Controller
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1', // Quantity of sellable units
             'items.*.unit_price' => 'required|numeric|min:0', // Sale price PER SELLABLE UNIT
-            'discount_amount' => 'nullable|numeric|min:0', // Discount amount (fixed); percentage computed from request if needed
+            'discount_amount' => 'nullable|numeric|min:0',
+            'discount_type' => ['nullable', Rule::in(['percentage', 'fixed'])],
             'payments' => 'present|array',
             'payments.*.method' => [
                 'required_with:payments.*.amount',
@@ -376,10 +378,16 @@ class SaleController extends Controller
             $subtotal += ($itemData['quantity'] * $itemData['unit_price']);
         }
 
-        // Calculate discount
+        // Calculate discount (input can be percentage or fixed; we store and use amount only)
         $discountAmount = 0;
         if (isset($validatedData['discount_amount']) && $validatedData['discount_amount'] > 0) {
-            $discountAmount = min((float) $validatedData['discount_amount'], $subtotal); // Fixed discount, cap at subtotal
+            $type = $validatedData['discount_type'] ?? 'fixed';
+            if ($type === 'percentage') {
+                $pct = min(100, (float) $validatedData['discount_amount']);
+                $discountAmount = $subtotal * ($pct / 100);
+            } else {
+                $discountAmount = min((float) $validatedData['discount_amount'], $subtotal);
+            }
         }
 
         // Calculate amount after discount (net amount)
@@ -838,7 +846,8 @@ class SaleController extends Controller
 
                 $totalAfterDiscount = $subtotal - $discountValue;
 
-                // discount_amount column dropped; discount not persisted (due = items total - payments)
+                // Persist discount as amount only
+                $sale->update(['discount_amount' => round($discountValue, 2)]);
             });
 
             // Reload relevant relations for client consumption

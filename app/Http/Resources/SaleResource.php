@@ -30,9 +30,10 @@ class SaleResource extends JsonResource
             'sale_date' => $this->sale_date->format('Y-m-d'),
             'is_returned' => $this->is_returned ?? false,
 
-            // Computed financial fields (columns dropped; derived from items and payments)
-            'total_amount' => $this->items->sum('total_price'),
-            'discount_amount' => 0,
+            // Subtotal from items; discount stored as amount; total = subtotal - discount
+            'subtotal' => (float) $this->items->sum('total_price'),
+            'discount_amount' => (float) ($this->discount_amount ?? 0),
+            'total_amount' => (float) ($this->items->sum('total_price') - ($this->discount_amount ?? 0)),
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
             'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null, // Include if needed
 
