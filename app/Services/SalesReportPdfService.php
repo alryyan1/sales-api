@@ -42,9 +42,10 @@ class SalesReportPdfService
 
         // --- PAGE 1: REPORT OVERVIEW (popup-style summary) ---
         $pdf->AddPage();
+        $totalDiscount = $sales->sum(fn (Sale $s) => (float) ($s->discount_amount ?? 0));
         $this->renderHeader($pdf, $summaryStats, $startDate, $endDate);
         $this->renderFilters($pdf, $validatedFilters);
-        $this->renderSummaryPopupStyle($pdf, $summaryStats, $paymentMethods);
+        $this->renderSummaryPopupStyle($pdf, $summaryStats, $paymentMethods, $totalDiscount);
 
         if (!empty($paymentMethods)) {
             $this->renderPaymentMethodTable($pdf, $paymentMethods);
@@ -115,7 +116,7 @@ class SalesReportPdfService
     /**
      * Summary in the same style as the POS shift summary popup.
      */
-    private function renderSummaryPopupStyle(TCPDF $pdf, array $stats, array $paymentMethods): void
+    private function renderSummaryPopupStyle(TCPDF $pdf, array $stats, array $paymentMethods, float $totalDiscount = 0): void
     {
         $pdf->SetFont(self::FONT_MAIN, 'B', self::SIZE_BODY);
         $pdf->SetFillColor(240, 240, 240);
@@ -143,6 +144,7 @@ class SalesReportPdfService
         }
         $rows[] = ['نقدي', number_format($cash, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['بنكك', number_format($bankak, 2) . ' ' . $this->currencySymbol, true];
+        $rows[] = ['إجمالي الخصومات', number_format($totalDiscount, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['مصروف نقدي', number_format($expenseCash, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['مصروف بنك', number_format($expenseBank, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['صافي نقدي', number_format($netCash, 2) . ' ' . $this->currencySymbol, true];
@@ -160,13 +162,12 @@ class SalesReportPdfService
         $cols = [
             ['w' => 8, 't' => '#'], // Reduced 10->8
             ['w' => 20, 't' => 'التاريخ'], // Reduced 22->20
-            ['w' => 22, 't' => 'العميل'], // Reduced 25->22
-            ['w' => 24, 't' => 'البائع'], // Reduced 30->24
+            ['w' => 24, 't' => 'المستخدم'], // Reduced 30->24
             ['w' => 17, 't' => 'الإجمالي'], // Reduced 18->17
             ['w' => 13, 't' => 'الخصم'], // Reduced 15->13
             ['w' => 17, 't' => 'المدفوع'], // Reduced 18->17
             ['w' => 13, 't' => 'المتبقي'], // Reduced 15->13
-            ['w' => 46, 't' => 'طريقة الدفع'], // Increased 27->46
+            ['w' => 66, 't' => 'طريقة الدفع'], // Increased 27->46
         ];
 
         // Column Headers
@@ -203,13 +204,12 @@ class SalesReportPdfService
 
             $pdf->Cell($cols[0]['w'], 7, (string) $sale->id, 1, 0, 'C');
             $pdf->Cell($cols[1]['w'], 7, $saleDate, 1, 0, 'C');
-            $pdf->Cell($cols[2]['w'], 7, ' ' . mb_substr($clientName, 0, 25), 1, 0, 'C');
-            $pdf->Cell($cols[3]['w'], 7, ' ' . $userName, 1, 0, 'C');
-            $pdf->Cell($cols[4]['w'], 7, number_format($totalAmount, 2), 1, 0, 'C');
-            $pdf->Cell($cols[5]['w'], 7, number_format($discount, 2), 1, 0, 'C');
-            $pdf->Cell($cols[6]['w'], 7, number_format($paidAmount, 2), 1, 0, 'C');
-            $pdf->Cell($cols[7]['w'], 7, number_format($due, 2), 1, 0, 'C');
-            $pdf->Cell($cols[8]['w'], 7, ' ' . $this->formatPaymentMethods($sale), 1, 1, 'C');
+            $pdf->Cell($cols[2]['w'], 7, ' ' . $userName, 1, 0, 'C');
+            $pdf->Cell($cols[3]['w'], 7, number_format($totalAmount, 2), 1, 0, 'C');
+            $pdf->Cell($cols[4]['w'], 7, number_format($discount, 2), 1, 0, 'C');
+            $pdf->Cell($cols[5]['w'], 7, number_format($paidAmount, 2), 1, 0, 'C');
+            $pdf->Cell($cols[6]['w'], 7, number_format($due, 2), 1, 0, 'C');
+            $pdf->Cell($cols[7]['w'], 7, ' ' . $this->formatPaymentMethods($sale), 1, 1, 'C');
         }
     }
 

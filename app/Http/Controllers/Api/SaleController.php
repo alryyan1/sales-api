@@ -125,6 +125,12 @@ class SaleController extends Controller
             return SaleResource::collection(collect());
         }
 
+        // POS: only show sales belonging to the current user
+        $user = $request->user();
+        if ($user) {
+            $query->where('user_id', $user->id);
+        }
+
         $sales = $query->orderBy('id', 'desc')->get();
 
         $sales->transform(function ($sale) {
