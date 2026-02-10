@@ -126,10 +126,13 @@ class SalesReportPdfService
 
         $cash = (float) ($paymentMethods['cash'] ?? 0);
         $bankak = (float) ($paymentMethods['bankak'] ?? 0);
+        $ocash = (float) ($paymentMethods['ocash'] ?? 0);
+        $fawry = (float) ($paymentMethods['fawry'] ?? 0);
+        $otherBanks = $ocash + $fawry;
         $expenseCash = (float) ($stats['expenseCash'] ?? 0);
         $expenseBank = (float) ($stats['expenseBank'] ?? 0);
         $netCash = $cash - $expenseCash;
-        $netBank = $bankak - $expenseBank;
+        $netBank = $bankak + $otherBanks - $expenseBank;
 
         $rows = [];
         if (!empty($stats['shift'])) {
@@ -144,6 +147,7 @@ class SalesReportPdfService
         }
         $rows[] = ['نقدي', number_format($cash, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['بنكك', number_format($bankak, 2) . ' ' . $this->currencySymbol, true];
+        $rows[] = ['بنوك اخري', number_format($otherBanks, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['إجمالي الخصومات', number_format($totalDiscount, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['مصروف نقدي', number_format($expenseCash, 2) . ' ' . $this->currencySymbol, true];
         $rows[] = ['مصروف بنك', number_format($expenseBank, 2) . ' ' . $this->currencySymbol, true];

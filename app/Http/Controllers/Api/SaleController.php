@@ -933,7 +933,7 @@ class SaleController extends Controller
 
                 if ($existingSaleItem) {
                     // Increase quantity of existing item
-                    $warehouseId = $sale->warehouse_id ?? 1;
+                    $warehouseId = $sale->warehouse_id ;
                     $oldQuantity = $existingSaleItem->quantity;
                     $additionalQuantity = $validatedData['quantity'];
                     $newQuantity = $oldQuantity + $additionalQuantity;
