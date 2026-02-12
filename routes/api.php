@@ -27,11 +27,10 @@ use App\Http\Controllers\Api\{
   SystemController,
   UnitController,
   UserController,
-  WhatsAppController,
-  WhatsAppSchedulerController,
   ShiftController,
   WarehouseController,
-  StockTransferController
+  StockTransferController,
+  WhatsAppCloudApiController
 };
 use App\Http\Controllers\UpdateController;
 
@@ -47,6 +46,10 @@ Route::post('/login', [AuthController::class, 'login'])->name('api.login');
 Route::get('/health', function () {
   return response()->json(['status' => 'ok', 'timestamp' => now()], 200);
 })->name('api.health');
+
+// --- Public WhatsApp Cloud Webhook Routes (no auth) ---
+Route::get('/whatsapp-cloud/webhook', [WhatsAppCloudApiController::class, 'verifyWebhook']);
+Route::post('/whatsapp-cloud/webhook', [WhatsAppCloudApiController::class, 'webhook']);
 
 // --- Protected Routes ---
 Route::middleware('auth:sanctum')->group(function () {
@@ -141,17 +144,19 @@ Route::middleware('auth:sanctum')->group(function () {
       Route::get('/frontend-instructions', [SystemController::class, 'getFrontendUpdateInstructions'])->name('frontend-instructions');
     });
 
-    // -- WhatsApp Scheduler Routes --
-    Route::get('/whatsapp-schedulers/options', [WhatsAppSchedulerController::class, 'options'])->name('whatsapp-schedulers.options');
-    Route::apiResource('whatsapp-schedulers', WhatsAppSchedulerController::class);
-    Route::patch('/whatsapp-schedulers/{whatsapp_scheduler}/toggle', [WhatsAppSchedulerController::class, 'toggle'])->name('whatsapp-schedulers.toggle');
-
-    // -- WhatsApp API Routes --
-    Route::prefix('whatsapp')->group(function () {
-      Route::post('/send-message', [WhatsAppController::class, 'sendMessage']);
-      Route::post('/test', [WhatsAppController::class, 'test']);
-      Route::get('/status', [WhatsAppController::class, 'getStatus']);
-      Route::post('/send-sale-notification', [WhatsAppController::class, 'sendSaleNotification']);
+    // -- WhatsApp Cloud API Routes --
+    Route::prefix('whatsapp-cloud')->group(function () {
+      Route::post('/send-text', [WhatsAppCloudApiController::class, 'sendTextMessage']);
+      Route::post('/send-template', [WhatsAppCloudApiController::class, 'sendTemplateMessage']);
+      Route::post('/send-document', [WhatsAppCloudApiController::class, 'sendDocument']);
+      Route::post('/send-image', [WhatsAppCloudApiController::class, 'sendImage']);
+      Route::post('/send-audio', [WhatsAppCloudApiController::class, 'sendAudio']);
+      Route::post('/send-video', [WhatsAppCloudApiController::class, 'sendVideo']);
+      Route::post('/send-location', [WhatsAppCloudApiController::class, 'sendLocation']);
+      Route::get('/templates', [WhatsAppCloudApiController::class, 'getTemplates']);
+      Route::get('/phone-numbers', [WhatsAppCloudApiController::class, 'getPhoneNumbers']);
+      Route::get('/is-configured', [WhatsAppCloudApiController::class, 'isConfigured']);
+      Route::get('/test-get-result-by-phone/{phone?}', [WhatsAppCloudApiController::class, 'testGetResultUrlByPhone']);
     });
   });
 
@@ -169,9 +174,8 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/payment-types', [SupplierPaymentController::class, 'getPaymentTypes']);
 
   // -- Sale Returns --
-  Route::get('/sale-returns/total-amount', [SaleReturnController::class, 'getTotalReturnedAmount'])->name('api.sale-returns.total-amount');
-  Route::apiResource('sale-returns', SaleReturnController::class)->except(['update', 'destroy']);
-  Route::get('/sales/{sale}/returnable-items', [SaleController::class, 'getReturnableItems'])->name('api.sales.returnableItems');
+  Route::get('/sale-returns', [SaleReturnController::class, 'index'])->name('api.sale-returns.index');
+  Route::post('/sale-returns', [SaleReturnController::class, 'store'])->name('api.sale-returns.store');
 
   // -- Products Management --
   Route::post('/product/by-ids', [ProductController::class, 'getByIds']);

@@ -150,16 +150,8 @@ class ReportController extends Controller
 
         $totalExpenses = (float) $expensesQuery->sum('amount');
 
-        // 2. Calculate Total Refunds from sale_returns table
-        $refundsQuery = \App\Models\SaleReturn::where('status', 'completed');
-        if ($startDate)
-            $refundsQuery->whereDate('return_date', '>=', $startDate);
-        if ($endDate)
-            $refundsQuery->whereDate('return_date', '<=', $endDate);
-        if ($userId)
-            $refundsQuery->where('user_id', $userId);
-
-        $totalRefunds = (float) $refundsQuery->sum('refunded_amount');
+        // 2. Total refunds from sale_returns were removed; keep API shape but return 0
+        $totalRefunds = 0.0;
 
         return response()->json([
             'total_expenses' => $totalExpenses,

@@ -24,8 +24,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property-read int|null $items_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Payment> $payments
  * @property-read int|null $payments_count
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\SaleReturn> $saleReturns
- * @property-read int|null $sale_returns_count
  * @property-read \App\Models\User|null $user
  * @method static \Database\Factories\SaleFactory factory($count = null, $state = [])
  * @method static \Illuminate\Database\Eloquent\Builder|Sale newModelQuery()
@@ -104,22 +102,6 @@ class Sale extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
-    }
-
-    /**
-     * Get the sale returns associated with this sale.
-     */
-    public function saleReturns(): HasMany
-    {
-        return $this->hasMany(SaleReturn::class, 'original_sale_id');
-    }
-
-    /**
-     * Check if this sale has any returns.
-     */
-    public function hasReturns(): bool
-    {
-        return $this->saleReturns()->exists();
     }
 
     /**

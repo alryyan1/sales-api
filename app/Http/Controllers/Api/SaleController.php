@@ -15,7 +15,6 @@ use App\Events\SaleCreated;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\SaleResource;
-use App\Models\SaleReturnItem;
 use App\Services\Pdf\MyCustomTCPDF;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -92,14 +91,6 @@ class SaleController extends Controller
 
         $sales = $query->latest('id')->paginate($request->input('per_page', 15));
 
-        // Add return information to each sale
-        if ($sales instanceof \Illuminate\Pagination\LengthAwarePaginator) {
-            $sales->getCollection()->transform(function ($sale) {
-                $sale->has_returns = $sale->hasReturns();
-                return $sale;
-            });
-        }
-
         return SaleResource::collection($sales);
     }
 
@@ -133,11 +124,6 @@ class SaleController extends Controller
 
         $sales = $query->orderBy('id', 'desc')->get();
 
-        $sales->transform(function ($sale) {
-            $sale->has_returns = $sale->hasReturns();
-            return $sale;
-        });
-
         return SaleResource::collection($sales);
     }
 
@@ -159,23 +145,6 @@ class SaleController extends Controller
 
         $sales = $query->latest('created_at')->latest('id')->get();
         return response()->json(['data' => SaleResource::collection($sales)]);
-    }
-
-    public function getReturnableItems(Sale $sale)
-    {
-        // $this->authorize('createReturn', $sale); // Policy check if user can create return for this sale
-
-        // Fetch items, calculate already returned quantity for each original sale item
-        $items = $sale->items()->with('product:id,name,sku,scientific_name')->get()->map(function ($saleItem) {
-            $alreadyReturnedQty = SaleReturnItem::where('original_sale_item_id', $saleItem->id)
-                ->whereHas('saleReturn', fn($q) => $q->where('status', '!=', 'cancelled'))
-                ->sum('quantity_returned');
-            $saleItem->max_returnable_quantity = $saleItem->quantity - $alreadyReturnedQty;
-            $saleItem->age = 99;
-            return $saleItem;
-        })->filter(fn($item) => $item->max_returnable_quantity > 0); // Only items that can still be returned
-
-        return SaleItemResource::collection($items); // Or a custom resource
     }
 
     public function createEmptySale(Request $request)
@@ -946,7 +915,7 @@ class SaleController extends Controller
                         ->sum('quantity');
                     $availableForThisItem = $availableInWarehouse - $currentInOtherItems;
 
-                    if ($availableForThisItem < $newQuantity) {
+                    if ($availableForThisItem < $additionalQuantity) {
                         throw ValidationException::withMessages([
                             'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested total: {$newQuantity}"
                         ]);
@@ -1057,13 +1026,7 @@ class SaleController extends Controller
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
-            Log::error('Failed to add sale item', [
-                'sale_id' => $sale->id,
-                'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
-            ]);
+           
             $payload = [
                 'message' => 'Failed to add sale item. Please try again.',
                 'error' => $e->getMessage()
@@ -1096,15 +1059,22 @@ class SaleController extends Controller
 
                 $warehouseId = $sale->warehouse_id ?? 1;
                 if ($quantityDifference > 0) {
+                    // Business rule: each sale must have at most ONE item per product.
+                    // We only need stock for the INCREASE (quantityDifference), not the whole new quantity.
                     $availableInWarehouse = $product->countStock($warehouseId);
+
+                    // In a valid state there should be no other items with the same product,
+                    // but we still exclude the current row defensively in case of legacy data.
                     $currentInOtherItems = $sale->items()
                         ->where('product_id', $product->id)
                         ->where('id', '!=', $saleItem->id)
                         ->sum('quantity');
-                    $availableForThisItem = $availableInWarehouse - $currentInOtherItems;
-                    if ($availableForThisItem < $newQuantity) {
+
+                    $availableForIncrease = $availableInWarehouse - $currentInOtherItems;
+
+                    if ($availableForIncrease < $quantityDifference) {
                         throw ValidationException::withMessages([
-                            'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested: {$newQuantity}"
+                            'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForIncrease}, additional requested: {$quantityDifference}"
                         ]);
                     }
                 }
@@ -1176,12 +1146,7 @@ class SaleController extends Controller
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
-            Log::error('Failed to update sale item', [
-                'sale_id' => $sale->id,
-                'sale_item_id' => $saleItemId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+         
             return response()->json([
                 'message' => 'Failed to update sale item. Please try again.'
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -1229,7 +1194,6 @@ class SaleController extends Controller
 
                 // Note: Sale status is not automatically changed when items are deleted
                 // The sale will maintain its current status regardless of item count
-                Log::info("Sale {$sale->id} has {$remainingItems->count()} items remaining - status unchanged");
 
                 DB::commit();
 

@@ -325,11 +325,35 @@ class Product extends Model
         if ($this->stock_alert_level !== null) {
             $newTotal = $this->total_stock;
 
-            // Check if we crossed info low stock territory
+            // Check if we crossed into low stock territory
             if ($newTotal <= $this->stock_alert_level && ($oldTotal > $this->stock_alert_level || $oldTotal === null)) {
                 try {
-                    $whatsAppService = app(\App\Services\WhatsAppService::class);
-                    $whatsAppService->sendLowStockAlert($this);
+                    // Send WhatsApp Cloud template notification for low stock
+                    $whatsAppCloud = app(\App\Services\WhatsAppCloudApiService::class);
+
+                    $to = '249124584291';
+                    $productName = (string) $this->name;
+                    $currentQty = (string) $newTotal;
+                    $alertLevel = (string) $this->stock_alert_level;
+
+                    $components = [
+                        [
+                            'type' => 'body',
+                            'parameters' => [
+                                ['type' => 'text', 'text' => 'د عباس حسن عباس'],
+                                ['type' => 'text', 'text' => $productName],
+                                ['type' => 'text', 'text' => $currentQty],
+                                ['type' => 'text', 'text' => $alertLevel],
+                            ],
+                        ],
+                    ];
+
+                    $whatsAppCloud->sendTemplateMessage(
+                        $to,
+                        'stock_level_alert_ar',
+                        'ar',
+                        $components
+                    );
 
                     if ($newTotal > 0) {
                         event(new \App\Events\ProductStockLow($this));

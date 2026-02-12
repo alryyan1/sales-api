@@ -31,4 +31,14 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'whatsapp_cloud' => [
+        'token' => env('WHATSAPP_CLOUD_API_TOKEN'),
+        'phone_number_id' => env('WHATSAPP_CLOUD_API_PHONE_NUMBER_ID'),
+        'waba_id' => env('WHATSAPP_CLOUD_WABA_ID'),
+        'api_version' => env('WHATSAPP_CLOUD_API_VERSION', 'v22.0'),
+        'app_secret' => env('WHATSAPP_CLOUD_APP_SECRET'),
+        'verify_token' => env('WHATSAPP_CLOUD_VERIFY_TOKEN', 'alryyan'),
+    ],
+
 ];
+

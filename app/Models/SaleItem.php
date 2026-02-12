@@ -41,6 +41,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class SaleItem extends Model
 {
     use HasFactory;
+    protected $table = 'sale_items';
 
     protected $fillable = [
         'sale_id',
