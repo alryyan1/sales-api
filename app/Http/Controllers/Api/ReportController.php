@@ -271,9 +271,9 @@ class ReportController extends Controller
 
         // --- Query Building ---
         $query = PurchaseItem::query()
-            ->with(['product:id,name,sku,sellable_unit_name'])
+            ->with(['product:id,name,sku'])
             ->whereNotNull('expiry_date')
-            ->whereHas('product', fn ($q) => $q->whereHas('warehouses', fn ($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->whereBetween('expiry_date', [$today, $expiryCutoffDate]);
 
         // --- Apply Filters ---
@@ -311,6 +311,100 @@ class ReportController extends Controller
         // --- Return Paginated Resource Collection ---
         // PurchaseItemResource should already format expiry_date and include product info (name, sku)
         return PurchaseItemResource::collection($nearExpiryItems);
+    }
+
+    /**
+     * Fetch products/batches that are already expired.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     */
+    public function expiredProductsReport(Request $request)
+    {
+        // --- Input Validation ---
+        $validated = $request->validate([
+            'product_id' => 'nullable|integer|exists:products,id',
+            'per_page' => 'nullable|integer|min:5|max:100',
+            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'purchase_items.created_at'])],
+            'sort_direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
+        ]);
+
+        $today = Carbon::today()->toDateString();
+
+        // --- Query Building ---
+        $query = PurchaseItem::query()
+            ->with(['product:id,name,sku'])
+            ->whereNotNull('expiry_date')
+            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->where('expiry_date', '<', $today);
+
+        // --- Apply Filters ---
+        if (!empty($validated['product_id'])) {
+            $query->where('product_id', $validated['product_id']);
+        }
+
+        // --- Sorting ---
+        $sortBy = $validated['sort_by'] ?? 'expiry_date';
+        $sortDirection = $validated['sort_direction'] ?? 'asc';
+
+        if ($sortBy === 'products.name') {
+            $query->join('products', 'purchase_items.product_id', '=', 'products.id')
+                ->orderBy('products.name', $sortDirection)
+                ->select('purchase_items.*');
+        } else {
+            $query->orderBy($sortBy, $sortDirection);
+        }
+
+        if ($sortBy !== 'purchase_items.created_at' && $sortBy !== 'id') {
+            $query->orderBy('purchase_items.created_at', 'asc')->orderBy('purchase_items.id', 'asc');
+        }
+
+        // --- Pagination ---
+        $perPage = $validated['per_page'] ?? 25;
+        $expiredItems = $query->paginate($perPage);
+
+        // --- Return Paginated Resource Collection ---
+        return PurchaseItemResource::collection($expiredItems);
+    }
+
+    /**
+     * Get counts of near-expiring and expired products for badge display.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function expiryCountsSummary(Request $request)
+    {
+        // --- Input Validation ---
+        $validated = $request->validate([
+            'days_threshold' => 'nullable|integer|min:1|max:730',
+        ]);
+
+        $daysThreshold = $validated['days_threshold'] ?? 30;
+        $today = Carbon::today()->toDateString();
+        $expiryCutoffDate = Carbon::today()->addDays($daysThreshold)->toDateString();
+
+        // Count near-expiring products (between today and cutoff date)
+        $nearExpiringCount = PurchaseItem::query()
+            ->whereNotNull('expiry_date')
+            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->whereBetween('expiry_date', [$today, $expiryCutoffDate])
+            ->distinct('product_id')
+            ->count('product_id');
+
+        // Count expired products (before today)
+        $expiredCount = PurchaseItem::query()
+            ->whereNotNull('expiry_date')
+            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->where('expiry_date', '<', $today)
+            ->distinct('product_id')
+            ->count('product_id');
+
+        return response()->json([
+            'near_expiring_count' => $nearExpiringCount,
+            'expired_count' => $expiredCount,
+            'days_threshold' => $daysThreshold,
+        ]);
     }
     /**
      * Generate a Monthly Revenue Report with daily breakdown and payment method summary.
@@ -823,7 +917,7 @@ class ReportController extends Controller
         $totalRevenue = (float) SaleItem::query()
             ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
             ->whereBetween('sales.sale_date', [$startDate, $endDate])
-            ->when(!empty($validated['client_id']), fn ($q) => $q->where('sales.client_id', $validated['client_id']))
+            ->when(!empty($validated['client_id']), fn($q) => $q->where('sales.client_id', $validated['client_id']))
             ->sum('sale_items.total_price');
 
 
@@ -938,8 +1032,8 @@ class ReportController extends Controller
         $sales = $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc')->get();
         $sales->load(['items', 'payments']);
 
-        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
+        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
         $totalSales = $sales->count();
         $totalDiscount = 0;
         $totalDue = max(0, $totalAmount - $totalPaid);
@@ -1072,8 +1166,8 @@ class ReportController extends Controller
     {
         $sales->load(['items', 'payments']);
         $totalSales = $sales->count();
-        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
+        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
         $totalDue = max(0, $totalAmount - $totalPaid);
 
         $paymentMethods = $sales->flatMap->payments->groupBy('method')->map->sum('amount');
@@ -1082,7 +1176,7 @@ class ReportController extends Controller
             ->map(function ($clientSales) {
                 return [
                     'name' => $clientSales->first()->client?->name ?? 'Unknown',
-                    'total' => (float) $clientSales->sum(fn ($s) => $s->items->sum('total_price')),
+                    'total' => (float) $clientSales->sum(fn($s) => $s->items->sum('total_price')),
                     'count' => $clientSales->count()
                 ];
             })
@@ -1353,8 +1447,8 @@ class ReportController extends Controller
         $pdf->SetFillColor(70, 130, 180);
         $pdf->SetTextColor(255, 255, 255);
 
-        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
+        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
         $totalDiscount = 0;
         $totalDue = max(0, $totalAmount - $totalPaid);
 
@@ -1385,8 +1479,8 @@ class ReportController extends Controller
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
 
-        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
+        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
         $totalDue = max(0, $totalAmount - $totalPaid);
         $avgSaleValue = $sales->count() > 0 ? $totalAmount / $sales->count() : 0;
         $paymentRate = $totalAmount > 0 ? ($totalPaid / $totalAmount) * 100 : 0;

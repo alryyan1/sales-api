@@ -154,17 +154,16 @@ class ProductPdfService
 
         // Table rows
         $pdf->SetFont('arial', '', 7);
-        
-        // Calculate totals
-        $totalCost = 0;
-        $totalSellPrice = 0;
-        
+
+        // Calculate total inventory cost
+        $totalInventoryCost = 0;
+
         foreach ($products as $index => $product) {
             $stockStatus = $this->getStockStatus($product);
             $fillColor = $this->getFillColor($product);
-            
+
             $pdf->SetFillColor($fillColor[0], $fillColor[1], $fillColor[2]);
-            
+
             $pdf->Cell($colWidths[0], 6, ($index + 1), 1, 0, 'C', true);
             $pdf->Cell($colWidths[1], 6, $this->truncate($product->name, 25), 1, 0, 'C', true);
             $pdf->Cell($colWidths[2], 6, $this->truncate($product->scientific_name ?: '-', 20), 1, 0, 'C', true);
@@ -176,25 +175,21 @@ class ProductPdfService
             $pdf->Cell($colWidths[8], 6, $product->last_sale_price_per_sellable_unit ? number_format($product->last_sale_price_per_sellable_unit, 2) : '-', 1, 0, 'C', true);
             $pdf->Cell($colWidths[9], 6, $product->stock_alert_level ? number_format($product->stock_alert_level) : '-', 1, 0, 'C', true);
             $pdf->Cell($colWidths[10], 6, $stockStatus, 1, 1, 'C', true);
-            
-            // Add to totals
+
+            // Add to inventory cost total
             if ($product->latest_cost_per_sellable_unit) {
-                $totalCost += $product->latest_cost_per_sellable_unit * $product->stock_quantity;
-            }
-            if ($product->last_sale_price_per_sellable_unit) {
-                $totalSellPrice += $product->last_sale_price_per_sellable_unit * $product->stock_quantity;
+                $totalInventoryCost += $product->latest_cost_per_sellable_unit * $product->stock_quantity;
             }
         }
-        
-        // Totals row
-        $pdf->SetFont('arial', 'B', 8);
+
+        // Add spacing after table
+        $pdf->Ln(5);
+
+        // Display total inventory cost
+        $pdf->SetFont('arial', 'B', 12);
         $pdf->SetFillColor(220, 220, 220);
-        
-        // Empty cells before totals
-        $pdf->Cell($colWidths[0] + $colWidths[1] + $colWidths[2] + $colWidths[3] + $colWidths[4] + $colWidths[5] + $colWidths[6], 7, 'الإجمالي', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[7], 7, number_format($totalCost, 2), 1, 0, 'C', true);
-        $pdf->Cell($colWidths[8], 7, number_format($totalSellPrice, 2), 1, 0, 'C', true);
-        $pdf->Cell($colWidths[9] + $colWidths[10], 7, '', 1, 1, 'C', true);
+        $pdf->Cell(80, 8, 'إجمالي تكلفة المخزون:', 1, 0, 'R', true);
+        $pdf->Cell(50, 8, number_format($totalInventoryCost, 2), 1, 1, 'C', true);
     }
 
     /**
