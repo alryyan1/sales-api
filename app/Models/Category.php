@@ -36,7 +36,11 @@ class Category extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'description', 'parent_id'];
+    protected $fillable = ['name', 'description', 'parent_id', 'is_default'];
+
+    protected $casts = [
+        'is_default' => 'boolean',
+    ];
 
     /**
      * Get the products belonging to this category.
