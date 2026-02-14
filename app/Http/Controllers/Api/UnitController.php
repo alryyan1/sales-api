@@ -23,7 +23,7 @@ class UnitController extends Controller
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
+                    ->orWhere('description', 'like', "%{$search}%");
             });
         }
 
@@ -58,9 +58,9 @@ class UnitController extends Controller
     public function stocking(): JsonResponse
     {
         $units = Unit::where('type', 'stocking')
-                    ->where('is_active', true)
-                    ->orderBy('name')
-                    ->get();
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
 
         return response()->json([
             'data' => $units,
@@ -73,9 +73,9 @@ class UnitController extends Controller
     public function sellable(): JsonResponse
     {
         $units = Unit::where('type', 'sellable')
-                    ->where('is_active', true)
-                    ->orderBy('name')
-                    ->get();
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get();
 
         return response()->json([
             'data' => $units,
@@ -92,6 +92,7 @@ class UnitController extends Controller
             'type' => ['required', Rule::in(['stocking', 'sellable'])],
             'description' => 'nullable|string|max:1000',
             'is_active' => 'boolean',
+            'is_default' => 'boolean',
         ]);
 
         if ($validator->fails()) {
@@ -103,13 +104,20 @@ class UnitController extends Controller
 
         // Check for unique name and type combination
         $existingUnit = Unit::where('name', $request->name)
-                           ->where('type', $request->type)
-                           ->first();
+            ->where('type', $request->type)
+            ->first();
 
         if ($existingUnit) {
             return response()->json([
                 'message' => 'A unit with this name and type already exists.',
             ], 422);
+        }
+
+        // If setting as default, unset other defaults of the same type
+        if ($request->boolean('is_default', false)) {
+            Unit::where('type', $request->type)
+                ->where('is_default', true)
+                ->update(['is_default' => false]);
         }
 
         $unit = Unit::create($request->all());
@@ -140,6 +148,7 @@ class UnitController extends Controller
             'type' => ['required', Rule::in(['stocking', 'sellable'])],
             'description' => 'nullable|string|max:1000',
             'is_active' => 'boolean',
+            'is_default' => 'boolean',
         ]);
 
         if ($validator->fails()) {
@@ -151,14 +160,22 @@ class UnitController extends Controller
 
         // Check for unique name and type combination (excluding current unit)
         $existingUnit = Unit::where('name', $request->name)
-                           ->where('type', $request->type)
-                           ->where('id', '!=', $unit->id)
-                           ->first();
+            ->where('type', $request->type)
+            ->where('id', '!=', $unit->id)
+            ->first();
 
         if ($existingUnit) {
             return response()->json([
                 'message' => 'A unit with this name and type already exists.',
             ], 422);
+        }
+
+        // If setting as default, unset other defaults of the same type
+        if ($request->boolean('is_default', false)) {
+            Unit::where('type', $request->type)
+                ->where('is_default', true)
+                ->where('id', '!=', $unit->id)
+                ->update(['is_default' => false]);
         }
 
         $unit->update($request->all());
@@ -180,8 +197,8 @@ class UnitController extends Controller
 
         if ($stockingProductsCount > 0 || $sellableProductsCount > 0) {
             return response()->json([
-                'message' => 'Cannot delete unit. It is being used by ' . 
-                           ($stockingProductsCount + $sellableProductsCount) . ' product(s).',
+                'message' => 'Cannot delete unit. It is being used by ' .
+                    ($stockingProductsCount + $sellableProductsCount) . ' product(s).',
             ], 422);
         }
 

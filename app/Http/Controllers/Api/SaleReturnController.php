@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
+use App\Models\Sale;
 use App\Models\SaleReturn;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -25,6 +26,7 @@ class SaleReturnController extends Controller
 
         $query = SaleReturn::with([
             'user:id,name',
+            'sale:id,number,sale_date',
             'shift:id,opened_at,closed_at',
             'items.product:id,name,sku',
         ])->where('user_id', $user->id);
@@ -56,6 +58,8 @@ class SaleReturnController extends Controller
         }
 
         $validated = $request->validate([
+            'sale_id' => 'required|exists:sales,id',
+            'phone_number' => 'nullable|string|max:20',
             'reason' => 'nullable|string|max:255',
             'shift_id' => 'nullable|exists:shifts,id',
             'returned_payment_method' => [
@@ -69,14 +73,32 @@ class SaleReturnController extends Controller
             'items.*.price' => 'required|numeric|min:0',
         ]);
 
-        $warehouseId = $user->warehouse_id ?? 1;
+        $sale = Sale::with('items')->find($validated['sale_id']);
+        foreach ($validated['items'] as $index => $itemData) {
+            $saleItem = $sale->items->firstWhere('product_id', (int) $itemData['product_id']);
+            if (!$saleItem) {
+                throw ValidationException::withMessages([
+                    "items.{$index}.product_id" => ['المنتج غير موجود في الفاتورة المحددة.'],
+                ]);
+            }
+            $returnQty = (int) $itemData['quantity'];
+            if ($returnQty > $saleItem->quantity) {
+                throw ValidationException::withMessages([
+                    "items.{$index}.quantity" => ['كمية الإرجاع لا يمكن أن تتجاوز الكمية المباعة (' . $saleItem->quantity . ').'],
+                ]);
+            }
+        }
+
+        $warehouseId = $sale->warehouse_id ?? $user->warehouse_id ?? 1;
 
         try {
             $saleReturn = DB::transaction(function () use ($validated, $user, $warehouseId) {
                 $header = SaleReturn::create([
                     'user_id' => $user->id,
+                    'sale_id' => $validated['sale_id'],
                     'shift_id' => $validated['shift_id'] ?? null,
                     'reason' => $validated['reason'] ?? null,
+                    'phone_number' => $validated['phone_number'] ?? null,
                     'returned_payment_method' => $validated['returned_payment_method'],
                 ]);
 
@@ -95,7 +117,7 @@ class SaleReturnController extends Controller
                     $product->incrementWarehouseStock($warehouseId, $quantity);
                 }
 
-                return $header->load(['user:id,name', 'items.product:id,name,sku']);
+                return $header->load(['user:id,name', 'sale:id,number,sale_date', 'items.product:id,name,sku']);
             });
 
             return response()->json([

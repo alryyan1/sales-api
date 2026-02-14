@@ -13,14 +13,21 @@ class SaleReturn extends Model
 
     protected $fillable = [
         'user_id',
+        'sale_id',
         'shift_id',
         'reason',
+        'phone_number',
         'returned_payment_method',
     ];
 
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function sale(): BelongsTo
+    {
+        return $this->belongsTo(Sale::class);
     }
 
     public function shift(): BelongsTo
