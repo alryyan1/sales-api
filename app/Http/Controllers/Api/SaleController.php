@@ -43,6 +43,7 @@ class SaleController extends Controller
                 'items.product' => function ($query) {
                     $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost']);
                 },
+                'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for expiry date
                 'payments.user:id,name,username' // Load payments with user relationship for today's sales
             ]);
             $sales = $query->latest('sale_date')->latest('id')->get();
@@ -139,6 +140,7 @@ class SaleController extends Controller
             'items.product' => function ($query) {
                 $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost']);
             },
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for expiry date
             'payments.user:id,name,username' // Load payments with user relationship
         ])
             ->whereDate('created_at', Carbon::today());
@@ -157,7 +159,7 @@ class SaleController extends Controller
         try {
             // Check for open shift before transaction
             $settings = (new SettingsService())->getAll();
-            
+
             $posMode = $settings['pos_mode'] ?? 'shift';
             // return $settings;
             $currentShift = null;
@@ -195,7 +197,7 @@ class SaleController extends Controller
 
             return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
         } catch (\Throwable $e) {
-    
+
 
             return response()->json($e->getMessage(), Response::HTTP_INTERNAL_SERVER_ERROR);
         }
@@ -902,7 +904,7 @@ class SaleController extends Controller
 
                 if ($existingSaleItem) {
                     // Increase quantity of existing item
-                    $warehouseId = $sale->warehouse_id ;
+                    $warehouseId = $sale->warehouse_id;
                     $oldQuantity = $existingSaleItem->quantity;
                     $additionalQuantity = $validatedData['quantity'];
                     $newQuantity = $oldQuantity + $additionalQuantity;
@@ -1026,7 +1028,7 @@ class SaleController extends Controller
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
-           
+
             $payload = [
                 'message' => 'Failed to add sale item. Please try again.',
                 'error' => $e->getMessage()
@@ -1146,7 +1148,7 @@ class SaleController extends Controller
                 'errors' => $e->errors()
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
-         
+
             return response()->json([
                 'message' => 'Failed to update sale item. Please try again.'
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
