@@ -42,14 +42,14 @@ class SalesReportPdfService
 
         // --- PAGE 1: REPORT OVERVIEW (popup-style summary) ---
         $pdf->AddPage();
-        $totalDiscount = $sales->sum(fn (Sale $s) => (float) ($s->discount_amount ?? 0));
+        $totalDiscount = $sales->sum(fn(Sale $s) => (float) ($s->discount_amount ?? 0));
         $this->renderHeader($pdf, $summaryStats, $startDate, $endDate);
         $this->renderFilters($pdf, $validatedFilters);
         $this->renderSummaryPopupStyle($pdf, $summaryStats, $paymentMethods, $totalDiscount);
 
-        if (!empty($paymentMethods)) {
-            $this->renderPaymentMethodTable($pdf, $paymentMethods);
-        }
+        // if (!empty($paymentMethods)) {
+        //     $this->renderPaymentMethodTable($pdf, $paymentMethods);
+        // }
 
         // --- PAGE 2+: DETAILED LOG ---
         $pdf->AddPage();
@@ -84,81 +84,150 @@ class SalesReportPdfService
 
     private function renderHeader(TCPDF $pdf, array $summaryStats, ?Carbon $startDate, ?Carbon $endDate): void
     {
-        // Brand Identity
-        $pdf->SetFont(self::FONT_MAIN, 'B', self::SIZE_TITLE);
-        $pdf->Cell(0, 12, $this->companyName, 0, 1, 'R');
-
-        $pdf->SetFont(self::FONT_MAIN, '', self::SIZE_BODY);
-        $pdf->Cell(0, 5, $this->companyAddress, 0, 1, 'R');
-        $pdf->Cell(0, 5, 'Tel: ' . $this->companyPhone, 0, 1, 'R');
-
-        $pdf->Ln(4);
-        $pdf->SetLineWidth(0.4);
-        $pdf->Line(self::MARGIN, $pdf->GetY(), 282, $pdf->GetY());
-        $pdf->Ln(8);
-
-        // Title: ملخص الوردية when shift, else ملخص المبيعات
+        // 1. Top Right: Company Info
         $pdf->SetFont(self::FONT_MAIN, 'B', 16);
-        $title = !empty($summaryStats['shift']) ? 'ملخص الوردية' : 'ملخص المبيعات';
-        $pdf->Cell(0, 10, $title, 0, 1, 'C');
+        $pdf->Cell(0, 8, $this->companyName, 0, 1, 'R');
+        $pdf->SetFont(self::FONT_MAIN, '', 10);
+        if ($this->companyAddress) {
+            $pdf->Cell(0, 5, $this->companyAddress, 0, 1, 'R');
+        }
+        if ($this->companyPhone) {
+            $pdf->Cell(0, 5, 'Tel: ' . $this->companyPhone, 0, 1, 'R');
+        }
+
+        $pdf->Ln(5);
+
+        // 2. Center: Report Title & Date/Shift Info
+        $pdf->SetFont(self::FONT_MAIN, 'B', 14);
+
+        $title = 'تقرير المبيعات والوردية';
+        if (!empty($summaryStats['shift'])) {
+            $title .= ' - وردية رقم #' . ($summaryStats['shift']['id'] ?? '');
+        }
+
+        $pdf->Cell(0, 8, $title, 0, 1, 'C');
 
         $pdf->SetFont(self::FONT_MAIN, '', 10);
+
+        // Context Info (Shift Opened/Closed or Date Range)
         if (!empty($summaryStats['shift'])) {
-            $pdf->Cell(0, 6, 'الوردية #' . ($summaryStats['shift']['id'] ?? ''), 0, 1, 'C');
+            $info = 'تاريخ الفتح: ' . ($summaryStats['shift']['opened_at'] ?? '—');
+            if (!empty($summaryStats['shift']['user_name'])) {
+                $info .= ' | المستخدم: ' . $summaryStats['shift']['user_name'];
+            }
+            $pdf->Cell(0, 6, $info, 0, 1, 'C');
         } else {
             $period = $this->buildPeriodText($startDate, $endDate);
-            $pdf->Cell(0, 6, $period, 0, 1, 'C');
+            $pdf->Cell(0, 6, 'الفترة: ' . $period, 0, 1, 'C');
         }
-        $pdf->Cell(0, 6, 'تاريخ التقرير: ' . now()->format('Y-m-d H:i'), 0, 1, 'C');
-        $pdf->Ln(10);
+
+        $pdf->Cell(0, 6, 'تاريخ الطباعة: ' . now()->format('Y-m-d h:i A'), 0, 1, 'C');
+
+        $pdf->Ln(5);
+        $pdf->SetLineWidth(0.4);
+        $pdf->Line(self::MARGIN, $pdf->GetY(), 210 - self::MARGIN, $pdf->GetY());
+        $pdf->Ln(5);
     }
 
     /**
-     * Summary in the same style as the POS shift summary popup.
+     * Render the 6-column financial summary table
+     * Columns: Item | Cash | Bankak | Fawry | Ocash | Total
+     * Rows: Revenue, Expenses, Returns, Net
      */
     private function renderSummaryPopupStyle(TCPDF $pdf, array $stats, array $paymentMethods, float $totalDiscount = 0): void
     {
-        $pdf->SetFont(self::FONT_MAIN, 'B', self::SIZE_BODY);
-        $pdf->SetFillColor(240, 240, 240);
-        $pdf->Cell(100, 8, 'البند', 1, 0, 'R', true);
-        $pdf->Cell(80, 8, 'القيمة', 1, 1, 'C', true);
-        $pdf->SetFont(self::FONT_MAIN, '', self::SIZE_BODY);
+        $cols = [
+            ['w' => 40, 't' => 'البيان'],     // Item
+            ['w' => 25, 't' => 'نقدي'],     // Cash
+            ['w' => 25, 't' => 'بنكك'],     // Bankak
+            ['w' => 25, 't' => 'فوري'],     // Fawry
+            ['w' => 25, 't' => 'أوكاش'],    // Ocash
+            ['w' => 30, 't' => 'الإجمالي'], // Total
+        ];
 
-        $cash = (float) ($paymentMethods['cash'] ?? 0);
-        $bankak = (float) ($paymentMethods['bankak'] ?? 0);
-        $ocash = (float) ($paymentMethods['ocash'] ?? 0);
-        $fawry = (float) ($paymentMethods['fawry'] ?? 0);
-        $otherBanks = $ocash + $fawry;
-        $expenseCash = (float) ($stats['expenseCash'] ?? 0);
-        $expenseBank = (float) ($stats['expenseBank'] ?? 0);
-        $netCash = $cash - $expenseCash;
-        $netBank = $bankak + $otherBanks - $expenseBank;
+        // Prepare Data Rows
+        // 1. Revenues (Sales)
+        $revCash = (float)($paymentMethods['cash'] ?? 0);
+        $revBankak = (float)($paymentMethods['bankak'] ?? 0);
+        $revFawry = (float)($paymentMethods['fawry'] ?? 0);
+        $revOcash = (float)($paymentMethods['ocash'] ?? 0);
+        // Combine other bank methods (visa, etc) into Bankak or handle separately? 
+        // Request asked for specific 6 columns. Any 'other' payments usually go to Bank/Visa. 
+        // For strict adherence to cols, we'll map generic 'visa'/'bank' to Bankak or add to 'Total' but show 0 in specific cols if not matching.
+        // Let's assume 'visa'/'bank_transfer' -> Bankak for simplicity in this specific 6-col layout, or just ignore if strictly those 4 methods.
+        // Better: Add 'visa' to 'Bankak' column for display if User implies 'Bank' generally, OR just display exact matches.
+        // Given the columns: Cash, Bankak, Fawry, Ocash. 
+        // If there are other methods (like Visa), they won't fit a specific column. We will put them in Total.
 
-        $rows = [];
-        if (!empty($stats['shift'])) {
-            $shift = $stats['shift'];
-            $rows[] = ['وردية #' . ($shift['id'] ?? ''), '', false];
-            if (!empty($shift['opened_at'])) {
-                $rows[] = ['وقت الفتح', $shift['opened_at'], false];
-            }
-            if (!empty($shift['user_name'])) {
-                $rows[] = ['فتح بواسطة', $shift['user_name'], false];
-            }
+        $revTotal = array_sum($paymentMethods); // Total of ALL methods
+
+        // 2. Expenses
+        $expBreakdown = $stats['expenses_breakdown'] ?? [];
+        $expCash = (float)($expBreakdown['cash'] ?? 0);
+        $expBankak = (float)($expBreakdown['bankak'] ?? 0); // Assuming mapped to 'bankak' or generic 'bank'
+        $expFawry = (float)($expBreakdown['fawry'] ?? 0);
+        $expOcash = (float)($expBreakdown['ocash'] ?? 0);
+        // Add generic 'bank' expense to bankak col? or just total? 
+        // Commonly 'bank' expense implies bank transfer/online.
+        $expBankGeneric = (float)($expBreakdown['bank'] ?? 0);
+        $expBankak += $expBankGeneric;
+
+        $expTotal = (float)($stats['totalExpenses'] ?? 0);
+
+        // 3. Returns (Sales Returns)
+        $retBreakdown = $stats['returns_breakdown'] ?? [];
+        $retCash = (float)($retBreakdown['cash'] ?? 0);
+        $retBankak = (float)($retBreakdown['bankak'] ?? 0);
+        $retFawry = (float)($retBreakdown['fawry'] ?? 0);
+        $retOcash = (float)($retBreakdown['ocash'] ?? 0);
+        $retTotal = (float)($stats['totalReturns'] ?? 0);
+
+        // 4. Net (Revenue - Expense - Returns)
+        $netCash = $revCash - $expCash - $retCash;
+        $netBankak = $revBankak - $expBankak - $retBankak;
+        $netFawry = $revFawry - $expFawry - $retFawry;
+        $netOcash = $revOcash - $expOcash - $retOcash;
+        $netTotal = $revTotal - $expTotal - $retTotal;
+
+
+        // -- RENDER TABLE --
+
+        $pdf->SetFont(self::FONT_MAIN, 'B', 10);
+
+        // Header
+        $pdf->SetFillColor(230, 230, 230);
+        foreach ($cols as $col) {
+            $pdf->Cell($col['w'], 9, $col['t'], 1, 0, 'C', true);
         }
-        $rows[] = ['نقدي', number_format($cash, 2) . ' ' . $this->currencySymbol, true];
-        $rows[] = ['بنكك', number_format($bankak, 2) . ' ' . $this->currencySymbol, true];
-        $rows[] = ['بنوك اخري', number_format($otherBanks, 2) . ' ' . $this->currencySymbol, true];
-        $rows[] = ['إجمالي الخصومات', number_format($totalDiscount, 2) . ' ' . $this->currencySymbol, true];
-        $rows[] = ['مصروف نقدي', number_format($expenseCash, 2) . ' ' . $this->currencySymbol, true];
-        $rows[] = ['مصروف بنك', number_format($expenseBank, 2) . ' ' . $this->currencySymbol, true];
-        $rows[] = ['صافي نقدي', number_format($netCash, 2) . ' ' . $this->currencySymbol, true];
-        $rows[] = ['صافي بنك', number_format($netBank, 2) . ' ' . $this->currencySymbol, true];
+        $pdf->Ln();
 
-        foreach ($rows as $row) {
-            $pdf->Cell(100, 8, $row[0], 1, 0, 'R');
-            $pdf->Cell(80, 8, $row[1], 1, 1, 'C');
-        }
+        // Row 1: Revenues
+        $pdf->SetFont(self::FONT_MAIN, '', 10);
+        $this->renderRow($pdf, $cols, 'الإيرادات', $revCash, $revBankak, $revFawry, $revOcash, $revTotal);
+
+        // Row 2: Expenses
+        $this->renderRow($pdf, $cols, 'المصروفات', $expCash, $expBankak, $expFawry, $expOcash, $expTotal);
+
+        // Row 3: Returns
+        $this->renderRow($pdf, $cols, 'مردودات المبيعات', $retCash, $retBankak, $retFawry, $retOcash, $retTotal);
+
+        // Row 4: Net Totals (Footer)
+        $pdf->SetFont(self::FONT_MAIN, 'B', 10);
+        $pdf->SetFillColor(240, 248, 255); // Light Blue
+        $this->renderRow($pdf, $cols, 'الصافي', $netCash, $netBankak, $netFawry, $netOcash, $netTotal, true);
+
         $pdf->Ln(10);
+    }
+
+    private function renderRow($pdf, $cols, $label, $v1, $v2, $v3, $v4, $total, $fill = false)
+    {
+        $pdf->Cell($cols[0]['w'], 8, $label, 1, 0, 'R', $fill);
+        $pdf->Cell($cols[1]['w'], 8, number_format($v1, 2), 1, 0, 'C', $fill); // Cash
+        $pdf->Cell($cols[2]['w'], 8, number_format($v2, 2), 1, 0, 'C', $fill); // Bankak
+        $pdf->Cell($cols[3]['w'], 8, number_format($v3, 2), 1, 0, 'C', $fill); // Fawry
+        $pdf->Cell($cols[4]['w'], 8, number_format($v4, 2), 1, 0, 'C', $fill); // Ocash
+        $pdf->Cell($cols[5]['w'], 8, number_format($total, 2), 1, 0, 'C', $fill); // Total
+        $pdf->Ln();
     }
 
     private function renderSalesTable(TCPDF $pdf, Collection $sales): void

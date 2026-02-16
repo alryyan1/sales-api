@@ -120,7 +120,7 @@ class ShiftController extends Controller
         $user = $request->user();
 
         // Prevent opening multiple shifts
-        $existing = Shift::where('user_id', $user->id)->open()->first();
+        $existing = Shift::open()->first();
         if ($existing) {
             return response()->json([
                 'message' => 'هناك وردية مفتوحة بالفعل لهذا المستخدم.',
@@ -162,8 +162,8 @@ class ShiftController extends Controller
     {
         $user = $request->user();
 
-        $shift = Shift::where('user_id', $user->id)
-            ->orderBy('id', 'desc')
+        $shift = Shift::
+            orderBy('id', 'desc')
             ->first();
 
         if (!$shift) {

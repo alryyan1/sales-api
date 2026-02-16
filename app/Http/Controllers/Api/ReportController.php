@@ -1072,12 +1072,66 @@ class ReportController extends Controller
         if (!empty($validated['user_id'])) {
             $expensesForBreakdown->where('user_id', $validated['user_id']);
         }
-        $expensesByMethod = $expensesForBreakdown->get()->groupBy('payment_method')->map->sum('amount');
-        $expenseCash = (float) ($expensesByMethod['cash'] ?? 0);
-        $expenseBank = (float) ($expensesByMethod['bank'] ?? 0);
+        $expensesByMethodData = $expensesForBreakdown->get();
+        // Manually group to ensure all methods are covered
+        $expensesByMethod = [
+            'cash' => 0,
+            'bankak' => 0,
+            'fawry' => 0,
+            'ocash' => 0,
+            'bank' => 0 // Generic bank/visa
+        ];
+        foreach ($expensesByMethodData as $exp) {
+            $method = $exp->payment_method ?? 'cash';
+            if (!isset($expensesByMethod[$method])) $expensesByMethod[$method] = 0;
+            $expensesByMethod[$method] += (float)$exp->amount;
+        }
+
+        // Sales Returns Breakdown
+        $returnsQuery = \App\Models\SaleReturn::query();
+        if (!empty($validated['shift_id'])) {
+            $returnsQuery->where('shift_id', $validated['shift_id']);
+        } else {
+            if ($startDate) {
+                $returnsQuery->whereDate('created_at', '>=', $startDate);
+            }
+            if ($endDate) {
+                $returnsQuery->whereDate('created_at', '<=', $endDate);
+            }
+        }
+        if (!empty($validated['user_id'])) {
+            $returnsQuery->where('user_id', $validated['user_id']);
+        }
+        $returnsData = $returnsQuery->with('items')->get();
+
+        $returnsByMethod = [
+            'cash' => 0,
+            'bankak' => 0,
+            'fawry' => 0,
+            'ocash' => 0
+        ];
+        $totalReturns = 0;
+
+        foreach ($returnsData as $ret) {
+            // Calculate total return amount from items
+            $returnTotal = $ret->items->sum(fn($i) => $i->quantity * $i->price);
+            $method = $ret->returned_payment_method ?? 'cash';
+
+            if (!isset($returnsByMethod[$method])) $returnsByMethod[$method] = 0;
+            $returnsByMethod[$method] += $returnTotal;
+            $totalReturns += $returnTotal;
+        }
 
         // Payment methods breakdown (sales payments: cash, bankak, etc.)
-        $paymentMethods = [];
+        $paymentMethods = [
+            'cash' => 0,
+            'bankak' => 0,
+            'fawry' => 0,
+            'ocash' => 0,
+            'visa' => 0,
+            'bank_transfer' => 0
+        ];
+
         foreach ($sales as $sale) {
             foreach ($sale->payments as $payment) {
                 $method = $payment->method ?? 'cash';
@@ -1103,8 +1157,9 @@ class ReportController extends Controller
             'totalDue' => $totalDue,
             'totalDiscount' => $totalDiscount,
             'totalExpenses' => $totalExpenses,
-            'expenseCash' => $expenseCash,
-            'expenseBank' => $expenseBank,
+            'totalReturns' => $totalReturns, // Add total returns
+            'expenses_breakdown' => $expensesByMethod, // Pass full breakdown
+            'returns_breakdown' => $returnsByMethod,   // Pass full breakdown
             'shift' => $shift ? [
                 'id' => $shift->id,
                 'opened_at' => $shift->opened_at?->format('Y-m-d H:i'),

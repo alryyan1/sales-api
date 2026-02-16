@@ -40,7 +40,7 @@ class DatabaseSeeder extends Seeder
             // LifeCareProductsSeeder::class,
             // AppSettingsSeeder::class,
         ]);
-        // Assign 'admin' role to the admin user AFTER roles are created
+        // Assign 'admin' role to the admin user AFTER roles are createdur
         $adminUser = User::where('username', env('ADMIN_USERNAME', 'superadmin'))->first();
         if ($adminUser && !$adminUser->hasRole('admin')) {
             $adminUser->assignRole('admin');
