@@ -947,8 +947,57 @@ class ReportController extends Controller
         // Use purchase_items.unit_cost as the cost price for the batch
         $totalCOGS = $cogsQuery->sum('sale_items.cost_price_at_sale'); // <-- SIMPLIFIED COGS
 
+        // --- Calculate Sale Returns ---
+        $returnsQuery = \App\Models\SaleReturn::with(['items.product', 'sale.items'])
+            ->whereBetween('created_at', [$startDate, $endDate]);
+
+        if (!empty($validated['client_id'])) {
+            $returnsQuery->whereHas('sale', fn($q) => $q->where('client_id', $validated['client_id']));
+        }
+
+        $returns = $returnsQuery->get();
+        $totalReturnsValue = 0;
+        $totalReturnsCost = 0;
+
+        foreach ($returns as $return) {
+            foreach ($return->items as $returnItem) {
+                if (!empty($validated['product_id']) && $returnItem->product_id != $validated['product_id']) {
+                    continue;
+                }
+
+                $totalReturnsValue += ($returnItem->price * $returnItem->quantity);
+
+                // Calculate Return Cost based on original sale average cost
+                $originalSaleItems = $return->sale->items->where('product_id', $returnItem->product_id);
+                if ($originalSaleItems->isNotEmpty()) {
+                    $totalSaleCost = $originalSaleItems->sum('cost_price_at_sale');
+                    $totalSaleQty = $originalSaleItems->sum('quantity');
+                    $avgCost = $totalSaleQty > 0 ? $totalSaleCost / $totalSaleQty : 0;
+                    $totalReturnsCost += ($avgCost * $returnItem->quantity);
+                } else {
+                    $product = $returnItem->product;
+                    $currentCost = $product ? $product->cost_price : 0;
+                    $totalReturnsCost += ($currentCost * $returnItem->quantity);
+                }
+            }
+        }
+
+        // --- Calculate Net Values ---
+        $netRevenue = $totalRevenue - $totalReturnsValue;
+        $netCOGS = max(0, $totalCOGS - $totalReturnsCost);
+
         // --- Calculate Gross Profit ---
-        $grossProfit = $totalRevenue - $totalCOGS;
+        $grossProfit = $netRevenue - $netCOGS;
+
+        // --- Calculate Expenses ---
+        $expensesQuery = \App\Models\Expense::whereBetween('expense_date', [$startDate, $endDate]);
+        if (!empty($validated['user_id'])) { // If user filter is relevant for P&L context
+            $expensesQuery->where('user_id', $validated['user_id']);
+        }
+        $totalExpenses = (float) $expensesQuery->sum('amount');
+
+        // --- Calculate Net Profit ---
+        $netProfit = $grossProfit - $totalExpenses;
 
         // --- (Optional) Calculate Total Purchase Costs (different from COGS) ---
         // This is the total value of goods *purchased* in the period, not necessarily sold.
@@ -961,9 +1010,15 @@ class ReportController extends Controller
             'start_date' => $startDate->toDateString(),
             'end_date' => $endDate->toDateString(),
             'filters' => Arr::only($validated, ['client_id', 'product_id']), // Show applied filters
-            'revenue' => (float) $totalRevenue,
-            'cost_of_goods_sold' => (float) $totalCOGS,
+            'revenue' => (float) $netRevenue,
+            'gross_revenue' => (float) $totalRevenue,
+            'returns_value' => (float) $totalReturnsValue,
+            'cost_of_goods_sold' => (float) $netCOGS,
+            'gross_cogs' => (float) $totalCOGS,
+            'returns_cost' => (float) $totalReturnsCost,
             'gross_profit' => (float) $grossProfit,
+            'total_expenses' => (float) $totalExpenses,
+            'net_profit' => (float) $netProfit,
             // 'total_purchase_cost' => (float) $totalPurchaseCost, // Optional
         ];
 
@@ -1588,7 +1643,7 @@ class ReportController extends Controller
      * Generate inventory PDF report
      *
      * @param Request $request
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
      */
     public function inventoryPdf(Request $request)
     {

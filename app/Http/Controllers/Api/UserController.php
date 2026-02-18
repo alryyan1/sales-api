@@ -251,7 +251,8 @@ class UserController extends Controller
                     ['route' => '/reports/inventory-log', 'label' => 'سجل المخزون'],
                     ['route' => '/reports/sales-discounts', 'label' => 'المبيعات المخفضة'],
                     ['route' => '/reports/daily-income', 'label' => 'تقرير المبيعات الشهري'],
-                    ['route' => '/reports/monthly-expenses', 'label' => 'تقرير المصروفات الشهرية']
+                    ['route' => '/reports/monthly-expenses', 'label' => 'تقرير المصروفات الشهرية'],
+                    ['route' => '/reports/profit-loss', 'label' => 'الأرباح والخسائر']
                 ]
             ],
             [

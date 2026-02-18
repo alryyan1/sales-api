@@ -85,7 +85,13 @@ class ShiftController extends Controller
      */
     public function current(Request $request)
     {
-        $shift = Shift::with(['user', 'closedByUser'])
+        $shift = Shift::with([
+            'user',
+            'closedByUser',
+            'sales.payments',
+            'expenses',
+            'saleReturns.items'
+        ])
             ->orderBy('id', 'desc')
             ->first();
 
@@ -132,7 +138,13 @@ class ShiftController extends Controller
             'opened_at' => now(),
         ]);
 
-        $shift->load(['user', 'closedByUser']);
+        $shift->load([
+            'user',
+            'closedByUser',
+            'sales.payments',
+            'expenses',
+            'saleReturns.items'
+        ]);
 
         return new ShiftResource($shift);
     }
@@ -158,12 +170,13 @@ class ShiftController extends Controller
      *     )
      * )
      */
-    public function close(Request $request)
+    public function close(Request $request, \App\Services\WhatsAppCloudApiService $whatsapp)
     {
         $user = $request->user();
 
-        $shift = Shift::
-            orderBy('id', 'desc')
+        $shift = Shift::with(['sales.payments', 'saleReturns.items', 'expenses'])
+            ->whereNull('closed_at')
+            ->orderBy('id', 'desc')
             ->first();
 
         if (!$shift) {
@@ -172,13 +185,135 @@ class ShiftController extends Controller
             ], 422);
         }
 
+        // Calculate stats before closing to ensure we capture everything
+        // 1. Sales
+        $salesCash = 0;
+        $salesBank = 0;
+        foreach ($shift->sales as $sale) {
+            // Filter by logged-in user
+          
+            foreach ($sale->payments as $payment) {
+                $method = $payment->method ?? 'cash';
+                if ($method === 'cash') {
+                    $salesCash += $payment->amount;
+                } else {
+                    $salesBank += $payment->amount;
+                }
+            }
+        }
+        $totalSales = $salesCash + $salesBank;
+
+        // 2. Returns
+        $returnsCash = 0;
+        $returnsBank = 0;
+        foreach ($shift->saleReturns as $return) {
+            // Filter by logged-in user
+        
+            $returnVal = 0;
+            foreach ($return->items as $item) {
+                $returnVal += ($item->quantity * $item->price);
+            }
+
+            $method = $return->returned_payment_method ?? 'cash';
+            if ($method === 'cash') {
+                $returnsCash += $returnVal;
+            } else {
+                $returnsBank += $returnVal;
+            }
+        }
+        $totalReturns = $returnsCash + $returnsBank;
+
+        // 3. Expenses
+        $expensesCash = 0;
+        $expensesBank = 0;
+        foreach ($shift->expenses as $expense) {
+            // Filter by logged-in user
+          
+
+            $method = $expense->payment_method ?? 'cash';
+            if ($method === 'cash') {
+                $expensesCash += $expense->amount;
+            } else {
+                $expensesBank += $expense->amount;
+            }
+        }
+
+        // 4. Net
+        $netCash = $salesCash - $returnsCash - $expensesCash;
+
+
+        $netBank = $salesBank - $returnsBank - $expensesBank;
+        //log
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} salesCash: " . $salesCash);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} salesBank: " . $salesBank);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} returnsCash: " . $returnsCash);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} returnsBank: " . $returnsBank);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} expensesCash: " . $expensesCash);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} expensesBank: " . $expensesBank);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} netCash: " . $netCash);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} netBank: " . $netBank);
+        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} total sales: " . $totalSales);
         $shift->update([
             'closed_at' => now(),
             'closed_by_user_id' => $user->id,
         ]);
 
-        $shift->load(['user', 'closedByUser']);
+        // Send WhatsApp Notification
+        $whatsappStatus = 'skipped';
+        $whatsappMessage = '';
 
-        return new ShiftResource($shift);
+        try {
+            $adminNumber = '249991961111';
+            $templateName = 'shift_closure_detailed';
+            $languageCode = 'ar';
+
+            $components = [
+                [
+                    'type' => 'body',
+                    'parameters' => [
+                        ['type' => 'text', 'text' => (string)$shift->id],
+                        ['type' => 'text', 'text' => number_format($totalSales, 2)],
+                        ['type' => 'text', 'text' => number_format($totalReturns, 2)],
+                        ['type' => 'text', 'text' => number_format($netCash, 2)],
+                        ['type' => 'text', 'text' => number_format($netBank, 2)],
+                    ]
+                ]
+            ];
+
+            $result = $whatsapp->sendTemplateMessage(
+                $adminNumber,
+                $templateName,
+                $languageCode,
+                $components
+            );
+
+            if ($result['success']) {
+                $whatsappStatus = 'success';
+                \Illuminate\Support\Facades\Log::info("Shift {$shift->id} closure notification sent to {$adminNumber}");
+            } else {
+                $whatsappStatus = 'failed';
+                $whatsappMessage = $result['error'] ?? 'Unknown error';
+                \Illuminate\Support\Facades\Log::error("Failed to send shift closure notification: " . $whatsappMessage);
+            }
+        } catch (\Exception $e) {
+            $whatsappStatus = 'failed';
+            $whatsappMessage = $e->getMessage();
+            \Illuminate\Support\Facades\Log::error("Exception sending shift closure notification: " . $e->getMessage());
+        }
+
+        $shift->load([
+            'user',
+            'closedByUser',
+            'sales.payments',
+            'expenses',
+            'saleReturns.items'
+        ]);
+
+        return (new ShiftResource($shift))->additional([
+            'meta' => [
+                'whatsapp_status' => $whatsappStatus,
+                'whatsapp_message' => $whatsappMessage,
+            ]
+        ]);
     }
 }
