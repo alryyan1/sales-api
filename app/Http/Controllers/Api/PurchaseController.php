@@ -389,6 +389,8 @@ class PurchaseController extends Controller
         // Only allow updating certain fields for a purchase, e.g., notes, status (if it doesn't trigger stock changes)
         // Modifying items, supplier, or date after creation can be problematic.
         $validatedData = $request->validate([
+            'supplier_id' => 'sometimes|required|exists:suppliers,id',
+            'purchase_date' => 'sometimes|required|date_format:Y-m-d',
             'reference_number' => ['sometimes', 'nullable', 'string', 'max:255', Rule::unique('purchases')->ignore($purchase->id)],
             'status' => ['sometimes', 'required', Rule::in(['received', 'pending', 'ordered'])],
             'notes' => 'sometimes|nullable|string|max:65535',
