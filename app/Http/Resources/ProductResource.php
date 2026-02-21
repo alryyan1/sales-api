@@ -35,6 +35,10 @@ class ProductResource extends JsonResource
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
             'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null,
 
+            'sale_price' => $this->sale_price !== null ? (float) $this->sale_price : null,
+            'cost_price' => $this->cost_price !== null ? (float) $this->cost_price : null,
+            'expire_date' => $this->expire_date ? (\Carbon\Carbon::parse($this->expire_date)->format('Y-m-d')) : null,
+
             'latest_cost_per_sellable_unit' => $this->latest_cost_per_sellable_unit ?? null,
             'suggested_sale_price_per_sellable_unit' => $this->suggested_sale_price_per_sellable_unit ?? null,
             'last_sale_price_per_sellable_unit' => $this->last_sale_price_per_sellable_unit ?? null,

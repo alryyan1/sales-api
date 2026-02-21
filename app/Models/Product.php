@@ -100,6 +100,9 @@ class Product extends Model
         'sellable_unit_id',
         'units_per_stocking_unit',
         'has_expiry_date',
+        'sale_price',
+        'cost_price',
+        'expire_date',
     ];
 
     /**
@@ -113,6 +116,9 @@ class Product extends Model
         'stock_alert_level' => 'integer', // Cast to integer
         'units_per_stocking_unit' => 'integer', // Cast to integer
         'has_expiry_date' => 'boolean',
+        'sale_price' => 'float',
+        'cost_price' => 'float',
+        'expire_date' => 'date',
     ];
 
     /**
@@ -373,6 +379,10 @@ class Product extends Model
     // Accessor to get the latest cost PER SELLABLE UNIT
     public function getLatestCostPerSellableUnitAttribute(): ?float
     {
+        if ($this->cost_price !== null) {
+            return (float) $this->cost_price;
+        }
+
         if (array_key_exists('latest_purchase_cost_raw', $this->attributes)) {
             $cost = $this->attributes['latest_purchase_cost_raw'];
             if ($cost !== null && $this->units_per_stocking_unit > 0) {
@@ -418,6 +428,10 @@ class Product extends Model
     // Accessor to get the last sale price from the most recent purchase item
     public function getLastSalePricePerSellableUnitAttribute(): ?float
     {
+        if ($this->sale_price !== null) {
+            return (float) $this->sale_price;
+        }
+
         if (array_key_exists('last_sale_price_raw', $this->attributes)) {
             return $this->attributes['last_sale_price_raw'] !== null ? (float) $this->attributes['last_sale_price_raw'] : null;
         }
@@ -437,6 +451,10 @@ class Product extends Model
     // Accessor to get the earliest expiry date from available stock
     public function getEarliestExpiryDateAttribute(): ?string
     {
+        if ($this->expire_date !== null) {
+            return $this->expire_date instanceof \Carbon\Carbon ? $this->expire_date->format('Y-m-d') : $this->expire_date;
+        }
+
         if (array_key_exists('earliest_expiry_date', $this->attributes)) {
             return $this->attributes['earliest_expiry_date'];
         }
@@ -518,7 +536,7 @@ class Product extends Model
             })
             ->with('product:id,units_per_stocking_unit')
             ->get();
-        return (int) $items->sum(fn ($item) => $item->quantity * (($item->product->units_per_stocking_unit ?? 1) ?: 1));
+        return (int) $items->sum(fn($item) => $item->quantity * (($item->product->units_per_stocking_unit ?? 1) ?: 1));
     }
 
     /**

@@ -500,7 +500,7 @@ class ReportController extends Controller
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
             // Calculate bank total from all bank-related payment methods
-            $bankMethods = ['visa', 'mastercard', 'mada', 'bank_transfer', 'bank'];
+            $bankMethods = ['bankak', 'fawry', 'ocash'];
             $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
                 return in_array($method, $bankMethods);
             })->sum();
@@ -618,7 +618,7 @@ class ReportController extends Controller
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
             // Calculate bank total from all bank-related payment methods
-            $bankMethods = ['visa', 'mastercard', 'mada', 'bank_transfer', 'bank'];
+            $bankMethods = ['bankak', 'fawry', 'ocash'];
             $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
                 return in_array($method, $bankMethods);
             })->sum();
