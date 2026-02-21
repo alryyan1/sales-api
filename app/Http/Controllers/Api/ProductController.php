@@ -124,6 +124,9 @@ class ProductController extends Controller
             'sellable_unit_id' => 'nullable|exists:units,id',
             'units_per_stocking_unit' => 'nullable|integer|min:1',
             'has_expiry_date' => 'nullable|boolean',
+            'sale_price' => 'nullable|numeric|min:0',
+            'cost_price' => 'nullable|numeric|min:0',
+            'expire_date' => 'nullable|date',
         ]);
 
         $product = Product::create($validatedData);
@@ -157,6 +160,9 @@ class ProductController extends Controller
             'sellable_unit_id' => 'sometimes|nullable|exists:units,id',
             'units_per_stocking_unit' => 'sometimes|nullable|integer|min:1',
             'has_expiry_date' => 'sometimes|boolean',
+            'sale_price' => 'sometimes|nullable|numeric|min:0',
+            'cost_price' => 'sometimes|nullable|numeric|min:0',
+            'expire_date' => 'sometimes|nullable|date',
         ]);
 
         // Important Note on stock_quantity:
