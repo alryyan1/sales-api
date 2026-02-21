@@ -129,10 +129,7 @@ class ClientLedgerController extends Controller
         $validated = $request->validate([
             'amount' => 'required|numeric|min:0.01',
             'payment_date' => 'required|date_format:Y-m-d',
-            'method' => [
-                'required',
-                Rule::in(['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'other', 'store_credit'])
-            ],
+            'method' => 'required',
             'reference_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string|max:65535',
         ]);

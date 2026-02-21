@@ -21,9 +21,9 @@ class PurchaseResource extends JsonResource
             'supplier_id' => $this->supplier_id, // Option 2a: Just ID
             'supplier_name' => $this->whenLoaded('supplier', fn() => $this->supplier?->name), // Option 2b: ID + Name (use optional chaining ?. )
 
-             // User Info (optional)
-             'user_id' => $this->user_id,
-             'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
+            // User Info (optional)
+            'user_id' => $this->user_id,
+            'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
 
             // Warehouse Info
             'warehouse_id' => $this->warehouse_id,
@@ -40,6 +40,17 @@ class PurchaseResource extends JsonResource
             // Conditionally include purchase items (usually for the 'show' endpoint)
             // Use PurchaseItemResource::collection to format each item
             'items' => PurchaseItemResource::collection($this->whenLoaded('items')),
+
+            // Payments & Ledger
+            'payments' => $this->whenLoaded('payments', fn() => $this->payments),
+            'total_paid' => $this->when(
+                $this->relationLoaded('payments') || $this->payments_sum_amount !== null,
+                fn() => (float) ($this->payments_sum_amount ?? $this->payments->sum('amount'))
+            ),
+            'balance' => $this->when(
+                $this->relationLoaded('payments') || $this->payments_sum_amount !== null,
+                fn() => (float) $this->total_amount - (float) ($this->payments_sum_amount ?? $this->payments->sum('amount'))
+            ),
         ];
     }
 }

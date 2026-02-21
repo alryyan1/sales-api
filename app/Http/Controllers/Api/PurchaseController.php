@@ -148,6 +148,9 @@ class PurchaseController extends Controller
             $query->with(['items', 'items.product:id,name,sku,stocking_unit_name,sellable_unit_name']);
         }
 
+        // Always include payment sums for ledger on the list view
+        $query->withSum('payments', 'amount');
+
         $purchases = $query->latest('id')->paginate($request->input('per_page', 15));
         return PurchaseResource::collection($purchases);
     }
@@ -348,7 +351,9 @@ class PurchaseController extends Controller
             'supplier:id,name,email,phone',
             'user:id,name',
             'items',
-            'items.product' // Basic product info for each item
+            'items.product', // Basic product info for each item
+            'payments',
+            'payments.user:id,name',
         ]);
         return response()->json(['purchase' => new PurchaseResource($purchase)]);
     }
@@ -1107,6 +1112,43 @@ class PurchaseController extends Controller
                 ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                 ->header('Content-Disposition', 'attachment; filename="purchases_' . date('Y-m-d') . '.xlsx"');
         }
+    }
+
+    /**
+     * Get the ledger/payments history for a purchase.
+     */
+    public function getPayments(Purchase $purchase)
+    {
+        $payments = $purchase->payments()->with('user:id,name')->latest('payment_date')->get();
+        return response()->json(['payments' => $payments]);
+    }
+
+    /**
+     * Add a payment to a purchase.
+     */
+    public function addPayment(Request $request, Purchase $purchase)
+    {
+        $validatedData = $request->validate([
+            'amount' => 'required|numeric|min:0.01',
+            'method' => 'required|string|in:cash,visa,mastercard,bank_transfer,mada,refund,other,bankak,fawry,ocash',
+            'payment_date' => 'required|date',
+            'reference_number' => 'nullable|string|max:255',
+            'notes' => 'nullable|string',
+        ]);
+
+        $payment = $purchase->payments()->create([
+            'user_id' => auth()->id(),
+            'amount' => $validatedData['amount'],
+            'method' => $validatedData['method'],
+            'payment_date' => $validatedData['payment_date'],
+            'reference_number' => $validatedData['reference_number'] ?? null,
+            'notes' => $validatedData['notes'] ?? null,
+        ]);
+
+        return response()->json([
+            'message' => 'Payment recorded successfully',
+            'payment' => $payment->load('user:id,name')
+        ], 201);
     }
 }
 

@@ -215,6 +215,8 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/purchases/preview-import-items', [PurchaseController::class, 'previewImportPurchaseItems']);
   Route::post('/purchases/process-import-items', [PurchaseController::class, 'processImportPurchaseItems']);
   Route::get('/purchases/{purchase}/items', [PurchaseController::class, 'getItems'])->name('api.purchases.getItems');
+  Route::get('/purchases/{purchase}/payments', [PurchaseController::class, 'getPayments'])->name('api.purchases.getPayments');
+  Route::post('/purchases/{purchase}/payments', [PurchaseController::class, 'addPayment'])->name('api.purchases.addPayment');
   Route::post('/purchases/{purchase}/items', [PurchaseController::class, 'addPurchaseItem'])->name('api.purchases.addPurchaseItem');
   Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updatePurchaseItem');
   Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'deletePurchaseItem'])->name('api.purchases.deletePurchaseItem');
@@ -226,6 +228,7 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class);
   Route::post('/sales/create-empty', [SaleController::class, 'createEmptySale'])->name('api.sales.createEmpty');
+  Route::put('/sales/{sale}/remove-client', [SaleController::class, 'removeClient'])->name('api.sales.removeClient');
   Route::post('/sales/{sale}/payments', [SaleController::class, 'addPayment'])->name('api.sales.addPayment');
   Route::delete('/sales/{sale}/payments', [SaleController::class, 'deletePayments'])->name('api.sales.deletePayments');
   Route::post('/sales/{sale}/payments/single', [SaleController::class, 'addSinglePayment'])->name('api.sales.addSinglePayment');

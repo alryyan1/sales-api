@@ -108,4 +108,12 @@ class Purchase extends Model
     {
         return $this->belongsTo(Warehouse::class);
     }
+
+    /**
+     * Get the payments made for this purchase (ledger).
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(PurchasePayment::class);
+    }
 }

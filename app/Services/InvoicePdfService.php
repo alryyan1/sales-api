@@ -42,8 +42,8 @@ class InvoicePdfService
         // Get settings
         $settings = app(\App\Services\SettingsService::class)->getAll();
 
-        // Load sale items
-        $sale->load(['items.product', 'client', 'user']);
+        // Load sale items and payments
+        $sale->load(['items.product', 'client', 'user', 'payments']);
 
         // Generate content
         $this->generateHeader($pdf, $sale, $settings);
@@ -175,10 +175,36 @@ class InvoicePdfService
 
         $pdf->SetFont('arial', 'B', 10);
 
+        // Calculate totals dynamically
+        $itemsTotal = $sale->items->sum('total_price');
+        $discountAmount = $sale->discount_amount ?? 0;
+        $totalAmount = $itemsTotal - $discountAmount;
+        $paidAmount = $sale->payments->sum('amount');
+        $currentDue = max(0, $totalAmount - $paidAmount);
+
+        // Subtotal (if discount exists)
+        if ($discountAmount > 0) {
+            $pdf->SetXY($rightX, $y);
+            $pdf->Cell($boxWidth - 30, 5, 'Subtotal', 0, 0, 'L');
+            $pdf->Cell(30, 5, number_format($itemsTotal, 0, '.', ','), 0, 1, 'R');
+
+            $y = $pdf->GetY() + 1;
+            $pdf->Line($rightX, $y, $rightX + $boxWidth, $y);
+            $y += 4;
+
+            $pdf->SetXY($rightX, $y);
+            $pdf->Cell($boxWidth - 30, 5, 'Discount', 0, 0, 'L');
+            $pdf->Cell(30, 5, number_format($discountAmount, 0, '.', ','), 0, 1, 'R');
+
+            $y = $pdf->GetY() + 1;
+            $pdf->Line($rightX, $y, $rightX + $boxWidth, $y);
+            $y += 4;
+        }
+
         // Total
         $pdf->SetXY($rightX, $y);
         $pdf->Cell($boxWidth - 30, 5, 'Total', 0, 0, 'L');
-        $pdf->Cell(30, 5, number_format($sale->total_amount, 0, '.', ','), 0, 1, 'R');
+        $pdf->Cell(30, 5, number_format($totalAmount, 0, '.', ','), 0, 1, 'R');
 
         // Line
         $y = $pdf->GetY() + 1;
@@ -188,16 +214,14 @@ class InvoicePdfService
         // Paid
         $pdf->SetXY($rightX, $y);
         $pdf->Cell($boxWidth - 30, 5, 'Paid', 0, 0, 'L');
-        $pdf->Cell(30, 5, number_format($sale->paid_amount, 0, '.', ','), 0, 1, 'R');
+        $pdf->Cell(30, 5, number_format($paidAmount, 0, '.', ','), 0, 1, 'R');
 
         // Line
         $y = $pdf->GetY() + 1;
         $pdf->Line($rightX, $y, $rightX + $boxWidth, $y);
         $y += 4;
 
-        // Current Due (with green background)
-        $currentDue = max(0, $sale->total_amount - $sale->paid_amount);
-
+        // Current Due
         $pdf->SetXY($rightX, $y);
         $pdf->Cell($boxWidth - 30, 5, 'Current Due', 0, 0, 'L');
 

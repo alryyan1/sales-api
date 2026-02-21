@@ -51,11 +51,17 @@ class ClientController extends Controller
     {
 
         // Basic pagination with financial data
-        $clients = Client::with(['sales', 'payments'])
+        $clients = Client::with(['sales.items', 'payments'])
             ->latest()
             ->paginate($request->input('per_page', 15)) // Default 15 per page
             ->through(function ($client) {
-                $totalDebit = $client->sales->sum('total_amount');
+                // Calculate total debit by summing the items of each sale and subtracting discount
+                $totalDebit = $client->sales->sum(function ($sale) {
+                    $itemsTotal = $sale->items->sum('total_price');
+                    $discount = (float) ($sale->discount_amount ?? 0);
+                    return $itemsTotal - $discount;
+                });
+
                 $totalCredit = $client->payments->sum('amount');
                 $balance = $totalDebit - $totalCredit;
 

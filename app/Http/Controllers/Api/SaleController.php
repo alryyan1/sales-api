@@ -569,18 +569,41 @@ class SaleController extends Controller
 
         $sale->update($validatedData);
 
-        $sale->load([
+        $sale = $sale->fresh([
             'client:id,name',
             'user:id,name',
             'items',
             'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
-            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date'
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
+            'payments.user:id,name'
         ]);
-        return response()->json(['sale' => new SaleResource($sale->fresh())]);
+        return response()->json(['sale' => new SaleResource($sale)]);
     }
 
+    /**
+     * Remove the client from a sale (set client_id to null).
+     */
+    public function removeClient(Request $request, Sale $sale)
+    {
+        $sale->update(['client_id' => null]);
+
+        $sale = $sale->fresh([
+            'client:id,name',
+            'user:id,name',
+            'items',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+            'items.product.sellableUnit:id,name',
+            'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
+            'payments.user:id,name'
+        ]);
+        return response()->json([
+            'message' => 'Client removed successfully.',
+            'sale' => new SaleResource($sale)
+        ]);
+    }
 
     /**
      * Remove the specified sale from storage.
