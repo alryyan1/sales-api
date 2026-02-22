@@ -245,6 +245,7 @@ class UserController extends Controller
             [
                 'category' => 'التقارير',
                 'items' => [
+                    ['route' => '/reports/dashboard', 'label' => 'لوحة المعلومات'],
                     ['route' => '/reports/sales', 'label' => 'تقرير المبيعات'],
                     ['route' => '/reports/purchases', 'label' => 'تقرير المشتريات'],
                     ['route' => '/reports/suppliers-summary', 'label' => 'ملخص الموردين'],
@@ -252,7 +253,10 @@ class UserController extends Controller
                     ['route' => '/reports/sales-discounts', 'label' => 'المبيعات المخفضة'],
                     ['route' => '/reports/daily-income', 'label' => 'تقرير المبيعات الشهري'],
                     ['route' => '/reports/monthly-expenses', 'label' => 'تقرير المصروفات الشهرية'],
-                    ['route' => '/reports/profit-loss', 'label' => 'الأرباح والخسائر']
+                    ['route' => '/reports/profit-loss', 'label' => 'الأرباح والخسائر'],
+                    ['route' => '/reports/best-selling-products', 'label' => 'المنتجات الأكثر مبيعاً'],
+                    ['route' => '/reports/stagnant-products', 'label' => 'المنتجات الراكدة'],
+                    ['route' => '/reports/low-stock-products', 'label' => 'المنتجات منخفضة المخزون']
                 ]
             ],
             [

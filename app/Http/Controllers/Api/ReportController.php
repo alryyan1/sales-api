@@ -1964,4 +1964,122 @@ class ReportController extends Controller
     public function inventoryReport(Request $request) { ... }
     public function profitLossReport(Request $request) { ... }
     */
+
+    /**
+     * Get best selling products based on quantity sold in a given period.
+     */
+    public function bestSelling(Request $request)
+    {
+        $days = (int) $request->input('days', 30);
+        $limit = (int) $request->input('limit', 10);
+
+        $startDate = Carbon::now()->subDays($days)->startOfDay();
+
+        $bestSelling = SaleItem::select('product_id', DB::raw('SUM(quantity) as total_quantity_sold'), DB::raw('SUM(total_price) as total_revenue'))
+            ->where('created_at', '>=', $startDate)
+            ->groupBy('product_id')
+            ->orderByDesc('total_quantity_sold')
+            ->limit($limit)
+            ->with(['product' => function ($query) {
+                // Ensure we select necessary columns and calculate total stock properly 
+                $query->select('id', 'name', 'sku', 'image_url', 'category_id')->with('category:id,name', 'warehouses');
+            }])
+            ->get();
+
+        // Map data to simpler structure
+        $results = $bestSelling->map(function ($item) {
+            $product = $item->product;
+            return [
+                'id' => $product ? $product->id : null,
+                'name' => $product ? $product->name : 'Unknown Product',
+                'sku' => $product ? $product->sku : null,
+                'category_name' => ($product && $product->category) ? $product->category->name : 'N/A',
+                'image_url' => $product ? $product->image_url : null,
+                'total_quantity_sold' => (int) $item->total_quantity_sold,
+                'total_revenue' => (float) $item->total_revenue,
+                'current_stock' => $product ? $product->total_stock : 0,
+            ];
+        })->filter(function ($item) {
+            return $item['id'] !== null;
+        })->values();
+
+        return response()->json(['data' => $results]);
+    }
+
+    /**
+     * Get stagnant products that have stock but haven't been sold recently.
+     */
+    public function stagnant(Request $request)
+    {
+        $months = (int) $request->input('months', 3);
+        $limit = (int) $request->input('limit', 20);
+
+        $dateThreshold = Carbon::now()->subMonths($months)->startOfDay();
+
+        $stagnantProducts = Product::whereHas('warehouses', function ($q) {
+            // Must have stock
+            $q->where('product_warehouse.quantity', '>', 0);
+        })
+            ->whereDoesntHave('saleItems', function ($query) use ($dateThreshold) {
+                // Must NOT have sales since the threshold date
+                $query->where('created_at', '>=', $dateThreshold);
+            })
+            ->with(['category:id,name', 'warehouses'])
+            ->withSum('saleItems', 'quantity') // To see lifetime sales
+            ->get(); // Get a collection and then we can sort by computed property
+
+        $results = $stagnantProducts->map(function ($product) {
+            return [
+                'id' => $product->id,
+                'name' => $product->name,
+                'sku' => $product->sku,
+                'category_name' => $product->category ? $product->category->name : 'N/A',
+                'stock_quantity' => $product->total_stock,
+                'lifetime_sales' => (int) $product->sale_items_sum_quantity,
+            ];
+        })->sortByDesc('stock_quantity')->take($limit)->values();
+
+        return response()->json(['data' => $results]);
+    }
+
+    /**
+     * Get products expiring within the next X months.
+     */
+    public function expiring(Request $request)
+    {
+        $months = (int) $request->input('months', 3);
+        $limit = (int) $request->input('limit', 20);
+
+        $dateThreshold = Carbon::now()->addMonths($months)->endOfDay();
+        $now = Carbon::now()->startOfDay();
+
+        // Get products with stock
+        $productsInStock = Product::whereHas('warehouses', function ($q) {
+            $q->where('product_warehouse.quantity', '>', 0);
+        })->with(['category:id,name', 'warehouses', 'purchaseItems'])->get();
+
+        // Filter those with early expiry
+        $expiring = $productsInStock->map(function ($product) {
+            $earliest = $product->earliest_expiry_date;
+            return [
+                'id' => $product->id,
+                'name' => $product->name,
+                'sku' => $product->sku,
+                'category_name' => $product->category ? $product->category->name : 'N/A',
+                'stock_quantity' => $product->total_stock,
+                'earliest_expiry_date' => $earliest,
+            ];
+        })->filter(function ($item) use ($dateThreshold, $now) {
+            if (!$item['earliest_expiry_date']) return false;
+            try {
+                $date = Carbon::parse($item['earliest_expiry_date']);
+                // Return soon expiring items AND already expired items in stock
+                return ltrim($date->format('Y-m-d'), "0") !== "" && $date->lte($dateThreshold);
+            } catch (\Exception $e) {
+                return false;
+            }
+        })->sortBy('earliest_expiry_date')->take($limit)->values();
+
+        return response()->json(['data' => $expiring]);
+    }
 }

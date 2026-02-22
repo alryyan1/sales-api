@@ -115,6 +115,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/monthly-revenue-excel', [ReportController::class, 'monthlyRevenueExcel'])->name('monthly-revenue-excel');
     Route::get('/monthly-purchases', [ReportController::class, 'monthlyPurchasesReport'])->name('monthly-purchases');
     Route::get('/top-products', [ReportController::class, 'topSellingProducts'])->name('top-products');
+
+    // Statistical Dashboard Routes
+    Route::get('/stats/best-selling', [ReportController::class, 'bestSelling'])->name('stats.best-selling');
+    Route::get('/stats/stagnant', [ReportController::class, 'stagnant'])->name('stats.stagnant');
+    Route::get('/stats/expiring', [ReportController::class, 'expiring'])->name('stats.expiring');
+
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
     Route::get('/sales-pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('sales-pdf');
     Route::get('/inventory-pdf', [ReportController::class, 'inventoryPdf'])->name('inventory-pdf');
