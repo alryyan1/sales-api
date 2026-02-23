@@ -60,7 +60,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Shifts (POS) --
   Route::get('/shifts', [ShiftController::class, 'index'])->name('api.shifts.index');
+  Route::get('/shifts/by-month', [ShiftController::class, 'byMonth'])->name('api.shifts.by-month');
   Route::get('/shifts/current', [ShiftController::class, 'current'])->name('api.shifts.current');
+  Route::get('/shifts/{shift}', [ShiftController::class, 'show'])->name('api.shifts.show');
   Route::post('/shifts/open', [ShiftController::class, 'open'])->name('api.shifts.open');
   Route::post('/shifts/close', [ShiftController::class, 'close'])->name('api.shifts.close');
 
@@ -123,6 +125,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
     Route::get('/sales-pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('sales-pdf');
+    Route::get('/shift-cost-pdf', [ReportController::class, 'shiftCostPdf'])->name('shift-cost-pdf');
+    Route::get('/shift-returns-pdf', [ReportController::class, 'shiftReturnsPdf'])->name('shift-returns-pdf');
+    Route::get('/shift-sold-items-pdf', [ReportController::class, 'shiftSoldItemsPdf'])->name('shift-sold-items-pdf');
     Route::get('/inventory-pdf', [ReportController::class, 'inventoryPdf'])->name('inventory-pdf');
     Route::get('/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('inventory-log');
     Route::get('/inventory-log/pdf', [App\Http\Controllers\Api\InventoryLogController::class, 'generatePdf'])->name('inventory-log.pdf');
@@ -165,6 +170,7 @@ Route::middleware('auth:sanctum')->group(function () {
       Route::get('/phone-numbers', [WhatsAppCloudApiController::class, 'getPhoneNumbers']);
       Route::get('/is-configured', [WhatsAppCloudApiController::class, 'isConfigured']);
       Route::get('/test-get-result-by-phone/{phone?}', [WhatsAppCloudApiController::class, 'testGetResultUrlByPhone']);
+      Route::get('/test-shift-firestore/{shift_id?}', [WhatsAppCloudApiController::class, 'testShiftFirestore']);
     });
   });
 

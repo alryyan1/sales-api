@@ -17,6 +17,8 @@ use App\Services\Pdf\MyCustomTCPDF;
 use App\Services\DailySalesPdfService;
 use App\Services\InventoryPdfService;
 use App\Services\SalesReportPdfService;
+use App\Services\ShiftCostPdfService;
+use App\Services\ShiftSalesReturnPdfService;
 use Arr;
 use DB;
 use Carbon\Carbon; // Ensure correct Carbon namespace is used
@@ -2081,5 +2083,65 @@ class ReportController extends Controller
         })->sortBy('earliest_expiry_date')->take($limit)->values();
 
         return response()->json(['data' => $expiring]);
+    }
+
+    /**
+     * Download Shift Cost (Expenses) PDF
+     */
+    public function shiftCostPdf(Request $request, \App\Services\ShiftCostPdfService $pdfService)
+    {
+        $validated = $request->validate([
+            'shift_id' => 'required|integer|exists:shifts,id',
+        ]);
+
+        $shift = Shift::with(['user', 'expenses.user', 'expenses.category'])->findOrFail($validated['shift_id']);
+
+        $pdfContent = $pdfService->generate($shift);
+
+        $filename = 'Shift_' . $shift->id . '_Costs_' . now()->format('Ymd_His') . '.pdf';
+
+        return response($pdfContent, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+    }
+
+    /**
+     * Download Shift Sales Returns PDF
+     */
+    public function shiftReturnsPdf(Request $request, \App\Services\ShiftSalesReturnPdfService $pdfService)
+    {
+        $validated = $request->validate([
+            'shift_id' => 'required|integer|exists:shifts,id',
+        ]);
+
+        $shift = Shift::with(['user', 'saleReturns.user', 'saleReturns.items', 'saleReturns.sale'])->findOrFail($validated['shift_id']);
+
+        $pdfContent = $pdfService->generate($shift);
+
+        $filename = 'Shift_' . $shift->id . '_Returns_' . now()->format('Ymd_His') . '.pdf';
+
+        return response($pdfContent, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+    }
+
+    /**
+     * Download Shift Sold Items PDF (الأصناف المباعة)
+     */
+    public function shiftSoldItemsPdf(Request $request, \App\Services\ShiftSoldItemsPdfService $pdfService)
+    {
+        $validated = $request->validate([
+            'shift_id' => 'required|integer|exists:shifts,id',
+        ]);
+
+        $shift = Shift::with(['user', 'sales.items.product'])->findOrFail($validated['shift_id']);
+
+        $pdfContent = $pdfService->generate($shift);
+
+        $filename = 'Shift_' . $shift->id . '_SoldItems_' . now()->format('Ymd_His') . '.pdf';
+
+        return response($pdfContent, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
     }
 }

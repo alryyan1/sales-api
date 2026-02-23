@@ -57,6 +57,39 @@ class ShiftController extends Controller
     }
 
     /**
+     * Get all shifts for a specific month, grouped by day.
+     * Accepts ?year=YYYY&month=MM (defaults to current month).
+     */
+    public function byMonth(Request $request)
+    {
+        $year  = (int) $request->input('year',  now()->year);
+        $month = (int) $request->input('month', now()->month);
+
+        $start = \Carbon\Carbon::createFromDate($year, $month, 1)->startOfMonth();
+        $end   = \Carbon\Carbon::createFromDate($year, $month, 1)->endOfMonth();
+
+        $shifts = Shift::with('user')
+            ->whereBetween('opened_at', [$start, $end])
+            ->orderBy('opened_at', 'asc')
+            ->get(['id', 'opened_at', 'closed_at', 'user_id', 'is_open']);
+
+        // Build a map: date-string -> [ shift summaries ]
+        $grouped = [];
+        foreach ($shifts as $shift) {
+            $day = $shift->opened_at ? $shift->opened_at->format('Y-m-d') : 'unknown';
+            $grouped[$day][] = [
+                'id'        => $shift->id,
+                'user_name' => $shift->user?->name ?? '—',
+                'opened_at' => $shift->opened_at?->toISOString(),
+                'closed_at' => $shift->closed_at?->toISOString(),
+                'is_open'   => $shift->is_open,
+            ];
+        }
+
+        return response()->json(['data' => $grouped, 'year' => $year, 'month' => $month]);
+    }
+
+    /**
      * @OA\Get(
      *     path="/api/shifts/current",
      *     summary="Get current shift",
@@ -98,6 +131,47 @@ class ShiftController extends Controller
         return $shift
             ? new ShiftResource($shift)
             : response()->json(null, 204);
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/api/shifts/{id}",
+     *     summary="Get a specific shift",
+     *     description="Retrieve details and stats of a specific shift by its ID.",
+     *     operationId="getShiftById",
+     *     tags={"Shifts"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Shift ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Shift details",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Shift not found"
+     *     )
+     * )
+     */
+    public function show(Request $request, $id)
+    {
+        $shift = Shift::with([
+            'user',
+            'closedByUser',
+            'sales.payments',
+            'expenses',
+            'saleReturns.items'
+        ])->findOrFail($id);
+
+        return new ShiftResource($shift);
     }
 
     /**
@@ -191,7 +265,7 @@ class ShiftController extends Controller
         $salesBank = 0;
         foreach ($shift->sales as $sale) {
             // Filter by logged-in user
-          
+
             foreach ($sale->payments as $payment) {
                 $method = $payment->method ?? 'cash';
                 if ($method === 'cash') {
@@ -208,7 +282,7 @@ class ShiftController extends Controller
         $returnsBank = 0;
         foreach ($shift->saleReturns as $return) {
             // Filter by logged-in user
-        
+
             $returnVal = 0;
             foreach ($return->items as $item) {
                 $returnVal += ($item->quantity * $item->price);
@@ -228,7 +302,7 @@ class ShiftController extends Controller
         $expensesBank = 0;
         foreach ($shift->expenses as $expense) {
             // Filter by logged-in user
-          
+
 
             $method = $expense->payment_method ?? 'cash';
             if ($method === 'cash') {
@@ -263,37 +337,61 @@ class ShiftController extends Controller
         $whatsappMessage = '';
 
         try {
-            $adminNumber = '249991961111';
-            $templateName = 'shift_closure_detailed';
-            $languageCode = 'ar';
+            $settingsService = new \App\Services\SettingsService();
+            $settings = $settingsService->getAll();
+            $numbersString = $settings['whatsapp_shift_closure_numbers'] ?? '';
+            $adminNumbers = array_filter(array_map('trim', explode(',', $numbersString)));
 
-            $components = [
-                [
-                    'type' => 'body',
-                    'parameters' => [
-                        ['type' => 'text', 'text' => (string)$shift->id],
-                        ['type' => 'text', 'text' => number_format($totalSales, 2)],
-                        ['type' => 'text', 'text' => number_format($totalReturns, 2)],
-                        ['type' => 'text', 'text' => number_format($netCash, 2)],
-                        ['type' => 'text', 'text' => number_format($netBank, 2)],
-                    ]
-                ]
-            ];
-
-            $result = $whatsapp->sendTemplateMessage(
-                $adminNumber,
-                $templateName,
-                $languageCode,
-                $components
-            );
-
-            if ($result['success']) {
-                $whatsappStatus = 'success';
-                \Illuminate\Support\Facades\Log::info("Shift {$shift->id} closure notification sent to {$adminNumber}");
+            if (empty($adminNumbers)) {
+                $whatsappStatus = 'skipped';
+                $whatsappMessage = 'No WhatsApp numbers configured for shift closures.';
             } else {
-                $whatsappStatus = 'failed';
-                $whatsappMessage = $result['error'] ?? 'Unknown error';
-                \Illuminate\Support\Facades\Log::error("Failed to send shift closure notification: " . $whatsappMessage);
+                $templateName = 'shift_closed';
+                $languageCode = 'ar';
+
+                $components = [
+                    [
+                        'type' => 'body',
+                        'parameters' => [
+                            ['type' => 'text', 'text' => (string)$shift->id],
+                            ['type' => 'text', 'text' => number_format($totalSales, 2)],
+                            ['type' => 'text', 'text' => number_format($totalReturns, 2)],
+                            ['type' => 'text', 'text' => number_format($netCash, 2)],
+                            ['type' => 'text', 'text' => number_format($netBank, 2)],
+                        ]
+                    ]
+                ];
+
+                $successCount = 0;
+                $errors = [];
+
+                foreach ($adminNumbers as $number) {
+                    $result = $whatsapp->sendTemplateMessage(
+                        $number,
+                        $templateName,
+                        $languageCode,
+                        $components
+                    );
+
+                    if ($result['success']) {
+                        $successCount++;
+                        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} closure notification sent to {$number}");
+                    } else {
+                        $errors[] = "Failed for {$number}: " . ($result['error'] ?? 'Unknown error');
+                        \Illuminate\Support\Facades\Log::error("Failed to send shift closure notification to {$number}: " . ($result['error'] ?? 'Unknown error'));
+                    }
+                }
+
+                if ($successCount > 0) {
+                    $whatsappStatus = 'success';
+                    $whatsappMessage = "Sent to {$successCount} configure number(s).";
+                    if (!empty($errors)) {
+                        $whatsappMessage .= " Errors: " . implode(' | ', $errors);
+                    }
+                } else {
+                    $whatsappStatus = 'failed';
+                    $whatsappMessage = implode(' | ', $errors);
+                }
             }
         } catch (\Exception $e) {
             $whatsappStatus = 'failed';

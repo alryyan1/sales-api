@@ -447,56 +447,12 @@ class WhatsAppCloudApiController extends Controller
                         if (isset($value['messages'])) {
                             foreach ($value['messages'] as $message) {
                                 if ($recipientPhoneNumberId === '953041111231804') {
-                                    $collection = 'altamayoz';
-                                    Log::info('getting data from altamayoz ' . $recipientPhoneNumberId);
+                                    $collection = 'one_care';
                                     if (($message['type'] ?? '') === 'text' && isset($message['text']['body'])) {
                                         $from = $message['from'];
                                         $body = $message['text']['body'];
-
-                                        $msg = <<<MSG
-استعلام جديد للنتائج
- التميز الفرع الجديد 
-من الرقم: $from
-المحتوى: $body
-MSG;
-                                        $this->sendTextToUser('249991961111', $msg, $recipientPhoneNumberId);
                                     } else {
-                                        $msg = "  استعلام جديد    لمختبر التميز  من الرقم  " . ($message['from'] ?? '');
-                                        $this->sendTextToUser('249991961111', $msg, $recipientPhoneNumberId);
-                                        $this->sendTextToUser('249122867272', $msg, $recipientPhoneNumberId);
-                                    }
-
-                                    $this->handleIncomingMessage($message, $value, $collection, $recipientPhoneNumberId);
-                                } elseif ($recipientPhoneNumberId === '982254518296345') {
-                                    $collection = 'alroomy-shaglaban';
-                                    Log::info('getting data from alryyan ' . $recipientPhoneNumberId);
-                                    if (($message['type'] ?? '') === 'text' && isset($message['text']['body'])) {
-                                        $from = $message['from'];
-                                        $body = $message['text']['body'];
-
-                                        $msg = <<<MSG
-استعلام جديد للنتائج
-الرومي شقلبان 
-من الرقم: $from
-المحتوى: $body
-MSG;
-                                        $this->sendTextToUser('249991961111', $msg, $recipientPhoneNumberId);
-                                    }
-
-                                    $this->handleIncomingMessage($message, $value, $collection, $recipientPhoneNumberId);
-                                } elseif ($recipientPhoneNumberId === '1010322575491077') {
-                                    $collection = 'altamayoz_branch_one';
-                                    Log::info('getting data from alryyan ' . $recipientPhoneNumberId);
-                                    if (($message['type'] ?? '') === 'text' && isset($message['text']['body'])) {
-                                        $from = $message['from'];
-                                        $body = $message['text']['body'];
-
-                                        $msg = <<<MSG
-استعلام جديد للنتائج
-التميز الفرع الاول
-من الرقم: $from
-المحتوى: $body
-MSG;
+                                        $msg = "  استعلام جديد    لصيدليه ون كير من الرقم  " . ($message['from'] ?? '');
                                         $this->sendTextToUser('249991961111', $msg, $recipientPhoneNumberId);
                                     }
 
@@ -568,26 +524,20 @@ MSG;
         $type = $message['type'] ?? null;
         $timestamp = $message['timestamp'] ?? null;
 
-        Log::info('WhatsApp Cloud API: Incoming message received.', [
-            'message_id' => $messageId,
-            'from' => $from,
-            'type' => $type,
-            'timestamp' => $timestamp,
-        ]);
 
         if (($type ?? '') === 'text' && isset($message['text']['body'])) {
-            \App\Events\WhatsAppMessageReceived::dispatch([
-                'phone_number_id' => $phoneNumberId,
-                'waba_id' => null,
-                'from' => $from,
-                'to' => $phoneNumberId,
-                'type' => 'text',
-                'body' => $message['text']['body'],
-                'status' => 'received',
-                'message_id' => $messageId ?? null,
-                'direction' => 'incoming',
-                'raw_payload' => $message,
-            ]);
+            // \App\Events\WhatsAppMessageReceived::dispatch([
+            //     'phone_number_id' => $phoneNumberId,
+            //     'waba_id' => null,
+            //     'from' => $from,
+            //     'to' => $phoneNumberId,
+            //     'type' => 'text',
+            //     'body' => $message['text']['body'],
+            //     'status' => 'received',
+            //     'message_id' => $messageId ?? null,
+            //     'direction' => 'incoming',
+            //     'raw_payload' => $message,
+            // ]);
         }
 
         $isButtonMessage = false;
@@ -597,21 +547,9 @@ MSG;
             $interactive = $message['interactive'];
             $interactiveType = $interactive['type'] ?? null;
 
-            Log::info('WhatsApp Cloud API: Interactive message received.', [
-                'interactive_type' => $interactiveType,
-                'from' => $from,
-                'interactive_data' => $interactive,
-            ]);
-
             if ($interactiveType === 'button_reply' && isset($interactive['button_reply'])) {
                 $isButtonMessage = true;
                 $buttonData = $interactive['button_reply'];
-
-                Log::info('WhatsApp Cloud API: Button reply received (interactive format).', [
-                    'button_id' => $buttonData['id'] ?? null,
-                    'button_title' => $buttonData['title'] ?? null,
-                    'from' => $from,
-                ]);
             }
         } elseif ($type === 'button') {
             if (isset($message['button'])) {
@@ -621,305 +559,110 @@ MSG;
                 $isButtonMessage = true;
                 $buttonData = $message['interactive']['button_reply'];
             }
-
-            if ($isButtonMessage) {
-                Log::info('WhatsApp Cloud API: Button message received (button type).', [
-                    'button_id' => $buttonData['id'] ?? null,
-                    'button_text' => $buttonData['text'] ?? $buttonData['title'] ?? null,
-                    'from' => $from,
-                    'full_message' => $message,
-                ]);
-            }
         }
 
         if ($isButtonMessage && $buttonData !== null) {
-            $pdfUrl = $this->getResultUrlFromFirestoreByPhone($from, $collection);
-            Log::info('PDF URL: ' . $pdfUrl);
+            // Determine which button was pressed by its title or payload
+            $buttonTitle = strtolower(trim($buttonData['title'] ?? $buttonData['text'] ?? $buttonData['id'] ?? ''));
+            $buttonPayload = strtolower(trim($buttonData['payload'] ?? $buttonData['id'] ?? ''));
 
-            if ($pdfUrl) {
-                $this->sendTextToUser($from, "سيتم إرسال النتيجة إليكم خلال لحظات", $phoneNumberId);
-                $this->sendDocumentToUser($from, $pdfUrl, null, $phoneNumberId);
-            } else {
-                $this->sendTextToUser($from, "عذراً، لم يتم العثور على النتيجة لرقم الهاتف: {$from}", $phoneNumberId);
+            // Identify the report type from the button
+            $isSalesReport   = str_contains($buttonTitle, 'مبيعات')   && !str_contains($buttonTitle, 'مردود') && !str_contains($buttonTitle, 'اصناف');
+            $isSoldItems     = str_contains($buttonTitle, 'اصناف')    || str_contains($buttonPayload, 'sold');
+            $isReturns       = str_contains($buttonTitle, 'مردود')    || str_contains($buttonPayload, 'return');
+
+            // Fallback: try button payload keywords
+            if (!$isSalesReport && !$isSoldItems && !$isReturns) {
+                $isSalesReport = str_contains($buttonPayload, 'sales') || str_contains($buttonPayload, 'report');
             }
-        } elseif ($type === 'text' && isset($message['text']['body'])) {
-            $messageText = trim($message['text']['body']);
 
-            if (is_numeric($messageText)) {
-                $code = $messageText;
+            // We need to know the shift_id. It may be embedded in the button payload, e.g. "sales_71" or just "71".
+            // Try to extract a numeric shift_id from payload, otherwise look up last shift document.
+            $shiftId = null;
+            if (preg_match('/(\d+)/', $buttonPayload, $m)) {
+                $shiftId = $m[1];
+            } elseif (preg_match('/(\d+)/', $buttonTitle, $m)) {
+                $shiftId = $m[1];
+            }
 
-                Log::info('WhatsApp Cloud API: Numeric visit ID received.', [
-                    'code' => $code,
-                    'from' => $from,
-                    'message_text' => $messageText,
-                ]);
+            if ($shiftId) {
+                $shiftPdfs = $this->getShiftPdfUrlsFromFirestore($shiftId, $collection);
+            } else {
+                $shiftPdfs = null;
+            }
 
-                $this->sendTextToUser($from, "سيتم إرسال النتيجة إليكم خلال لحظات", $phoneNumberId);
-
-                $pdfUrl = $this->getResultUrlFromFirestore($code, $collection);
+            if ($shiftPdfs) {
+                if ($isSoldItems) {
+                    $pdfUrl  = $shiftPdfs['sold_items_pdf_url'] ?? null;
+                    $label   = 'تقرير الأصناف المباعة';
+                } elseif ($isReturns) {
+                    $pdfUrl  = $shiftPdfs['returns_pdf_url'] ?? null;
+                    $label   = 'تقرير مردودات المبيعات';
+                } else {
+                    // Default: main sales report
+                    $pdfUrl  = $shiftPdfs['pdf_url'] ?? null;
+                    $label   = 'تقرير المبيعات';
+                }
 
                 if ($pdfUrl) {
-                    $this->sendDocumentToUser($from, $pdfUrl, $code, $phoneNumberId);
+                    $this->sendTextToUser($from, "سيتم إرسال {$label} خلال لحظات", $phoneNumberId);
+                    $this->sendDocumentToUser($from, $pdfUrl, "shift_{$shiftId}", $phoneNumberId);
                 } else {
-                    $this->sendTextToUser($from, "عذراً، لم يتم العثور على النتيجة للرقم: {$code}", $phoneNumberId);
+                    $this->sendTextToUser($from, "عذراً، {$label} غير متاح لهذه الوردية.", $phoneNumberId);
                 }
             } else {
-                Log::info('WhatsApp Cloud API: Non-numeric text message ignored.', [
-                    'message_text' => $messageText,
-                    'from' => $from,
-                ]);
+                // Fallback to old phone-based lookup
+
+                $this->sendTextToUser($from, "عذراً، لم يتم العثور على التقرير لهذا الرقم: {$from}", $phoneNumberId);
             }
-        }
+        } 
     }
 
     /**
-     * Get result URL from Firestore using visit ID/code.
+     * Fetch all PDF URLs for a shift from Firestore.
+     * Firestore path: one_care → shifts (subcollection) → {shift_id}
+     * Returns array with keys: pdf_url, cost_pdf_url, sold_items_pdf_url, returns_pdf_url
      */
-    protected function getResultUrlFromFirestore(string $visitId, ?string $collection = null): ?string
+    protected function getShiftPdfUrlsFromFirestore(string $shiftId, ?string $collection): ?array
     {
         try {
             $projectId = config('firebase.project_id');
             if (!$projectId) {
-                Log::warning('Firebase project ID not configured for Firestore read');
+                Log::warning('Firebase project ID not configured');
                 return null;
             }
 
-            $accessToken = FirebaseService::getAccessToken();
+            $accessToken = \App\Services\FirebaseService::getAccessToken();
             if (!$accessToken) {
-                Log::warning('FCM access token unavailable for Firestore read');
+                Log::warning('FCM access token unavailable');
                 return null;
             }
 
-            $documentId = (string) $visitId;
-            $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents/{$collection}/{$documentId}";
+            // Path: one_care/shifts/shifts/{shift_id}
+            $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents/one_care/shifts/shifts/{$shiftId}";
 
-            $response = Http::withToken($accessToken)->get($url);
+            $response = \Illuminate\Support\Facades\Http::withToken($accessToken)->get($url);
 
-            if ($response->successful()) {
-                $document = $response->json();
-                $fields = $document['fields'] ?? [];
-
-                if (isset($fields['result_url']['stringValue'])) {
-                    $resultUrl = $fields['result_url']['stringValue'];
-                    Log::info("Retrieved result URL from Firestore", [
-                        'collection' => $collection,
-                        'document_id' => $documentId,
-                        'result_url' => $resultUrl,
-                    ]);
-                    return $resultUrl;
-                }
-
-                Log::warning("Result URL not found in Firestore document", [
-                    'collection' => $collection,
-                    'document_id' => $documentId,
-                    'available_fields' => array_keys($fields),
-                ]);
+            if (!$response->successful()) {
+                Log::warning("Shift Firestore document not found", ['shift_id' => $shiftId, 'status' => $response->status()]);
                 return null;
             }
 
-            if ($response->status() === 404) {
-                Log::warning("Firestore document not found", [
-                    'collection' => $collection,
-                    'document_id' => $documentId,
-                ]);
-                return null;
-            }
+            $fields = $response->json()['fields'] ?? [];
 
-            Log::warning("Failed to get Firestore document", [
-                'collection' => $collection,
-                'document_id' => $documentId,
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-            return null;
+            return [
+                'pdf_url'            => $fields['pdf_url']['stringValue'] ?? null,
+                'cost_pdf_url'       => $fields['cost_pdf_url']['stringValue'] ?? null,
+                'sold_items_pdf_url' => $fields['sold_items_pdf_url']['stringValue'] ?? null,
+                'returns_pdf_url'    => $fields['returns_pdf_url']['stringValue'] ?? null,
+            ];
         } catch (\Exception $e) {
-            Log::error("Failed to get result URL from Firestore", [
-                'visit_id' => $visitId,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            Log::error("Failed to fetch shift PDF URLs from Firestore", ['shift_id' => $shiftId, 'error' => $e->getMessage()]);
             return null;
         }
     }
 
-    /**
-     * Get the most recent result URL from Firestore by searching for patient phone number.
-     */
-    protected function getResultUrlFromFirestoreByPhone(string $phoneNumber, ?string $collection): ?string
-    {
-        try {
-            $projectId = config('firebase.project_id');
-            if (!$projectId) {
-                Log::warning('Firebase project ID not configured for Firestore query');
-                return null;
-            }
-
-            $accessToken = FirebaseService::getAccessToken();
-            if (!$accessToken) {
-                Log::warning('FCM access token unavailable for Firestore query');
-                return null;
-            }
-
-            $normalizedPhone = preg_replace('/[^0-9]/', '', $phoneNumber);
-
-            $phoneVariants = [$phoneNumber];
-
-            if ($phoneNumber !== $normalizedPhone) {
-                $phoneVariants[] = $normalizedPhone;
-            }
-
-            $countryCodes = ['249', '968', '966', '971', '974', '965', '973', '961', '962', '964', '963', '961'];
-
-            foreach ($countryCodes as $code) {
-                if (strlen($normalizedPhone) > strlen($code) && substr($normalizedPhone, 0, strlen($code)) === $code) {
-                    $phoneWithoutCountryCode = substr($normalizedPhone, strlen($code));
-                    if (strlen($phoneWithoutCountryCode) >= 8) {
-                        $phoneVariants[] = $phoneWithoutCountryCode;
-                    }
-                }
-            }
-
-            $phoneVariants = array_values(array_unique($phoneVariants));
-
-            Log::info("Searching Firestore by phone number", [
-                'collection' => $collection,
-                'original_phone' => $phoneNumber,
-                'normalized_phone' => $normalizedPhone,
-                'variants_to_try' => $phoneVariants,
-            ]);
-
-            $parent = "projects/{$projectId}/databases/(default)";
-            $url = "https://firestore.googleapis.com/v1/{$parent}/documents:runQuery";
-
-            $foundDocument = null;
-            $phoneVariantUsed = null;
-
-            foreach ($phoneVariants as $phoneToSearch) {
-                $query = [
-                    'parent' => $parent,
-                    'structuredQuery' => [
-                        'from' => [
-                            ['collectionId' => $collection],
-                        ],
-                        'where' => [
-                            'fieldFilter' => [
-                                'field' => [
-                                    'fieldPath' => 'patient_phone',
-                                ],
-                                'op' => 'EQUAL',
-                                'value' => [
-                                    'stringValue' => $phoneToSearch,
-                                ],
-                            ],
-                        ],
-                        'limit' => 10,
-                    ],
-                ];
-
-                Log::debug("Querying Firestore", [
-                    'collection' => $collection,
-                    'phone_variant' => $phoneToSearch,
-                    'query_url' => $url,
-                ]);
-
-                $response = Http::withToken($accessToken)
-                    ->withBody(json_encode($query), 'application/json')
-                    ->post($url);
-
-                if ($response->successful()) {
-                    $results = $response->json();
-
-                    Log::debug("Firestore query response", [
-                        'collection' => $collection,
-                        'phone_variant' => $phoneToSearch,
-                        'response_status' => $response->status(),
-                        'results_count' => is_array($results) ? count($results) : 0,
-                        'results' => $results,
-                    ]);
-
-                    if (is_array($results) && !empty($results)) {
-                        $documents = array_filter($results, function ($result) {
-                            return isset($result['document']);
-                        });
-
-                        if (!empty($documents)) {
-                            usort($documents, function ($a, $b) {
-                                $aTime = $a['document']['fields']['updated_at']['timestampValue'] ?? '';
-                                $bTime = $b['document']['fields']['updated_at']['timestampValue'] ?? '';
-                                return strcmp($bTime, $aTime);
-                            });
-
-                            $foundDocument = $documents[0]['document'];
-                            $phoneVariantUsed = $phoneToSearch;
-                            Log::info("Found matching document in Firestore", [
-                                'collection' => $collection,
-                                'phone_variant_used' => $phoneVariantUsed,
-                                'document_name' => $foundDocument['name'] ?? 'unknown',
-                                'total_matches' => count($documents),
-                            ]);
-                            break;
-                        }
-                    } else {
-                        Log::debug("No documents found for phone variant", [
-                            'collection' => $collection,
-                            'phone_variant' => $phoneToSearch,
-                            'results' => $results,
-                        ]);
-                    }
-                } else {
-                    Log::warning("Failed to query Firestore by phone variant", [
-                        'collection' => $collection,
-                        'phone_variant' => $phoneToSearch,
-                        'status' => $response->status(),
-                        'body' => $response->body(),
-                    ]);
-                }
-            }
-
-            if ($foundDocument === null) {
-                Log::info("No Firestore documents found for phone number after trying all variants", [
-                    'collection' => $collection,
-                    'phone_number' => $phoneNumber,
-                    'normalized_phone' => $normalizedPhone,
-                    'variants_tried' => $phoneVariants,
-                ]);
-                return null;
-            }
-
-            $document = $foundDocument;
-            $fields = $document['fields'] ?? [];
-
-            if (isset($fields['result_url']['stringValue'])) {
-                $resultUrl = $fields['result_url']['stringValue'];
-                $documentId = $document['name'] ?? 'unknown';
-
-                Log::info("Retrieved result URL from Firestore by phone", [
-                    'collection' => $collection,
-                    'phone_number' => $phoneNumber,
-                    'phone_variant_used' => $phoneVariantUsed,
-                    'document_id' => $documentId,
-                    'result_url' => $resultUrl,
-                ]);
-                return $resultUrl;
-            }
-
-            Log::warning("Result URL not found in Firestore document", [
-                'collection' => $collection,
-                'phone_number' => $phoneNumber,
-                'phone_variant_used' => $phoneVariantUsed,
-                'available_fields' => array_keys($fields),
-            ]);
-            return null;
-        } catch (\Exception $e) {
-            Log::error("Failed to get result URL from Firestore by phone", [
-                'phone_number' => $phoneNumber,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            return null;
-        }
-    }
-
+ 
     /**
      * Send a document to a user via WhatsApp Cloud API.
      */
@@ -1017,28 +760,11 @@ MSG;
         Log::info("WhatsApp Message Status: [ID: {$messageId}] is now {$currentStatus}");
 
         try {
-            broadcast(new \App\Events\WhatsAppStatusUpdated($messageId, $currentStatus, $errorInfo));
+            // broadcast(new \App\Events\WhatsAppStatusUpdated($messageId, $currentStatus, $errorInfo));
         } catch (\Throwable $e) {
             Log::warning('Failed to broadcast WhatsApp status update: ' . $e->getMessage());
         }
     }
 
-    /**
-     * Test method to get result URL from Firestore by phone number.
-     */
-    public function testGetResultUrlByPhone(Request $request, ?string $phoneNumber = null): JsonResponse
-    {
-        $phoneNumber = $phoneNumber ?? $request->query('phone', '');
-        $collection = $request->query('collection');
 
-        $resultUrl = $this->getResultUrlFromFirestoreByPhone($phoneNumber, $collection);
-
-        return response()->json([
-            'success' => $resultUrl !== null,
-            'phone_number' => $phoneNumber,
-            'collection' => $collection,
-            'result_url' => $resultUrl,
-        ]);
-    }
 }
-

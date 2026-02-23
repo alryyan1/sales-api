@@ -59,7 +59,7 @@ class SaleReturnController extends Controller
 
         $validated = $request->validate([
             'sale_id' => 'required|exists:sales,id',
-            'phone_number' => 'nullable|string|max:20',
+            'phone_number' => 'required|string|max:20',
             'reason' => 'nullable|string|max:255',
             'shift_id' => 'nullable|exists:shifts,id',
             'returned_payment_method' => [
@@ -74,6 +74,24 @@ class SaleReturnController extends Controller
         ]);
 
         $sale = Sale::with('items')->find($validated['sale_id']);
+
+        // Check if sale is fully paid
+        $totalPaid = \Illuminate\Support\Facades\DB::table('payments')->where('sale_id', $sale->id)->sum('amount');
+        $totalAmount = \Illuminate\Support\Facades\DB::table('sale_items')->where('sale_id', $sale->id)->sum('total_price') - ($sale->discount_amount ?? 0);
+        if (round($totalPaid, 2) < round($totalAmount, 2)) {
+            throw ValidationException::withMessages([
+                'sale_id' => ['لا يمكن إرجاع أصناف من فاتورة غير مسددة بالكامل.']
+            ]);
+        }
+
+        // Get previously returned quantities
+        $alreadyReturned = DB::table('sale_return_items')
+            ->join('sale_returns', 'sale_return_items.sale_return_id', '=', 'sale_returns.id')
+            ->where('sale_returns.sale_id', $sale->id)
+            ->select('product_id', DB::raw('SUM(quantity) as total_returned'))
+            ->groupBy('product_id')
+            ->pluck('total_returned', 'product_id');
+
         foreach ($validated['items'] as $index => $itemData) {
             $saleItem = $sale->items->firstWhere('product_id', (int) $itemData['product_id']);
             if (!$saleItem) {
@@ -82,9 +100,12 @@ class SaleReturnController extends Controller
                 ]);
             }
             $returnQty = (int) $itemData['quantity'];
-            if ($returnQty > $saleItem->quantity) {
+            $previouslyReturned = $alreadyReturned[$saleItem->product_id] ?? 0;
+            $availableToReturn = $saleItem->quantity - $previouslyReturned;
+
+            if ($returnQty > $availableToReturn) {
                 throw ValidationException::withMessages([
-                    "items.{$index}.quantity" => ['كمية الإرجاع لا يمكن أن تتجاوز الكمية المباعة (' . $saleItem->quantity . ').'],
+                    "items.{$index}.quantity" => ['كمية الإرجاع المتاحة للصنف هي (' . $availableToReturn . ') فقط.'],
                 ]);
             }
         }
@@ -134,4 +155,3 @@ class SaleReturnController extends Controller
         }
     }
 }
-

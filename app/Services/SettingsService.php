@@ -49,6 +49,7 @@ class SettingsService
             'product_images_show_in_pos' => 'bool',
             'product_images_show_in_invoices' => 'bool',
             'product_images_show_in_reports' => 'bool',
+            'whatsapp_shift_closure_numbers' => 'string',
         ];
     }
 
@@ -91,6 +92,7 @@ class SettingsService
             'product_images_show_in_pos' => $c['product_images_show_in_pos'] ?? true,
             'product_images_show_in_invoices' => $c['product_images_show_in_invoices'] ?? false,
             'product_images_show_in_reports' => $c['product_images_show_in_reports'] ?? false,
+            'whatsapp_shift_closure_numbers' => $c['whatsapp_shift_closure_numbers'] ?? '',
         ];
     }
 

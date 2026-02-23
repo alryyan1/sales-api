@@ -65,6 +65,12 @@ class SaleItemResource extends JsonResource
                 return $this->product?->sellableUnit?->name ?? 'Piece';
             }),
 
+            'returned_quantity' => \Illuminate\Support\Facades\DB::table('sale_return_items')
+                ->join('sale_returns', 'sale_return_items.sale_return_id', '=', 'sale_returns.id')
+                ->where('sale_returns.sale_id', $this->sale_id)
+                ->where('sale_return_items.product_id', $this->product_id)
+                ->sum('sale_return_items.quantity') ?? 0,
+
             'quantity' => $this->quantity, // Quantity sold in this line item
             'unit_price' => $this->unit_price, // Price at which this item was sold (already cast to decimal:2 in model)
             'total_price' => $this->total_price, // quantity * unit_price (already cast in model)

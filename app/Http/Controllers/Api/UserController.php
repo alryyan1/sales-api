@@ -256,7 +256,8 @@ class UserController extends Controller
                     ['route' => '/reports/profit-loss', 'label' => 'الأرباح والخسائر'],
                     ['route' => '/reports/best-selling-products', 'label' => 'المنتجات الأكثر مبيعاً'],
                     ['route' => '/reports/stagnant-products', 'label' => 'المنتجات الراكدة'],
-                    ['route' => '/reports/low-stock-products', 'label' => 'المنتجات منخفضة المخزون']
+                    ['route' => '/reports/low-stock-products', 'label' => 'المنتجات منخفضة المخزون'],
+                    ['route' => '/reports/monthly-shifts', 'label' => 'تقرير الورديات الشهري'],
                 ]
             ],
             [
@@ -270,6 +271,7 @@ class UserController extends Controller
                     ['route' => '/admin/backups', 'label' => 'النسخ الاحتياطي'],
                     ['route' => '/admin/warehouses', 'label' => 'المخازن'],
                     ['route' => '/admin/whatsapp-schedulers', 'label' => 'جدولة واتساب'],
+                    ['route' => '/admin/whatsapp-test', 'label' => 'تجربة الواتساب'],
                     ['route' => '/admin/inventory/requisitions/request', 'label' => 'طلب مخزون'],
                     ['route' => '/admin/inventory/requisitions', 'label' => 'طلبات المخزون'],
                     ['route' => '/admin/idb-manager', 'label' => 'إدارة DB المحلية']
