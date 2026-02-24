@@ -446,7 +446,7 @@ class WhatsAppCloudApiController extends Controller
                         // Handle incoming messages
                         if (isset($value['messages'])) {
                             foreach ($value['messages'] as $message) {
-                                if ($recipientPhoneNumberId === '953041111231804') {
+                                if ($recipientPhoneNumberId === '1036370259552771') {
                                     $collection = 'one_care';
                                     if (($message['type'] ?? '') === 'text' && isset($message['text']['body'])) {
                                         $from = $message['from'];
@@ -524,6 +524,12 @@ class WhatsAppCloudApiController extends Controller
         $type = $message['type'] ?? null;
         $timestamp = $message['timestamp'] ?? null;
 
+        \Illuminate\Support\Facades\Log::info('WhatsApp Cloud API: handleincomingmessage.', [
+            'message_id' => $messageId,
+            'from' => $from,
+            'type' => $type,
+            'timestamp' => $timestamp,
+        ]);
 
         if (($type ?? '') === 'text' && isset($message['text']['body'])) {
             // \App\Events\WhatsAppMessageReceived::dispatch([
@@ -585,9 +591,13 @@ class WhatsAppCloudApiController extends Controller
                 $shiftId = $m[1];
             }
 
+            \Illuminate\Support\Facades\Log::info('WhatsApp Cloud API: Shift ID: ' . $shiftId);
+
             if ($shiftId) {
+                \Illuminate\Support\Facades\Log::info('WhatsApp Cloud API: Shift ID found: ' . $shiftId);
                 $shiftPdfs = $this->getShiftPdfUrlsFromFirestore($shiftId, $collection);
             } else {
+                \Illuminate\Support\Facades\Log::info('WhatsApp Cloud API: Shift ID not found.');
                 $shiftPdfs = null;
             }
 
@@ -683,7 +693,7 @@ class WhatsAppCloudApiController extends Controller
                 $to,
                 $documentUrl,
                 $filename,
-                'نتيجة المختبر - Lab Result',
+                'PDF Report',
                 $accessToken,
                 $phoneNumberId
             );

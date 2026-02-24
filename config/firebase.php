@@ -19,5 +19,5 @@ return [
     | The absolute path to the service account JSON file.
     |
     */
-    'credentials_path' => env('FIREBASE_CREDENTIALS_PATH', storage_path('app/firebase/service-account.json')),
+    'credentials_path' => base_path(env('FIREBASE_CREDENTIALS_PATH', 'storage/app/firebase/service-account.json')),
 ];

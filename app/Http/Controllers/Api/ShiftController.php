@@ -71,7 +71,7 @@ class ShiftController extends Controller
         $shifts = Shift::with('user')
             ->whereBetween('opened_at', [$start, $end])
             ->orderBy('opened_at', 'asc')
-            ->get(['id', 'opened_at', 'closed_at', 'user_id', 'is_open']);
+            ->get(['id', 'opened_at', 'closed_at', 'user_id']);
 
         // Build a map: date-string -> [ shift summaries ]
         $grouped = [];
@@ -82,7 +82,7 @@ class ShiftController extends Controller
                 'user_name' => $shift->user?->name ?? '—',
                 'opened_at' => $shift->opened_at?->toISOString(),
                 'closed_at' => $shift->closed_at?->toISOString(),
-                'is_open'   => $shift->is_open,
+                'is_open'   => is_null($shift->closed_at),
             ];
         }
 
@@ -244,7 +244,7 @@ class ShiftController extends Controller
      *     )
      * )
      */
-    public function close(Request $request, \App\Services\WhatsAppCloudApiService $whatsapp)
+    public function close(Request $request, \App\Services\WhatsAppCloudApiService $whatsapp, \App\Services\AirtelSmsService $sms)
     {
         $user = $request->user();
 
@@ -259,74 +259,20 @@ class ShiftController extends Controller
             ], 422);
         }
 
-        // Calculate stats before closing to ensure we capture everything
-        // 1. Sales
-        $salesCash = 0;
-        $salesBank = 0;
-        foreach ($shift->sales as $sale) {
-            // Filter by logged-in user
-
-            foreach ($sale->payments as $payment) {
-                $method = $payment->method ?? 'cash';
-                if ($method === 'cash') {
-                    $salesCash += $payment->amount;
-                } else {
-                    $salesBank += $payment->amount;
-                }
-            }
-        }
-        $totalSales = $salesCash + $salesBank;
-
-        // 2. Returns
-        $returnsCash = 0;
-        $returnsBank = 0;
-        foreach ($shift->saleReturns as $return) {
-            // Filter by logged-in user
-
-            $returnVal = 0;
-            foreach ($return->items as $item) {
-                $returnVal += ($item->quantity * $item->price);
-            }
-
-            $method = $return->returned_payment_method ?? 'cash';
-            if ($method === 'cash') {
-                $returnsCash += $returnVal;
-            } else {
-                $returnsBank += $returnVal;
-            }
-        }
-        $totalReturns = $returnsCash + $returnsBank;
-
-        // 3. Expenses
-        $expensesCash = 0;
-        $expensesBank = 0;
-        foreach ($shift->expenses as $expense) {
-            // Filter by logged-in user
+        // Delegate stats calculation to the model
+        $stats        = $shift->calculateStats();
+        $salesCash    = $stats['salesCash'];
+        $salesBank    = $stats['salesBank'];
+        $totalSales   = $stats['totalSales'];
+        $returnsCash  = $stats['returnsCash'];
+        $returnsBank  = $stats['returnsBank'];
+        $totalReturns = $stats['totalReturns'];
+        $expensesCash = $stats['expensesCash'];
+        $expensesBank = $stats['expensesBank'];
+        $netCash      = $stats['netCash'];
+        $netBank      = $stats['netBank'];
 
 
-            $method = $expense->payment_method ?? 'cash';
-            if ($method === 'cash') {
-                $expensesCash += $expense->amount;
-            } else {
-                $expensesBank += $expense->amount;
-            }
-        }
-
-        // 4. Net
-        $netCash = $salesCash - $returnsCash - $expensesCash;
-
-
-        $netBank = $salesBank - $returnsBank - $expensesBank;
-        //log
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} salesCash: " . $salesCash);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} salesBank: " . $salesBank);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} returnsCash: " . $returnsCash);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} returnsBank: " . $returnsBank);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} expensesCash: " . $expensesCash);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} expensesBank: " . $expensesBank);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} netCash: " . $netCash);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} netBank: " . $netBank);
-        \Illuminate\Support\Facades\Log::info("Shift {$shift->id} total sales: " . $totalSales);
         $shift->update([
             'closed_at' => now(),
             'closed_by_user_id' => $user->id,
@@ -359,7 +305,33 @@ class ShiftController extends Controller
                             ['type' => 'text', 'text' => number_format($netCash, 2)],
                             ['type' => 'text', 'text' => number_format($netBank, 2)],
                         ]
-                    ]
+                    ],
+                    // Embed shift_id in each button payload so the webhook can extract it
+                    // when the user taps a button (payload is echoed back by Meta as button_reply.id)
+                    [
+                        'type'       => 'button',
+                        'sub_type'   => 'quick_reply',
+                        'index'      => '0',
+                        'parameters' => [
+                            ['type' => 'payload', 'payload' => 'sales_' . $shift->id],
+                        ],
+                    ],
+                    [
+                        'type'       => 'button',
+                        'sub_type'   => 'quick_reply',
+                        'index'      => '1',
+                        'parameters' => [
+                            ['type' => 'payload', 'payload' => 'sold_items_' . $shift->id],
+                        ],
+                    ],
+                    [
+                        'type'       => 'button',
+                        'sub_type'   => 'quick_reply',
+                        'index'      => '2',
+                        'parameters' => [
+                            ['type' => 'payload', 'payload' => 'returns_' . $shift->id],
+                        ],
+                    ],
                 ];
 
                 $successCount = 0;
@@ -397,6 +369,28 @@ class ShiftController extends Controller
             $whatsappStatus = 'failed';
             $whatsappMessage = $e->getMessage();
             \Illuminate\Support\Facades\Log::error("Exception sending shift closure notification: " . $e->getMessage());
+        }
+
+        // --- SMS Notification (Airtel) ---
+        // Reuse the same numbers and same shift details as WhatsApp
+        try {
+            $settingsServiceSms = new \App\Services\SettingsService();
+            $settingsSms = $settingsServiceSms->getAll();
+            $smsNumbersString = $settingsSms['whatsapp_shift_closure_numbers'] ?? '';
+            $smsNumbers = array_filter(array_map('trim', explode(',', $smsNumbersString)));
+
+            if (!empty($smsNumbers)) {
+                $smsText = "تقرير الوردية #{$shift->id}\n"
+                    . "المبيعات: " . number_format($totalSales, 2) . "\n"
+                    . "المردودات: " . number_format($totalReturns, 2) . "\n"
+                    . "صافي كاش: " . number_format($netCash, 2) . "\n"
+                    . "صافي بنك: " . number_format($netBank, 2);
+
+                $smsResults = $sms->sendToMany(array_values($smsNumbers), $smsText);
+                \Illuminate\Support\Facades\Log::info("Shift {$shift->id} SMS results", $smsResults);
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("Shift {$shift->id} SMS send failed: " . $e->getMessage());
         }
 
         $shift->load([

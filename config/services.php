@@ -32,13 +32,18 @@ return [
     ],
 
     'whatsapp_cloud' => [
-        'token' => env('WHATSAPP_CLOUD_API_TOKEN'),
+        'token'           => env('WHATSAPP_CLOUD_API_TOKEN'),
         'phone_number_id' => env('WHATSAPP_CLOUD_API_PHONE_NUMBER_ID'),
-        'waba_id' => env('WHATSAPP_CLOUD_WABA_ID'),
-        'api_version' => env('WHATSAPP_CLOUD_API_VERSION', 'v22.0'),
-        'app_secret' => env('WHATSAPP_CLOUD_APP_SECRET'),
-        'verify_token' => env('WHATSAPP_CLOUD_VERIFY_TOKEN', 'alryyan'),
+        'waba_id'         => env('WHATSAPP_CLOUD_WABA_ID'),
+        'api_version'     => env('WHATSAPP_CLOUD_API_VERSION', 'v22.0'),
+        'app_secret'      => env('WHATSAPP_CLOUD_APP_SECRET'),
+        'verify_token'    => env('WHATSAPP_CLOUD_VERIFY_TOKEN', 'alryyan'),
+    ],
+
+    'airtel_sms' => [
+        'api_key'  => env('AIRTEL_SMS_API_KEY', '683e2c68-a020-4423-bc7f-2d9c53e873c6'),
+        'sender'   => env('AIRTEL_SMS_SENDER', 'INFO'),
+        'endpoint' => env('AIRTEL_SMS_ENDPOINT', 'https://www.airtel.sd/api/rest_send_sms/'),
     ],
 
 ];
-
