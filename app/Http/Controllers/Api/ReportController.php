@@ -274,6 +274,7 @@ class ReportController extends Controller
         // --- Query Building ---
         $query = PurchaseItem::query()
             ->with(['product:id,name,sku'])
+            ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
             ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->whereBetween('expiry_date', [$today, $expiryCutoffDate]);
@@ -336,6 +337,7 @@ class ReportController extends Controller
         // --- Query Building ---
         $query = PurchaseItem::query()
             ->with(['product:id,name,sku'])
+            ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
             ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->where('expiry_date', '<', $today);
@@ -388,6 +390,7 @@ class ReportController extends Controller
 
         // Count near-expiring products (between today and cutoff date)
         $nearExpiringCount = PurchaseItem::query()
+            ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
             ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->whereBetween('expiry_date', [$today, $expiryCutoffDate])
@@ -396,6 +399,7 @@ class ReportController extends Controller
 
         // Count expired products (before today)
         $expiredCount = PurchaseItem::query()
+            ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
             ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->where('expiry_date', '<', $today)
@@ -408,6 +412,122 @@ class ReportController extends Controller
             'days_threshold' => $daysThreshold,
         ]);
     }
+
+    /**
+     * Fetch products that have been moved to expired (is_moved_to_expired = true).
+     */
+    public function movedExpiredProductsReport(Request $request)
+    {
+        $validated = $request->validate([
+            'product_id' => 'nullable|integer|exists:products,id',
+            'per_page' => 'nullable|integer|min:5|max:100',
+            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'purchase_items.created_at'])],
+            'sort_direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
+        ]);
+
+        $query = PurchaseItem::query()
+            ->with(['product:id,name,sku'])
+            ->where('is_moved_to_expired', true);
+
+        if (!empty($validated['product_id'])) {
+            $query->where('product_id', $validated['product_id']);
+        }
+
+        $sortBy = $validated['sort_by'] ?? 'expiry_date';
+        $sortDirection = $validated['sort_direction'] ?? 'desc';
+
+        if ($sortBy === 'products.name') {
+            $query->join('products', 'purchase_items.product_id', '=', 'products.id')
+                ->orderBy('products.name', $sortDirection)
+                ->select('purchase_items.*');
+        } else {
+            $query->orderBy($sortBy, $sortDirection);
+        }
+
+        $perPage = $validated['per_page'] ?? 25;
+        $movedItems = $query->paginate($perPage);
+
+        return PurchaseItemResource::collection($movedItems);
+    }
+
+    /**
+     * Move an expired product batch off the shelves by updating stock levels.
+     */
+    public function moveExpiredProduct($id, Request $request)
+    {
+        try {
+            DB::beginTransaction();
+
+            $purchaseItem = PurchaseItem::with('product')->findOrFail($id);
+
+            // Validation: Ensure it's not already moved
+            if ($purchaseItem->is_moved_to_expired) {
+                return response()->json(['message' => 'Product batch has already been moved to expired.'], 400);
+            }
+
+            // Mark as moved
+            $purchaseItem->is_moved_to_expired = true;
+            $purchaseItem->save();
+
+            // Deduct from ALL warehouses (or specific one, depending on how stock is currently managed)
+            // Assuming we take it evenly out of wherever the stock currently resides up to the remaining items in batch.
+            $product = clone $purchaseItem->product;
+
+            // For simplicity and since we don't know EXACTLY which warehouse the batch is in, 
+            // we will deduct product_warehouse quantity, starting from the first warehouse that has stock,
+            // up to the total amount of this batch, or simply creating an adjustment 
+            // based on what's available globally if we can't map batches to specific warehouses perfectly.
+            // Since we don't have remaining_quantity on purchase_item anymore, we assume the whole batch's equivalent amount
+            // needs to be removed from global stock.
+            $quantityToRemove = $purchaseItem->quantity;
+
+            if ($product && $quantityToRemove > 0) {
+                $warehouses = DB::table('product_warehouse')
+                    ->where('product_id', $product->id)
+                    ->where('quantity', '>', 0)
+                    ->orderBy('warehouse_id')
+                    ->get();
+
+                $remainingToRemove = $quantityToRemove;
+                foreach ($warehouses as $wh) {
+                    if ($remainingToRemove <= 0) break;
+
+                    $deduct = min($wh->quantity, $remainingToRemove);
+                    DB::table('product_warehouse')
+                        ->where('product_id', $product->id)
+                        ->where('warehouse_id', $wh->warehouse_id)
+                        ->decrement('quantity', $deduct);
+
+                    $remainingToRemove -= $deduct;
+                }
+
+                // Log the stock adjustment
+                DB::table('stock_adjustments')->insert([
+                    'product_id' => $product->id,
+                    'purchase_item_id' => $purchaseItem->id,
+                    'user_id' => $request->user() ? $request->user()->id : null,
+                    'quantity_change' => -$quantityToRemove,
+                    'quantity_before' => $product->stock_quantity, // Before all warehouse decrements (approximate)
+                    'quantity_after' => max(0, $product->stock_quantity - $quantityToRemove),
+                    'reason' => 'Expired - Moved',
+                    'notes' => "Moved expired batch #{$purchaseItem->batch_number} off shelves.",
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Product batch successfully moved to expired.',
+                'data' => new PurchaseItemResource($purchaseItem)
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Failed to move product.', 'error' => $e->getMessage()], 500);
+        }
+    }
+
     /**
      * Generate a Monthly Revenue Report with daily breakdown and payment method summary.
      *

@@ -26,7 +26,7 @@ class SaleController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Sale::with(['client:id,name', 'user:id,name']);
+        $query = Sale::with(['client:id,name', 'user:id,name', 'items.product:id,name']);
 
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {

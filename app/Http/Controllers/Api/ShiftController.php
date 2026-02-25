@@ -278,6 +278,59 @@ class ShiftController extends Controller
             'closed_by_user_id' => $user->id,
         ]);
 
+        $shift->load([
+            'user',
+            'closedByUser',
+            'sales.payments',
+            'expenses',
+            'saleReturns.items'
+        ]);
+
+        return new ShiftResource($shift);
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/api/shifts/{id}/notify",
+     *     summary="Send shift closure notifications",
+     *     description="Send WhatsApp and SMS notifications for a closed shift. Should be called after PDFs are uploaded.",
+     *     operationId="notifyShiftClosure",
+     *     tags={"Shifts"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Shift ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Notifications sent",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="whatsapp_status", type="string"),
+     *             @OA\Property(property="whatsapp_message", type="string")
+     *         )
+     *     )
+     * )
+     */
+    public function notify(Request $request, $id, \App\Services\WhatsAppCloudApiService $whatsapp, \App\Services\AirtelSmsService $sms)
+    {
+        $shift = Shift::with(['sales.payments', 'saleReturns.items', 'expenses'])->findOrFail($id);
+
+        // Delegate stats calculation to the model
+        $stats        = $shift->calculateStats();
+        $salesCash    = $stats['salesCash'];
+        $salesBank    = $stats['salesBank'];
+        $totalSales   = $stats['totalSales'];
+        $returnsCash  = $stats['returnsCash'];
+        $returnsBank  = $stats['returnsBank'];
+        $totalReturns = $stats['totalReturns'];
+        $expensesCash = $stats['expensesCash'];
+        $expensesBank = $stats['expensesBank'];
+        $netCash      = $stats['netCash'];
+        $netBank      = $stats['netBank'];
+
         // Send WhatsApp Notification
         $whatsappStatus = 'skipped';
         $whatsappMessage = '';
@@ -307,7 +360,6 @@ class ShiftController extends Controller
                         ]
                     ],
                     // Embed shift_id in each button payload so the webhook can extract it
-                    // when the user taps a button (payload is echoed back by Meta as button_reply.id)
                     [
                         'type'       => 'button',
                         'sub_type'   => 'quick_reply',
@@ -372,7 +424,6 @@ class ShiftController extends Controller
         }
 
         // --- SMS Notification (Airtel) ---
-        // Reuse the same numbers and same shift details as WhatsApp
         try {
             $settingsServiceSms = new \App\Services\SettingsService();
             $settingsSms = $settingsServiceSms->getAll();
@@ -393,19 +444,9 @@ class ShiftController extends Controller
             \Illuminate\Support\Facades\Log::error("Shift {$shift->id} SMS send failed: " . $e->getMessage());
         }
 
-        $shift->load([
-            'user',
-            'closedByUser',
-            'sales.payments',
-            'expenses',
-            'saleReturns.items'
-        ]);
-
-        return (new ShiftResource($shift))->additional([
-            'meta' => [
-                'whatsapp_status' => $whatsappStatus,
-                'whatsapp_message' => $whatsappMessage,
-            ]
+        return response()->json([
+            'whatsapp_status' => $whatsappStatus,
+            'whatsapp_message' => $whatsappMessage,
         ]);
     }
 }

@@ -32,7 +32,8 @@ class ProductController extends Controller
         // Add subqueries for expensive attributes to avoid N+1 queries
         $query->addSelect([
             'earliest_expiry_date' => PurchaseItem::selectRaw('MIN(expiry_date)')
-                ->whereColumn('product_id', 'products.id'),
+                ->whereColumn('product_id', 'products.id')
+                ->where('is_moved_to_expired', false),
 
             'latest_purchase_cost_raw' => PurchaseItem::select('unit_cost')
                 ->whereColumn('product_id', 'products.id')
@@ -283,7 +284,8 @@ class ProductController extends Controller
     {
         $warehouseId = $request->query('warehouse_id');
 
-        $query = PurchaseItem::where('product_id', $product->id);
+        $query = PurchaseItem::where('product_id', $product->id)
+            ->where('is_moved_to_expired', false);
 
         if ($warehouseId) {
             $query->whereHas('purchase', function ($q) use ($warehouseId) {

@@ -65,6 +65,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/shifts/{shift}', [ShiftController::class, 'show'])->name('api.shifts.show');
   Route::post('/shifts/open', [ShiftController::class, 'open'])->name('api.shifts.open');
   Route::post('/shifts/close', [ShiftController::class, 'close'])->name('api.shifts.close');
+  Route::post('/shifts/{shift}/notify', [ShiftController::class, 'notify'])->name('api.shifts.notify');
 
   // -- Autocomplete Routes --
   Route::get('/products/autocomplete', [ProductController::class, 'autocomplete'])->name('api.products.autocomplete');
@@ -112,6 +113,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profit-loss', [ReportController::class, 'profitLossReport'])->name('profit-loss');
     Route::get('/near-expiry', [ReportController::class, 'nearExpiryReport'])->name('near-expiry');
     Route::get('/expired-products', [ReportController::class, 'expiredProductsReport'])->name('expired-products');
+    Route::post('/expired-products/{id}/move', [ReportController::class, 'moveExpiredProduct'])->name('expired-products.move');
+    Route::get('/moved-expired', [ReportController::class, 'movedExpiredProductsReport'])->name('moved-expired');
     Route::get('/expiry-counts', [ReportController::class, 'expiryCountsSummary'])->name('expiry-counts');
     Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue');
     Route::get('/monthly-revenue-excel', [ReportController::class, 'monthlyRevenueExcel'])->name('monthly-revenue-excel');

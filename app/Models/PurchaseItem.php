@@ -76,6 +76,7 @@ class PurchaseItem extends Model
         'sale_price_stocking_unit', // Optional: Intended sale price per STOCKING UNIT
         'cost_per_sellable_unit',   // Cost per sellable unit (calculated)
         'expiry_date',
+        'is_moved_to_expired',
     ];
 
     protected $casts = [
@@ -86,6 +87,7 @@ class PurchaseItem extends Model
         'sale_price_stocking_unit' => 'decimal:2',
         'cost_per_sellable_unit' => 'decimal:2',
         'expiry_date' => 'date',
+        'is_moved_to_expired' => 'boolean',
     ];
     /**
      * Get the parent purchase record.

@@ -625,7 +625,7 @@ class WhatsAppCloudApiController extends Controller
 
                 $this->sendTextToUser($from, "عذراً، لم يتم العثور على التقرير لهذا الرقم: {$from}", $phoneNumberId);
             }
-        } 
+        }
     }
 
     /**
@@ -648,8 +648,9 @@ class WhatsAppCloudApiController extends Controller
                 return null;
             }
 
-            // Path: one_care/shifts/shifts/{shift_id}
-            $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents/one_care/shifts/shifts/{$shiftId}";
+            // Path: pharmacies/{$collection}/shifts/{shift_id}
+            $tenantCollection = $collection ?: 'one_care';
+            $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents/pharmacies/{$tenantCollection}/shifts/{$shiftId}";
 
             $response = \Illuminate\Support\Facades\Http::withToken($accessToken)->get($url);
 
@@ -672,7 +673,7 @@ class WhatsAppCloudApiController extends Controller
         }
     }
 
- 
+
     /**
      * Send a document to a user via WhatsApp Cloud API.
      */
@@ -775,6 +776,4 @@ class WhatsAppCloudApiController extends Controller
             Log::warning('Failed to broadcast WhatsApp status update: ' . $e->getMessage());
         }
     }
-
-
 }
