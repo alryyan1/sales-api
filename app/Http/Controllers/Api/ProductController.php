@@ -69,20 +69,19 @@ class ProductController extends Controller
 
         // Filter by stock availability
         if ($request->boolean('in_stock_only')) {
-            $query->where('stock_quantity', '>', 0);
+            $query->hasStock();
         }
 
         // Filter by low stock (products where stock is at or below alert level)
         if ($request->boolean('low_stock_only')) {
-            $query->where(function ($q) {
-                $q->whereNotNull('stock_alert_level')
-                    ->where('stock_quantity', '<=', \DB::raw('stock_alert_level'));
-            });
+            $query->lowStock();
         }
 
         // Filter by out of stock only
         if ($request->boolean('out_of_stock_only')) {
-            $query->where('stock_quantity', '<=', 0);
+            $query->whereDoesntHave('warehouses', function ($q) {
+                $q->where('product_warehouse.quantity', '>', 0);
+            });
         }
 
         // Sorting
@@ -90,8 +89,15 @@ class ProductController extends Controller
         $sortDirection = $request->input('sort_direction', 'desc'); // Default sort direction
 
         // Validate sortable fields to prevent SQL injection or errors
-        $sortableFields = ['name', 'sku', 'stock_quantity', 'created_at', 'updated_at'];
-        if (in_array($sortBy, $sortableFields)) {
+        $sortableFields = ['name', 'sku', 'created_at', 'updated_at'];
+        if ($sortBy === 'stock_quantity') {
+            $query->orderBy(
+                \DB::table('product_warehouse')
+                    ->selectRaw('COALESCE(SUM(quantity), 0)')
+                    ->whereColumn('product_id', 'products.id'),
+                $sortDirection
+            );
+        } elseif (in_array($sortBy, $sortableFields)) {
             $query->orderBy($sortBy, $sortDirection);
         } else {
             $query->orderBy('created_at', 'desc'); // Fallback default sort

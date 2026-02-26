@@ -51,6 +51,9 @@ Route::get('/health', function () {
 Route::get('/whatsapp-cloud/webhook', [WhatsAppCloudApiController::class, 'verifyWebhook']);
 Route::post('/whatsapp-cloud/webhook', [WhatsAppCloudApiController::class, 'webhook']);
 
+// --- Public PDF Routes (token validated in controller) ---
+Route::get('/reports/moved-expired-pdf', [ReportController::class, 'movedExpiredPdf'])->name('api.reports.moved-expired-pdf');
+
 // --- Protected Routes ---
 Route::middleware('auth:sanctum')->group(function () {
 

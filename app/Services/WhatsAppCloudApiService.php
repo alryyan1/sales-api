@@ -628,4 +628,3 @@ class WhatsAppCloudApiService
         return $cleanedNumber;
     }
 }
-

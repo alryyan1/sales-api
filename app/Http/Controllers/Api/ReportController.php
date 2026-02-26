@@ -19,6 +19,7 @@ use App\Services\InventoryPdfService;
 use App\Services\SalesReportPdfService;
 use App\Services\ShiftCostPdfService;
 use App\Services\ShiftSalesReturnPdfService;
+use App\Services\MovedExpiredProductsPdfService;
 use Arr;
 use DB;
 use Carbon\Carbon; // Ensure correct Carbon namespace is used
@@ -448,6 +449,38 @@ class ReportController extends Controller
         $movedItems = $query->paginate($perPage);
 
         return PurchaseItemResource::collection($movedItems);
+    }
+
+    /**
+     * Generate PDF for moved expired products
+     */
+    public function movedExpiredPdf(Request $request, MovedExpiredProductsPdfService $pdfService)
+    {
+        // Require role permissions check if needed, same as movedExpiredProductsReport
+
+        // Handle token from query string (used when opening PDF in a new window)
+        if ($request->has('token')) {
+            $request->headers->set('Authorization', 'Bearer ' . $request->query('token'));
+            // Authenticate the user for this request using the token
+            if (auth('sanctum')->check()) {
+                auth()->setUser(auth('sanctum')->user());
+            } else {
+                return response()->json(['message' => 'Unauthenticated.'], 401);
+            }
+        }
+
+        $filters = $request->only(['product_id', 'search', 'sort_by', 'sort_direction']);
+
+        try {
+            $pdfContent = $pdfService->generatePdf($filters);
+
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="moved_expired_products_report.pdf"');
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Failed to generate moved expired products PDF: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to generate PDF report'], 500);
+        }
     }
 
     /**
