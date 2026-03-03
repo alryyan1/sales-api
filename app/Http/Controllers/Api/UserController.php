@@ -221,7 +221,7 @@ class UserController extends Controller
             [
                 'category' => 'المبيعات',
                 'items' => [
-                    ['route' => '/sales/pos-blank', 'label' => 'نقطة البيع الموحدة'],
+                    ['route' => '/sales/pos-blank', 'label' => 'المعرض'],
                     ['route' => '/sales/returns', 'label' => 'مردودات المبيعات'],
                     ['route' => '/clients', 'label' => 'العملاء']
                 ]
@@ -229,14 +229,14 @@ class UserController extends Controller
             [
                 'category' => 'المخزون',
                 'items' => [
-                    ['route' => '/products', 'label' => 'المنتجات'],
+                    ['route' => '/products', 'label' => 'المعدات'],
                     ['route' => '/inventory/adjustments', 'label' => 'تعديلات المخزون'],
                     ['route' => '/inventory/transfers', 'label' => 'تحويل المخزون'],
                     ['route' => '/inventory/counts', 'label' => 'جرد المخزون']
                 ]
             ],
             [
-                'category' => 'المشتريات',
+                'category' => 'الواردات',
                 'items' => [
                     ['route' => '/suppliers', 'label' => 'الموردون'],
                     ['route' => '/purchases', 'label' => 'قائمة المشتريات']
