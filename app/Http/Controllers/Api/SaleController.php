@@ -26,7 +26,7 @@ class SaleController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Sale::with(['client:id,name', 'user:id,name', 'items.product:id,name']);
+        $query = Sale::with(['client:id,name', 'user:id,name', 'items.product:id,name,image_url']);
 
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
@@ -105,7 +105,7 @@ class SaleController extends Controller
             'client:id,name',
             'user:id,name',
             'payments.user:id,name,username',
-            'items.product:id,name,sku,scientific_name',
+            'items.product:id,name,sku,scientific_name,image_url',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
         ]);
 
@@ -252,7 +252,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,scientific_name',
+                'items.product:id,name,sku,scientific_name,image_url',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
             ]);
@@ -541,7 +541,7 @@ class SaleController extends Controller
             'client:id,name,email',
             'user:id,name',
             'items',
-            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
@@ -573,7 +573,7 @@ class SaleController extends Controller
             'client:id,name',
             'user:id,name',
             'items',
-            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
@@ -593,7 +593,7 @@ class SaleController extends Controller
             'client:id,name',
             'user:id,name',
             'items',
-            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
@@ -702,7 +702,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items',
-                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'payments.user:id,name,username' // Load user relationship for payments
@@ -744,7 +744,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items',
-                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'payments.user:id,name,username' // Load user relationship for payments
@@ -854,7 +854,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
                 'payments.user:id,name'
@@ -1025,7 +1025,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
@@ -1155,7 +1155,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
@@ -1274,7 +1274,7 @@ class SaleController extends Controller
         $sale->load([
             'client:id,name,email,phone,address', // Load more client details
             'user:id,name', // Salesperson
-            'items.product:id,name,sku,scientific_name', // Product details for each item
+            'items.product:id,name,sku,scientific_name,image_url', // Product details for each item
             'items.purchaseItemBatch:id,batch_number', // Batch number sold from
             'payments' // Load payments made against this invoice
         ]);
@@ -1472,7 +1472,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name', // Load only what's needed for receipt
                 'user:id,name',
-                'items.product:id,name,sku,scientific_name',
+                'items.product:id,name,sku,scientific_name,image_url',
                 // No need to load purchaseItemBatch for thermal receipt unless showing batch no.
             ]);
 
@@ -1842,7 +1842,7 @@ class SaleController extends Controller
             $sale->load([
                 'client:id,name',
                 'user:id,name',
-                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'

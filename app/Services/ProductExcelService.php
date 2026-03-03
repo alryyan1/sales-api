@@ -45,14 +45,11 @@ class ProductExcelService
         }
 
         if (!empty($filters['in_stock_only'])) {
-            $query->where('stock_quantity', '>', 0);
+            $query->hasStock();
         }
 
         if (!empty($filters['low_stock_only'])) {
-            $query->where(function ($q) {
-                $q->whereNotNull('stock_alert_level')
-                    ->where('stock_quantity', '<=', DB::raw('stock_alert_level'));
-            });
+            $query->lowStock();
         }
 
         // Get all products (no pagination for Excel)
@@ -525,7 +522,6 @@ class ProductExcelService
             $spreadsheet->disconnectWorksheets();
             unset($spreadsheet);
             gc_collect_cycles();
-
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Product import error: ' . $e->getMessage());
@@ -625,7 +621,6 @@ class ProductExcelService
                 'name' => trim($data['name'] ?? ''),
                 'sku' => isset($data['sku']) && $data['sku'] !== '' ? (string) $data['sku'] : null,
                 'scientific_name' => isset($data['scientific_name']) && $data['scientific_name'] !== '' ? (string) $data['scientific_name'] : null,
-                'stock_quantity' => isset($data['stock_quantity']) && is_numeric($data['stock_quantity']) ? (int) $data['stock_quantity'] : 0,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
@@ -650,7 +645,6 @@ class ProductExcelService
             'name' => trim($data['name'] ?? ''),
             'sku' => isset($data['sku']) && $data['sku'] !== '' ? (string) $data['sku'] : null,
             'scientific_name' => isset($data['scientific_name']) && $data['scientific_name'] !== '' ? (string) $data['scientific_name'] : null,
-            'stock_quantity' => isset($data['stock_quantity']) && is_numeric($data['stock_quantity']) ? (int) $data['stock_quantity'] : 0,
         ];
 
         return Product::create($productData);

@@ -516,10 +516,10 @@ class ProductController extends Controller
 
         try {
             // Store image in public/products directory
-            $imagePath = $request->file('image')->store('products', 'public');
+            $path = $request->file('image')->store('products', 'public');
 
-            // Get full URL
-            $imageUrl = asset('storage/' . $imagePath);
+            // Store relative path in database
+            $imageUrl = '/storage/' . $path;
 
             // Update product
             $product->update(['image_url' => $imageUrl]);

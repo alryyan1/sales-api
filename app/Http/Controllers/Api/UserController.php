@@ -213,9 +213,9 @@ class UserController extends Controller
         // Define navigation structure matching current frontend routes/navItems.ts
         $navigationItems = [
             [
-                'category' => 'لوحة التحكم',
+                'category' => 'لوحة التحكم ',
                 'items' => [
-                    ['route' => '/dashboard', 'label' => 'لوحة التحكم']
+                    ['route' => '/dashboard', 'label' =>  ' لوحة التحكم']
                 ]
             ],
             [
@@ -245,19 +245,21 @@ class UserController extends Controller
             [
                 'category' => 'التقارير',
                 'items' => [
-                    ['route' => '/reports/dashboard', 'label' => 'لوحة المعلومات'],
                     ['route' => '/reports/sales', 'label' => 'تقرير المبيعات'],
-                    ['route' => '/reports/purchases', 'label' => 'تقرير المشتريات'],
-                    ['route' => '/reports/suppliers-summary', 'label' => 'ملخص الموردين'],
+                    ['route' => '/reports/sale-returns', 'label' => 'تقرير مردودات المبيعات'],
+                    // ['route' => '/reports/purchases', 'label' => 'تقرير المشتريات'],
+                    // ['route' => '/reports/suppliers-summary', 'label' => 'ملخص الموردين'],
                     ['route' => '/reports/inventory-log', 'label' => 'سجل المخزون'],
-                    ['route' => '/reports/sales-discounts', 'label' => 'المبيعات المخفضة'],
+                    // ['route' => '/reports/sales-discounts', 'label' => 'المبيعات المخفضة'],
                     ['route' => '/reports/daily-income', 'label' => 'تقرير المبيعات الشهري'],
                     ['route' => '/reports/monthly-expenses', 'label' => 'تقرير المصروفات الشهرية'],
-                    ['route' => '/reports/profit-loss', 'label' => 'الأرباح والخسائر'],
+                    // ['route' => '/reports/profit-loss', 'label' => 'الأرباح والخسائر'],
                     ['route' => '/reports/best-selling-products', 'label' => 'المنتجات الأكثر مبيعاً'],
                     ['route' => '/reports/stagnant-products', 'label' => 'المنتجات الراكدة'],
                     ['route' => '/reports/low-stock-products', 'label' => 'المنتجات منخفضة المخزون'],
-                    ['route' => '/reports/monthly-shifts', 'label' => 'تقرير الورديات الشهري'],
+                    ['route' => '/reports/shortages', 'label' => 'الطلبية (النواقص)'],
+                    // ['route' => '/reports/moved-expired-products', 'label' => 'المنتجات التالفة/المنتهية'],
+                    ['route' => '/reports/monthly-shifts', 'label' => 'تقرير الورديات '],
                 ]
             ],
             [

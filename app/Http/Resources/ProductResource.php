@@ -22,7 +22,7 @@ class ProductResource extends JsonResource
             'scientific_name' => $this->scientific_name,
             'sku' => $this->sku,
             'description' => $this->description,
-            'image_url' => $this->image_url,
+            'image_url' => $this->image_url ? (str_starts_with($this->image_url, 'http') ? $this->image_url : asset($this->image_url)) : null,
             'category_id' => $this->category_id,
             'category_name' => $this->whenLoaded('category', fn() => $this->category?->name),
             'stocking_unit_id' => $this->stocking_unit_id,

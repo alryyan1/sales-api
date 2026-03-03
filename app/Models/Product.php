@@ -99,6 +99,7 @@ class Product extends Model
         'stocking_unit_id',
         'sellable_unit_id',
         'units_per_stocking_unit',
+        'image_url',
         'has_expiry_date',
         'sale_price',
         'cost_price',
