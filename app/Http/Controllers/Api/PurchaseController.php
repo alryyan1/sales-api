@@ -16,6 +16,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use App\Services\PurchasePdfService;
 use App\Services\PurchaseExcelService;
+use App\Services\TaxPdfService;
 
 
 class PurchaseController extends Controller
@@ -210,6 +211,10 @@ class PurchaseController extends Controller
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
             'status' => ['required', Rule::in(['received', 'pending', 'ordered'])],
             'currency' => ['sometimes', 'required', Rule::in(['SDG', 'USD'])],
+            'tax_amount' => 'sometimes|numeric|min:0',
+            'customs_amount' => 'sometimes|numeric|min:0',
+            'tax_details' => 'nullable|array',
+            'customs_details' => 'nullable|array',
             'notes' => 'nullable|string|max:65535',
             'items' => 'nullable|array',
             'items.*.product_id' => 'required|exists:products,id',
@@ -233,6 +238,10 @@ class PurchaseController extends Controller
                     'status' => $validatedData['status'],
                     'notes' => $validatedData['notes'] ?? null,
                     'currency' => $validatedData['currency'] ?? 'SDG',
+                    'tax_amount' => $validatedData['tax_amount'] ?? 0,
+                    'customs_amount' => $validatedData['customs_amount'] ?? 0,
+                    'tax_details' => $validatedData['tax_details'] ?? null,
+                    'customs_details' => $validatedData['customs_details'] ?? null,
                     'total_amount' => 0, // Initialize total amount
                 ];
                 $purchase = Purchase::create($purchaseHeaderData);
@@ -401,6 +410,10 @@ class PurchaseController extends Controller
             'reference_number' => ['sometimes', 'nullable', 'string', 'max:255', Rule::unique('purchases')->ignore($purchase->id)],
             'status' => ['sometimes', 'required', Rule::in(['received', 'pending', 'ordered'])],
             'currency' => ['sometimes', 'required', Rule::in(['SDG', 'USD'])],
+            'tax_amount' => 'sometimes|numeric|min:0',
+            'customs_amount' => 'sometimes|numeric|min:0',
+            'tax_details' => 'nullable|array',
+            'customs_details' => 'nullable|array',
             'notes' => 'sometimes|nullable|string|max:65535',
             // DO NOT allow updating 'items' array here without extremely complex logic
             // for stock reversal and re-application.
@@ -1152,6 +1165,22 @@ class PurchaseController extends Controller
             'message' => 'Payment recorded successfully',
             'payment' => $payment->load('user:id,name')
         ], 201);
+    }
+
+    /**
+     * Export tax and customs details to PDF.
+     */
+    public function exportTaxPdf(Purchase $purchase)
+    {
+        $includeDetails = request()->boolean('include_details', false);
+        $taxPdfService = new TaxPdfService();
+        $pdfContent = $taxPdfService->generateTaxPdf($purchase, $includeDetails);
+
+        $filename = ($includeDetails ? 'detailed_tax_' : 'summary_tax_') . $purchase->id . '.pdf';
+
+        return response($pdfContent)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'attachment; filename="' . $filename . '"');
     }
 }
 

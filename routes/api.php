@@ -238,7 +238,9 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/purchases/{purchase}/payments', [PurchaseController::class, 'addPayment'])->name('api.purchases.addPayment');
   Route::post('/purchases/{purchase}/items', [PurchaseController::class, 'addPurchaseItem'])->name('api.purchases.addPurchaseItem');
   Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updatePurchaseItem');
+  Route::put('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'updatePurchaseItem'])->name('api.purchases.updatePurchaseItem');
   Route::delete('/purchases/{purchase}/items/{purchaseItem}', [PurchaseController::class, 'deletePurchaseItem'])->name('api.purchases.deletePurchaseItem');
+  Route::get('/purchases/{purchase}/export-tax-pdf', [PurchaseController::class, 'exportTaxPdf'])->name('api.purchases.exportTaxPdf');
   Route::delete('/purchases/{purchase}/items-zero-quantity', [PurchaseController::class, 'deleteZeroQuantityItems'])->name('api.purchases.deleteZeroQuantityItems');
   Route::post('/purchases/{purchase}/add-all-missing-products', [PurchaseController::class, 'addAllMissingProducts'])->name('api.purchases.addAllMissingProducts');
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
