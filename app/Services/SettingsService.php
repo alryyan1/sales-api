@@ -51,6 +51,7 @@ class SettingsService
             'product_images_show_in_reports' => 'bool',
             'whatsapp_shift_closure_numbers' => 'string',
             'firebase_collection_name' => 'string',
+            'usd_to_sdg_factor' => 'float',
         ];
     }
 
@@ -95,6 +96,7 @@ class SettingsService
             'product_images_show_in_reports' => $c['product_images_show_in_reports'] ?? false,
             'whatsapp_shift_closure_numbers' => $c['whatsapp_shift_closure_numbers'] ?? '',
             'firebase_collection_name' => $c['firebase_collection_name'] ?? 'one_care',
+            'usd_to_sdg_factor' => $c['usd_to_sdg_factor'] ?? 1.0,
         ];
     }
 

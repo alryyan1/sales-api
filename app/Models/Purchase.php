@@ -71,6 +71,7 @@ class Purchase extends Model
         'status',
         'total_amount', // Although calculated, might be set initially or updated
         'notes',
+        'currency',
         'stock_added_to_warehouse',
     ];
 

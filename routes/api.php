@@ -134,6 +134,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/shift-cost-pdf', [ReportController::class, 'shiftCostPdf'])->name('shift-cost-pdf');
     Route::get('/shift-returns-pdf', [ReportController::class, 'shiftReturnsPdf'])->name('shift-returns-pdf');
     Route::get('/shift-sold-items-pdf', [ReportController::class, 'shiftSoldItemsPdf'])->name('shift-sold-items-pdf');
+    Route::get('/shift-inventory-effects-pdf', [ReportController::class, 'shiftInventoryEffectsPdf'])->name('shift-inventory-effects-pdf');
     Route::get('/inventory-pdf', [ReportController::class, 'inventoryPdf'])->name('inventory-pdf');
     Route::get('/inventory-log', [App\Http\Controllers\Api\InventoryLogController::class, 'index'])->name('inventory-log');
     Route::get('/inventory-log/pdf', [App\Http\Controllers\Api\InventoryLogController::class, 'generatePdf'])->name('inventory-log.pdf');

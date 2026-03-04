@@ -2297,4 +2297,24 @@ class ReportController extends Controller
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
     }
+
+    /**
+     * Download Shift Inventory Effects PDF (أثر المخزون)
+     */
+    public function shiftInventoryEffectsPdf(Request $request, \App\Services\ShiftInventoryEffectsPdfService $pdfService)
+    {
+        $validated = $request->validate([
+            'shift_id' => 'required|integer|exists:shifts,id',
+        ]);
+
+        $shift = Shift::with(['user', 'sales.items.product', 'saleReturns.items.product'])->findOrFail($validated['shift_id']);
+
+        $pdfContent = $pdfService->generate($shift);
+
+        $filename = 'Shift_' . $shift->id . '_InventoryEffects_' . now()->format('Ymd_His') . '.pdf';
+
+        return response($pdfContent, 200)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+    }
 }

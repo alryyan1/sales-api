@@ -29,29 +29,21 @@ class PurchasePdfService
     // COLOR SCHEME CONSTANTS
     // ============================================
 
-    /** @var array Primary brand color (Professional Blue) */
-    private const COLOR_PRIMARY = [41, 128, 185];
+    /** @var array Primary brand color (Professional Gray) */
+    private const COLOR_PRIMARY = [80, 80, 80];
 
-    /** @var array Header background (Dark Blue-Gray) */
-    private const COLOR_HEADER_BG = [52, 73, 94];
+    /** @var array Header background (Dark Gray) */
+    private const COLOR_HEADER_BG = [60, 60, 60];
 
     /** @var array Light gray for backgrounds */
     private const COLOR_LIGHT_GRAY = [245, 245, 245];
 
     /** @var array Border color */
-    private const COLOR_BORDER = [220, 220, 220];
+    private const COLOR_BORDER = [200, 200, 200];
 
-    /** @var array Success/Received status color */
-    private const COLOR_SUCCESS = [212, 237, 218];
-    private const COLOR_SUCCESS_TEXT = [21, 87, 36];
-
-    /** @var array Warning/Pending status color */
-    private const COLOR_WARNING = [255, 243, 205];
-    private const COLOR_WARNING_TEXT = [133, 100, 4];
-
-    /** @var array Info/Ordered status color */
-    private const COLOR_INFO = [209, 236, 241];
-    private const COLOR_INFO_TEXT = [12, 84, 96];
+    /** @var array Neutral status color */
+    private const COLOR_STATUS_BG = [230, 230, 230];
+    private const COLOR_STATUS_TEXT = [40, 40, 40];
 
     // ============================================
     // LAYOUT CONSTANTS
@@ -223,20 +215,17 @@ class PurchasePdfService
         // Company name/logo section
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_TITLE);
         $this->pdf->SetTextColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
-        $this->pdf->Cell(0, 10, 'نظام إدارة المبيعات', 0, 1, 'C');
 
         // Document title
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SUBTITLE + 2);
         $this->pdf->SetTextColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
-        $this->pdf->Cell(0, 8, 'أمر شراء', 0, 1, 'C');
+        $this->pdf->Cell(0, 8, 'فاتوره مشتريات', 0, 1, 'C');
 
         // Order number with enhanced styling
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SUBTITLE);
-        $this->pdf->SetTextColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
         $this->pdf->Cell(0, 8, 'رقم الطلب: #' . str_pad($purchase->id, 6, '0', STR_PAD_LEFT), 0, 1, 'C');
 
         // Status badge with professional styling
-        $this->addEnhancedStatusBadge($purchase->status);
+        // $this->addEnhancedStatusBadge($purchase->status);
 
         // Separator line
         $this->pdf->Ln(3);
@@ -343,9 +332,9 @@ class PurchasePdfService
     private function addSectionHeader(string $title): void
     {
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_HEADING);
-        $this->pdf->SetFillColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
-        $this->pdf->SetTextColor(255, 255, 255);
-        $this->pdf->Cell(0, 10, $title, 0, 1, 'R', true);
+        // $this->pdf->SetFillColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
+        // $this->pdf->SetTextColor(255, 255, 255);
+        $this->pdf->Cell(0, 10, $title, 0, 1, 'R', 0);
         $this->pdf->SetTextColor(0, 0, 0);
         $this->pdf->Ln(3);
     }
@@ -525,7 +514,7 @@ class PurchasePdfService
         $this->pdf->SetTextColor(255, 255, 255);
         $this->pdf->Cell($labelWidth, 9, 'المبلغ الإجمالي:', 1, 0, 'R', true);
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_HEADING - 1);
-        $this->pdf->Cell($valueWidth, 9, number_format($totalAmount, 2) . ' ج.س', 1, 1, 'C', true);
+        $this->pdf->Cell($valueWidth, 9, number_format($totalAmount, 2) . ' ' . ($purchase->currency ?? 'SDG'), 1, 1, 'C', true);
         $this->pdf->SetTextColor(0, 0, 0);
     }
 
@@ -580,7 +569,7 @@ class PurchasePdfService
     }
 
     /**
-     * Get status-specific colors for badges
+     * Get status-specific colors for badges (Grayscale)
      *
      * @param string $status
      * @return array{bg: array<int>, text: array<int>}
@@ -589,20 +578,20 @@ class PurchasePdfService
     {
         return match ($status) {
             'received' => [
-                'bg' => self::COLOR_SUCCESS,
-                'text' => self::COLOR_SUCCESS_TEXT,
+                'bg' => [210, 210, 210],
+                'text' => [0, 0, 0],
             ],
             'pending' => [
-                'bg' => self::COLOR_WARNING,
-                'text' => self::COLOR_WARNING_TEXT,
+                'bg' => [230, 230, 230],
+                'text' => [50, 50, 50],
             ],
             'ordered' => [
-                'bg' => self::COLOR_INFO,
-                'text' => self::COLOR_INFO_TEXT,
+                'bg' => [240, 240, 240],
+                'text' => [80, 80, 80],
             ],
             'cancelled' => [
-                'bg' => [248, 215, 218],
-                'text' => [114, 28, 36],
+                'bg' => [200, 200, 200],
+                'text' => [100, 100, 100],
             ],
             default => [
                 'bg' => self::COLOR_LIGHT_GRAY,

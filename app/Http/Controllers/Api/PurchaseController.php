@@ -209,6 +209,7 @@ class PurchaseController extends Controller
             'purchase_date' => 'required|date_format:Y-m-d',
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
             'status' => ['required', Rule::in(['received', 'pending', 'ordered'])],
+            'currency' => ['sometimes', 'required', Rule::in(['SDG', 'USD'])],
             'notes' => 'nullable|string|max:65535',
             'items' => 'nullable|array',
             'items.*.product_id' => 'required|exists:products,id',
@@ -231,6 +232,7 @@ class PurchaseController extends Controller
                     'reference_number' => $validatedData['reference_number'] ?? null,
                     'status' => $validatedData['status'],
                     'notes' => $validatedData['notes'] ?? null,
+                    'currency' => $validatedData['currency'] ?? 'SDG',
                     'total_amount' => 0, // Initialize total amount
                 ];
                 $purchase = Purchase::create($purchaseHeaderData);
@@ -398,6 +400,7 @@ class PurchaseController extends Controller
             'purchase_date' => 'sometimes|required|date_format:Y-m-d',
             'reference_number' => ['sometimes', 'nullable', 'string', 'max:255', Rule::unique('purchases')->ignore($purchase->id)],
             'status' => ['sometimes', 'required', Rule::in(['received', 'pending', 'ordered'])],
+            'currency' => ['sometimes', 'required', Rule::in(['SDG', 'USD'])],
             'notes' => 'sometimes|nullable|string|max:65535',
             // DO NOT allow updating 'items' array here without extremely complex logic
             // for stock reversal and re-application.
