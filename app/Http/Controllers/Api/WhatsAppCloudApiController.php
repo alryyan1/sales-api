@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
 class WhatsAppCloudApiController extends Controller
 {
@@ -531,6 +532,11 @@ class WhatsAppCloudApiController extends Controller
             'timestamp' => $timestamp,
         ]);
 
+        // Handle Image Messages
+        if ($type === 'image' && isset($message['image'])) {
+            $this->handleImageMessage($message['image'], $from, $messageId);
+        }
+
         if (($type ?? '') === 'text' && isset($message['text']['body'])) {
             // \App\Events\WhatsAppMessageReceived::dispatch([
             //     'phone_number_id' => $phoneNumberId,
@@ -625,6 +631,67 @@ class WhatsAppCloudApiController extends Controller
 
                 $this->sendTextToUser($from, "عذراً، لم يتم العثور على التقرير لهذا الرقم: {$from}", $phoneNumberId);
             }
+        }
+    }
+
+    /**
+     * Handle incoming image messages.
+     */
+    protected function handleImageMessage(array $imageData, string $from, string $messageId): void
+    {
+        $mediaId = $imageData['id'] ?? null;
+        $caption = $imageData['caption'] ?? '';
+        $mimeType = $imageData['mime_type'] ?? 'image/jpeg';
+
+        if (!$mediaId) {
+            Log::warning('WhatsApp Cloud API: Image message missing media ID.');
+            return;
+        }
+
+        Log::info('WhatsApp Cloud API: Processing image message.', [
+            'media_id' => $mediaId,
+            'from' => $from,
+        ]);
+
+        $mediaUrl = $this->whatsappService->getMediaUrl($mediaId);
+
+        if (!$mediaUrl) {
+            Log::error('WhatsApp Cloud API: Could not retrieve media URL for ID ' . $mediaId);
+            return;
+        }
+
+        $content = $this->whatsappService->downloadMedia($mediaUrl);
+
+        if (!$content) {
+            Log::error('WhatsApp Cloud API: Could not download media content for URL ' . $mediaUrl);
+            return;
+        }
+
+        // Determine extension from mime type
+        $extension = 'jpg';
+        if (str_contains($mimeType, 'png')) {
+            $extension = 'png';
+        } elseif (str_contains($mimeType, 'gif')) {
+            $extension = 'gif';
+        } elseif (str_contains($mimeType, 'webp')) {
+            $extension = 'webp';
+        }
+
+        $filename = "whatsapp_image_{$messageId}_{$from}." . $extension;
+        $path = "whatsapp/images/{$filename}";
+
+        try {
+            Storage::disk('public')->put($path, $content);
+            $fullUrl = Storage::disk('public')->url($path);
+
+            Log::info('WhatsApp Cloud API: Image stored successfully.', [
+                'path' => $path,
+                'url' => $fullUrl,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('WhatsApp Cloud API: Failed to store image.', [
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

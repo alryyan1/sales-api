@@ -551,6 +551,78 @@ class WhatsAppCloudApiService
     }
 
     /**
+     * Get the download URL for a media object using its media ID.
+     *
+     * @param string $mediaId Media ID from WhatsApp Cloud API
+     * @param string|null $accessToken Optional access token
+     * @return string|null Direct download URL
+     */
+    public function getMediaUrl(string $mediaId, ?string $accessToken = null): ?string
+    {
+        $accessToken = $accessToken ?? $this->accessToken;
+
+        if (!$accessToken) {
+            Log::error('WhatsAppCloudApiService: Access token not configured.');
+            return null;
+        }
+
+        $endpoint = "{$this->baseUrl}/{$this->apiVersion}/{$mediaId}";
+
+        try {
+            $response = Http::withToken($accessToken)->get($endpoint);
+
+            if ($response->successful()) {
+                return $response->json()['url'] ?? null;
+            }
+
+            Log::error('WhatsAppCloudApiService getMediaUrl failed.', [
+                'status' => $response->status(),
+                'response' => $response->json(),
+            ]);
+
+            return null;
+        } catch (\Exception $e) {
+            Log::error("WhatsAppCloudApiService getMediaUrl Exception: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Download media content from a given URL.
+     *
+     * @param string $mediaUrl HTTP URL to the media
+     * @param string|null $accessToken Optional access token
+     * @return string|null Binary data of the media or null on failure
+     */
+    public function downloadMedia(string $mediaUrl, ?string $accessToken = null): ?string
+    {
+        $accessToken = $accessToken ?? $this->accessToken;
+
+        if (!$accessToken) {
+            Log::error('WhatsAppCloudApiService: Access token not configured.');
+            return null;
+        }
+
+        try {
+            // WhatsApp media download requires the same access token used for API calls
+            $response = Http::withToken($accessToken)->get($mediaUrl);
+
+            if ($response->successful()) {
+                return $response->body();
+            }
+
+            Log::error('WhatsAppCloudApiService downloadMedia failed.', [
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        } catch (\Exception $e) {
+            Log::error("WhatsAppCloudApiService downloadMedia Exception: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Handles the response from the WhatsApp Cloud API.
      *
      * @param Response $response
