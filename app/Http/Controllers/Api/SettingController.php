@@ -36,11 +36,31 @@ class SettingController extends Controller
      */
     public function update(Request $request)
     {
-        $this->checkAuthorization('manage-settings');
         $service = new SettingsService();
         $rules = $service->validationRules();
         Log::info('Settings update request data:', $request->all());
         $validated = $request->validate($rules);
+
+        // Authorization logic:
+        $isUpdatingDollarRate = $request->has('usd_to_sdg_factor');
+        $isUpdatingOtherSettings = count(array_diff(array_keys($validated), ['usd_to_sdg_factor'])) > 0;
+
+        // If updating general settings (anything except/besides dollar rate)
+        if ($isUpdatingOtherSettings) {
+            // Require general update-settings or the older manage-settings
+            if (!Auth::user()->can('update-settings') && !Auth::user()->can('manage-settings')) {
+                abort(403, 'This action is unauthorized.');
+            }
+        }
+
+        // If updating dollar rate
+        if ($isUpdatingDollarRate) {
+            // Require specific permission or general update permisison
+            if (!Auth::user()->can('update-dollar-rate') && !Auth::user()->can('update-settings') && !Auth::user()->can('manage-settings')) {
+                abort(403, 'You do not have permission to update the dollar rate.');
+            }
+        }
+
         $newSettings = $service->update($validated);
         return response()->json([
             'message' => 'Settings updated successfully.',

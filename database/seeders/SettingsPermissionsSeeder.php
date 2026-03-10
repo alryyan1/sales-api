@@ -21,6 +21,7 @@ class SettingsPermissionsSeeder extends Seeder
         $permissions = [
             'view-settings',
             'update-settings',
+            'update-dollar-rate',
         ];
 
         foreach ($permissions as $permissionName) {

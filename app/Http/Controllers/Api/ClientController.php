@@ -5,11 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Client;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log; // Added Log for debugging
 use Illuminate\Http\Response;
 use App\Http\Resources\ClientResource;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Validation\Rule;
-use PharIo\Manifest\Author; // Import Rule for unique validation on update
+// Removed PharIo\Manifest\Author which was causing issues
 
 class ClientController extends Controller
 {
@@ -47,13 +48,30 @@ class ClientController extends Controller
      *     )
      * )
      */
-    public function index(Request $request) // Added Request for potential filtering/searching later
+    public function index(Request $request) 
     {
+        $search = $request->get('search'); // Use get() directly
+        
+        // Debugging: Log the search term to see if it reaches the backend
+        Log::info('Client search triggered', ['search_term' => $search]);
+
+        $query = Client::with(['sales.items', 'payments']);
+
+        if (!empty($search)) {
+            $query = $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%")
+                  ->orWhere('id', 'like', "%{$search}%");
+            });
+        }
+
+        $query = $query->latest();
 
         // Basic pagination with financial data
-        $clients = Client::with(['sales.items', 'payments'])
-            ->latest()
+        $clients = $query
             ->paginate($request->input('per_page', 15)) // Default 15 per page
+            ->withQueryString()
             ->through(function ($client) {
                 // Calculate total debit by summing the items of each sale and subtracting discount
                 $totalDebit = $client->sales->sum(function ($sale) {
