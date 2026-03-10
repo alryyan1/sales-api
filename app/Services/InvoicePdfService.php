@@ -493,24 +493,30 @@ class InvoicePdfService
             $pdf->Cell(0, 6, $term, 0, 1, 'R');
         }
 
-        $pdf->Ln(20);
-        $yText = $pdf->GetY();
-        $pdf->SetFont('dejavusans', 'B', 11);
-        $pdf->Cell(60, 10, 'توقيع المستلم', 0, 0, 'C');
-        $pdf->SetX(110);
-        $pdf->Cell(60, 10, 'ختم الشركة', 0, 1, 'C');
+        $pdf->Ln(10);
+        $yStart = $pdf->GetY();
 
         $stampPath = public_path('images/stamp.png');
         $sigPath = public_path('images/signature.png');
 
+        // Center X for the block (shifted left as per previous requests)
+        $centerX = 130;
+
         if (file_exists($stampPath)) {
-            // Draw Stamp under "ختم الشركة" (Shifted left)
-            $pdf->Image($stampPath, 117.5, $yText + 12, 45, 0, '', '', '', false, 300, '', false, false, 0);
+            // Draw Stamp 
+            $pdf->Image($stampPath, $centerX - 22.5, $yStart, 45, 0, '', '', '', false, 300, '', false, false, 0);
         }
 
         if (file_exists($sigPath)) {
-            // Draw Signature under the Stamp (Shifted left)
-            $pdf->Image($sigPath, 120, $yText + 55, 40, 0, '', '', '', false, 300, '', false, false, 0);
+            // Draw Signature under the Stamp (increased distance)
+            $sigY = $yStart + 55;
+            $pdf->Image($sigPath, $centerX - 20, $sigY, 40, 0, '', '', '', false, 300, '', false, false, 0);
+
+            // Write Name directly under the Signature
+            $pdf->SetY($sigY + 18); // Moved slightly closer to signature image bottom
+            $pdf->SetX($centerX - 30);
+            $pdf->SetFont('dejavusans', 'B', 12);
+            $pdf->Cell(60, 10, 'كمال يحى', 0, 1, 'C');
         }
     }
 
