@@ -53,13 +53,8 @@ class SettingController extends Controller
             }
         }
 
-        // If updating dollar rate
-        if ($isUpdatingDollarRate) {
-            // Require specific permission or general update permisison
-            if (!Auth::user()->can('update-dollar-rate') && !Auth::user()->can('update-settings') && !Auth::user()->can('manage-settings')) {
-                abort(403, 'You do not have permission to update the dollar rate.');
-            }
-        }
+        // Note: isUpdatingDollarRate check removed from authorization requirement 
+        // to allow all authenticated users to update the rate via the TopAppBar
 
         $newSettings = $service->update($validated);
         return response()->json([
