@@ -22,8 +22,13 @@ class InventoryAuditPdfService
         $warehouses = Warehouse::orderBy('id')->get();
         $whCount = $warehouses->count();
 
-        // Fetch products grouped by category
-        $categories = Category::with(['products' => function ($query) use ($filters) {
+        // 1. Fetch filtered categories and their products
+        $categoriesQuery = Category::query();
+        if (!empty($filters['category_id'])) {
+            $categoriesQuery->where('id', $filters['category_id']);
+        }
+
+        $categories = $categoriesQuery->with(['products' => function ($query) use ($filters) {
             if (!empty($filters['search'])) {
                 $search = $filters['search'];
                 $query->where(function ($q) use ($search) {
@@ -37,6 +42,40 @@ class InventoryAuditPdfService
             
             $query->orderBy('name');
         }, 'products.sellableUnit'])->get();
+
+        // 2. Prepare unified data structure for categories and products
+        $categoryData = [];
+        foreach ($categories as $cat) {
+            if ($cat->products->isNotEmpty()) {
+                $categoryData[] = (object) [
+                    'name' => $cat->name,
+                    'products' => $cat->products
+                ];
+            }
+        }
+
+        // 3. Include uncategorized products if no specific category is selected
+        if (empty($filters['category_id'])) {
+            $unCatQuery = Product::whereNull('category_id')
+                ->with(['warehouses', 'sellableUnit']);
+            
+            if (!empty($filters['search'])) {
+                $search = $filters['search'];
+                $unCatQuery->where(function ($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('sku', 'like', "%{$search}%");
+                });
+            }
+            
+            $uncategorizedProducts = $unCatQuery->orderBy('name')->get();
+            
+            if ($uncategorizedProducts->isNotEmpty()) {
+                $categoryData[] = (object) [
+                    'name' => 'غير مصنف', // Uncategorized in Arabic
+                    'products' => $uncategorizedProducts
+                ];
+            }
+        }
 
         // Create PDF - A5 size
         $pdf = new MyCustomTCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
@@ -118,7 +157,7 @@ class InventoryAuditPdfService
             'default' => [255, 255, 255]
         ];
 
-        foreach ($categories as $category) {
+        foreach ($categoryData as $category) {
             $products = $category->products;
             if ($products->isEmpty()) continue;
 
