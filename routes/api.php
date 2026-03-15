@@ -30,7 +30,8 @@ use App\Http\Controllers\Api\{
   ShiftController,
   WarehouseController,
   StockTransferController,
-  WhatsAppCloudApiController
+  WhatsAppCloudApiController,
+  PackageController
 };
 use App\Http\Controllers\UpdateController;
 
@@ -141,6 +142,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/expenses-summary', [ReportController::class, 'expensesSummary'])->name('expenses-summary');
     Route::get('/monthly-expenses', [ReportController::class, 'monthlyExpenses'])->name('monthly-expenses');
     Route::get('/monthly-expenses-excel', [ReportController::class, 'monthlyExpensesExcel'])->name('monthly-expenses-excel');
+    Route::get('/inventory-audit-pdf', [ReportController::class, 'inventoryAuditPdf'])->name('inventory-audit-pdf');
   });
 
   // -- Admin Only Routes --
@@ -207,6 +209,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/products/{product}/sales-history', [ProductController::class, 'salesHistory']);
   Route::post('/products/{product}/image', [ProductController::class, 'uploadImage'])->name('api.products.upload-image');
   Route::apiResource('products', ProductController::class);
+  Route::apiResource('packages', PackageController::class);
 
   // -- Warehouses Management --
   Route::apiResource('warehouses', WarehouseController::class);

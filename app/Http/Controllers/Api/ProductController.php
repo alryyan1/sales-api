@@ -47,6 +47,16 @@ class ProductController extends Controller
                 ->limit(1)
         ]);
 
+        if ($warehouseId = $request->input('warehouse_id')) {
+            $query->addSelect([
+                'current_stock_quantity' => \Illuminate\Support\Facades\DB::table('product_warehouse')
+                    ->selectRaw('COALESCE(SUM(quantity), 0)')
+                    ->whereColumn('product_id', 'products.id')
+                    ->where('warehouse_id', $warehouseId)
+                    ->limit(1)
+            ]);
+        }
+
         // Load relationships needed for the ProductResource
         $query->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem', 'warehouses'])
             ->withSum('purchaseItems', 'quantity')
@@ -105,13 +115,6 @@ class ProductController extends Controller
 
         $perPage = $request->input('per_page', 15); // Default items per page
         $products = $query->paginate($perPage);
-
-        if ($warehouseId = $request->input('warehouse_id')) {
-            $products->getCollection()->transform(function ($product) use ($warehouseId) {
-                $product->current_stock_quantity = $product->countStock($warehouseId);
-                return $product;
-            });
-        }
 
         return ProductResource::collection($products);
     }

@@ -19,8 +19,6 @@ class SettingsPermissionsSeeder extends Seeder
 
         // 2. Define permissions to add
         $permissions = [
-            'view-settings',
-            'update-settings',
             'update-dollar-rate',
         ];
 

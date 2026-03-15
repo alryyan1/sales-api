@@ -51,9 +51,18 @@ class SaleItemResource extends JsonResource
                 return $this->purchaseItemBatch?->expiry_date?->format('Y-m-d');
             }),
 
-            // Current stock information from the product
+            // Current stock information from the product (Specific to sale warehouse or user warehouse)
             'current_stock_quantity' => $this->whenLoaded('product', function () {
-                return $this->product?->stock_quantity ?? 0;
+                $warehouseId = $this->sale?->warehouse_id ?? request()->user()?->warehouse_id;
+                
+                if ($warehouseId && $this->product->relationLoaded('warehouses')) {
+                    $warehouse = $this->product->warehouses->firstWhere('id', $warehouseId);
+                    if ($warehouse) {
+                        return (int) $warehouse->pivot->quantity;
+                    }
+                }
+                
+                return (int) ($this->product->stock_quantity ?? 0);
             }),
             'stock_alert_level' => $this->whenLoaded('product', function () {
                 return $this->product?->stock_alert_level;

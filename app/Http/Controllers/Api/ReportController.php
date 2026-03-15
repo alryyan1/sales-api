@@ -2317,4 +2317,25 @@ class ReportController extends Controller
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
     }
+
+    /**
+     * Generate Multi-Warehouse Inventory Audit PDF
+     */
+    public function inventoryAuditPdf(Request $request, \App\Services\InventoryAuditPdfService $pdfService)
+    {
+        $filters = $request->only(['search', 'category_id']);
+        
+        try {
+            $pdfContent = $pdfService->generate($filters);
+            
+            $filename = 'Inventory_Audit_' . now()->format('Ymd_His') . '.pdf';
+            
+            return response($pdfContent, 200)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+        } catch (\Exception $e) {
+            \Log::error('Inventory Audit PDF generation failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to generate PDF report', 'error' => $e->getMessage()], 500);
+        }
+    }
 }

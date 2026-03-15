@@ -26,7 +26,7 @@ class SaleController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Sale::with(['client:id,name', 'user:id,name', 'items.product:id,name,image_url']);
+        $query = Sale::with(['client:id,name', 'user:id,name', 'items.product:id,name,image_url', 'items.product.warehouses']);
 
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
@@ -41,7 +41,7 @@ class SaleController extends Controller
             // For today's sales, load items and payments and return all without pagination
             $query->with([
                 'items.product' => function ($query) {
-                    $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost']);
+                    $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost', 'warehouses']);
                 },
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for expiry date
                 'payments.user:id,name,username' // Load payments with user relationship for today's sales
@@ -106,6 +106,7 @@ class SaleController extends Controller
             'user:id,name',
             'payments.user:id,name,username',
             'items.product:id,name,sku,scientific_name,image_url',
+            'items.product.warehouses',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
         ]);
 
@@ -138,7 +139,7 @@ class SaleController extends Controller
             'client:id,name,email,phone,address,created_at,updated_at',
             'user:id,name',
             'items.product' => function ($query) {
-                $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost']);
+                $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost', 'warehouses']);
             },
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for expiry date
             'payments.user:id,name,username' // Load payments with user relationship
@@ -253,6 +254,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items.product:id,name,sku,scientific_name,image_url',
+                'items.product.warehouses',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
                 'payments.user:id,name'
             ]);
@@ -543,6 +545,7 @@ class SaleController extends Controller
             'items',
             'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
             'items.product.sellableUnit:id,name',
+            'items.product.warehouses',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
             'payments.user:id,name,username' // Load user relationship for payments to get user_name
@@ -855,6 +858,7 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
+                'items.product.warehouses',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
                 'payments.user:id,name'
@@ -1026,8 +1030,9 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
+                'items.product.warehouses',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
-                'items.purchaseItemBatch:id,batch_number,unit_cost',
+                'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
                 'payments.user:id,name'
             ]);
 
@@ -1087,9 +1092,11 @@ class SaleController extends Controller
                     // Business rule: each sale must have at most ONE item per product.
                     // We only need stock for the INCREASE (quantityDifference), not the whole new quantity.
                     $availableInWarehouse = $product->countStock($warehouseId);
+                    Log::info('Available in warehouse: ' . $availableInWarehouse);
+                    Log::info('Quantity difference: ' . $quantityDifference);
 
                     // In a valid state there should be no other items with the same product,
-                    // but we still exclude the current row defensively in case of legacy data.
+                    // but we still exclude the current     row defensively in case of legacy data.
                     $currentInOtherItems = $sale->items()
                         ->where('product_id', $product->id)
                         ->where('id', '!=', $saleItem->id)
@@ -1156,8 +1163,9 @@ class SaleController extends Controller
                 'client:id,name',
                 'user:id,name',
                 'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
+                'items.product.warehouses',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
-                'items.purchaseItemBatch:id,batch_number,unit_cost',
+                'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
                 'payments.user:id,name'
             ]);
 

@@ -338,7 +338,7 @@ class Product extends Model
                     // Send WhatsApp Cloud template notification for low stock
                     $whatsAppCloud = app(\App\Services\WhatsAppCloudApiService::class);
 
-                    $to = '249124584291';
+                    $to = '249991961111';
                     $productName = (string) $this->name;
                     $currentQty = (string) $newTotal;
                     $alertLevel = (string) $this->stock_alert_level;
@@ -469,8 +469,13 @@ class Product extends Model
     }
 
     // Accessor to get current stock quantity (already exists as stock_quantity)
-    public function getCurrentStockQuantityAttribute(): int
+    public function getCurrentStockQuantityAttribute($value): int
     {
+        // If the attribute exists in the model (e.g. from a subquery), use it
+        if (array_key_exists('current_stock_quantity', $this->attributes)) {
+            return (int) ($this->attributes['current_stock_quantity'] ?? 0);
+        }
+        
         return (int) $this->stock_quantity;
     }
 
