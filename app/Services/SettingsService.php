@@ -52,6 +52,7 @@ class SettingsService
             'whatsapp_shift_closure_numbers' => 'string',
             'firebase_collection_name' => 'string',
             'usd_to_sdg_factor' => 'float',
+            'product_row_color_highlight' => 'bool',
         ];
     }
 
@@ -97,6 +98,7 @@ class SettingsService
             'whatsapp_shift_closure_numbers' => $c['whatsapp_shift_closure_numbers'] ?? '',
             'firebase_collection_name' => $c['firebase_collection_name'] ?? 'one_care',
             'usd_to_sdg_factor' => $c['usd_to_sdg_factor'] ?? 1.0,
+            'product_row_color_highlight' => $c['product_row_color_highlight'] ?? true,
         ];
     }
 

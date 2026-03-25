@@ -235,7 +235,7 @@ class InvoicePdfService
 
         // Use Arabic fonts and RTL
         $pdf->setRTL(true);
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
 
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);

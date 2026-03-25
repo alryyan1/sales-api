@@ -5,12 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SaleItemResource;
 use App\Models\Sale;
-use App\Models\SaleItem; // Though items are created via relationship
 use App\Models\Product;
 use App\Models\PurchaseItem; // Needed for batch selection
 use App\Models\Shift;
-use App\Services\SettingsService;
-use App\Services\WhatsAppService;
 use App\Events\SaleCreated;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -158,31 +155,22 @@ class SaleController extends Controller
         ]);
 
         try {
-            // Check for open shift before transaction
-            $settings = (new SettingsService())->getAll();
+            $currentShift = Shift::orderBy('id', 'desc')
+                ->first();
 
-            $posMode = $settings['pos_mode'] ?? 'shift';
-            // return $settings;
-            $currentShift = null;
-            if ($posMode === 'shift') {
-                $currentShift = Shift::orderBy('id', 'desc')
-                    ->first();
-
-                if (!$currentShift) {
-                    return response()->json([
-                        'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
-                    ], Response::HTTP_BAD_REQUEST);
-                }
+            if (!$currentShift) {
+                return response()->json([
+                    'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
+                ], Response::HTTP_BAD_REQUEST);
             }
 
             $sale = DB::transaction(function () use ($validatedData, $request, $currentShift) {
-                // Create sale header (status column was removed)
                 $saleHeader = Sale::create([
-                    'client_id' => $validatedData['client_id'],
+                    'client_id' => null,
                     'user_id' => $request->user()->id,
                     'warehouse_id' => $request->user()->warehouse_id ?? 1,
                     'shift_id' => $currentShift->id,
-                    'sale_date' => $validatedData['sale_date'] ?? now()->toDateString(),
+                    'sale_date' => now(),
                 ]);
 
                 return $saleHeader;
@@ -204,336 +192,11 @@ class SaleController extends Controller
         }
     }
 
-    public function store(Request $request)
-    {
-        $validatedData = $this->validateSaleRequest($request);
 
 
-        // Check for open shift only if pos_mode is 'shift'
-        $settings = (new SettingsService())->getAll();
-        $posMode = $settings['pos_mode'] ?? 'shift';
-        // return $settings;
 
-        $currentShift = null;
-        if ($posMode === 'shift') {
-            $currentShift = Shift::where('user_id', $request->user()->id)
-                ->whereNull('closed_at')
-                ->orderBy('id', 'desc')
-                ->first();
 
-            if (!$currentShift) {
-                return response()->json([
-                    'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
-                ], Response::HTTP_BAD_REQUEST);
-            }
-        }
-
-        $this->performStockPreCheck($validatedData);
-
-        $calculatedTotals = $this->calculateTotals($validatedData);
-
-        $this->validatePaidAmount($calculatedTotals);
-
-        try {
-            $sale = DB::transaction(function () use ($validatedData, $request, $calculatedTotals, $currentShift) {
-                $saleHeader = $this->createSaleHeader($validatedData, $request, $calculatedTotals, $currentShift);
-
-                // --- Calculate Total Sale Amount from items in THIS request ---
-                $newTotalSaleAmount = 0;
-                $this->processSaleItems($validatedData, $saleHeader, $newTotalSaleAmount);
-
-                $this->createPaymentRecords($validatedData, $saleHeader, $request);
-
-                // Persist discount as amount only
-                $saleHeader->update(['discount_amount' => round($calculatedTotals['discountAmount'], 2)]);
-
-                return $saleHeader;
-            });
-
-            $sale->load([
-                'client:id,name',
-                'user:id,name',
-                'items.product:id,name,sku,scientific_name,image_url',
-                'items.product.warehouses',
-                'items.purchaseItemBatch:id,batch_number,unit_cost',
-                'payments.user:id,name'
-            ]);
-
-            // Fire event for notifications
-            event(new SaleCreated($sale));
-
-            return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
-        } catch (ValidationException $e) {
-            Log::warning("Sale creation validation failed: " . json_encode($e->errors()));
-            return response()->json([
-                'message' => $e->getMessage(),
-                'errors' => $e->errors()
-            ], Response::HTTP_UNPROCESSABLE_ENTITY);
-        } catch (\Throwable $e) {
-            Log::error("Sale creation critical error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-            return response()->json(['message' => 'Failed to create sale. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    private function validateSaleRequest(Request $request)
-    {
-        return $request->validate([
-            'warehouse_id' => 'nullable|exists:warehouses,id', // Warehouse for the sale
-            'client_id' => 'nullable|exists:clients,id', // Made nullable for POS sales
-            'shift_id' => 'nullable|exists:shifts,id', // Shift ID - null for days mode, set for shift mode
-            'sale_date' => 'nullable|date_format:Y-m-d',
-            'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1', // Quantity of sellable units
-            'items.*.unit_price' => 'required|numeric|min:0', // Sale price PER SELLABLE UNIT
-            'discount_amount' => 'nullable|numeric|min:0',
-            'discount_type' => ['nullable', Rule::in(['percentage', 'fixed'])],
-            'payments' => 'present|array',
-            'payments.*.method' => [
-                'required_with:payments.*.amount',
-                Rule::in(['cash', 'bankak', 'fawry', 'ocash'])
-            ],
-            'payments.*.amount' => 'required_with:payments.*.method|numeric|min:0.01',
-            'payments.*.payment_date' => 'required_with:payments.*.amount|date_format:Y-m-d',
-            'payments.*.reference_number' => 'nullable|string|max:255',
-            'payments.*.notes' => 'nullable|string|max:65535',
-        ]);
-    }
-
-    /**
-     * Get the ID of the last completed sale for the authenticated user.
-     */
-    public function getLastCompletedSaleId(Request $request)
-    {
-        $user = $request->user();
-        if (!$user) {
-            return response()->json(['message' => 'Unauthenticated.'], Response::HTTP_UNAUTHORIZED);
-        }
-
-        // Find the latest sale by this user.
-        $lastSale = Sale::where('user_id', $user->id)
-            ->orderBy('updated_at', 'desc')
-            ->select('id')
-            ->first();
-
-        if ($lastSale) {
-            return response()->json(['data' => ['last_sale_id' => $lastSale->id]]);
-        }
-
-        return response()->json(['data' => ['last_sale_id' => null], 'message' => 'No completed sales found for this user.'], Response::HTTP_OK);
-        // Or return 404 if no sale found:
-        // return response()->json(['message' => 'No completed sales found for this user.'], Response::HTTP_NOT_FOUND);
-    }
-    private function performStockPreCheck(array $validatedData)
-    {
-        $stockErrors = [];
-        $warehouseId = $validatedData['warehouse_id'] ?? request()->user()->warehouse_id ?? 1;
-
-        // Stock Pre-Check (checks Product.stock_quantity which is total sellable units)
-        foreach ($validatedData['items'] as $index => $itemData) {
-            $product = Product::find($itemData['product_id']);
-            if ($product) {
-                // Check if product has any stock in THIS warehouse
-                $availableInWarehouse = $product->countStock($warehouseId);
-
-                if ($availableInWarehouse <= 0) {
-                    $stockErrors["items.{$index}.product_id"] = ["Product '{$product->name}' is out of stock in Warehouse {$warehouseId}. Available: 0"];
-                }
-                // Check if requested quantity exceeds available stock
-                elseif ($availableInWarehouse < $itemData['quantity']) {
-                    $stockErrors["items.{$index}.quantity"] = ["Insufficient stock for '{$product->name}' in Warehouse {$warehouseId}. Available: {$availableInWarehouse} {$product->sellable_unit_name_plural}, Requested: {$itemData['quantity']}."];
-                }
-            }
-        }
-        if (!empty($stockErrors))
-            throw ValidationException::withMessages($stockErrors);
-    }
-
-    private function calculateTotals(array $validatedData)
-    {
-        // Calculate subtotal from items (not stored in DB anymore)
-        $subtotal = 0;
-        foreach ($validatedData['items'] as $itemData) {
-            $subtotal += ($itemData['quantity'] * $itemData['unit_price']);
-        }
-
-        // Calculate discount (input can be percentage or fixed; we store and use amount only)
-        $discountAmount = 0;
-        if (isset($validatedData['discount_amount']) && $validatedData['discount_amount'] > 0) {
-            $type = $validatedData['discount_type'] ?? 'fixed';
-            if ($type === 'percentage') {
-                $pct = min(100, (float) $validatedData['discount_amount']);
-                $discountAmount = $subtotal * ($pct / 100);
-            } else {
-                $discountAmount = min((float) $validatedData['discount_amount'], $subtotal);
-            }
-        }
-
-        // Calculate amount after discount (net amount)
-        $amountAfterDiscount = $subtotal - $discountAmount;
-
-        // Calculate total paid amount
-        $calculatedTotalPaidAmount = 0;
-        if (!empty($validatedData['payments'])) {
-            foreach ($validatedData['payments'] as $paymentData) {
-                if (isset($paymentData['amount']) && is_numeric($paymentData['amount'])) {
-                    $calculatedTotalPaidAmount += (float) $paymentData['amount'];
-                }
-            }
-        }
-
-        return [
-            'subtotal' => $subtotal,
-            'discountAmount' => $discountAmount,
-            'amountAfterDiscount' => $amountAfterDiscount,
-            'totalPaidAmount' => $calculatedTotalPaidAmount,
-        ];
-    }
-
-    private function validatePaidAmount(array $calculatedTotals)
-    {
-        // Paid amount cannot exceed NET amount (gross - discount)
-        $netAmount = (float) $calculatedTotals['amountAfterDiscount'];
-        if ($calculatedTotals['totalPaidAmount'] > $netAmount) {
-            throw ValidationException::withMessages(['payments' => ['Total paid amount cannot exceed the net sale amount after discount.']]);
-        }
-    }
-
-    private function createSaleHeader(array $validatedData, Request $request, array $calculatedTotals, ?Shift $currentShift = null)
-    {
-        // Determine shift_id: use provided shift_id, or auto-fetch if not provided and not explicitly null
-        $shiftId = null;
-
-        if (array_key_exists('shift_id', $validatedData)) {
-            // shift_id was explicitly provided (can be null for days mode)
-            // Use array_key_exists instead of isset because isset returns false for null values
-            $shiftId = $validatedData['shift_id'];
-        } elseif (!$currentShift) {
-            // shift_id not provided and no currentShift passed - auto-fetch open shift
-            // This maintains backward compatibility for shift mode
-            $currentShift = Shift::where('user_id', $request->user()->id)
-                ->whereNull('closed_at')
-                ->orderBy('id', 'desc')
-                ->first();
-            $shiftId = $currentShift?->id;
-        } else {
-            // currentShift was passed as parameter
-            $shiftId = $currentShift?->id;
-        }
-
-        $saleData = [
-            'warehouse_id' => $validatedData['warehouse_id'] ?? $request->user()->warehouse_id ?? 1,
-            'client_id' => $validatedData['client_id'] ?? null,
-            'user_id' => $request->user()->id,
-            'shift_id' => $shiftId, // Can be null for days mode
-            'sale_date' => $validatedData['sale_date'],
-        ];
-
-        return Sale::create($saleData);
-    }
-
-    private function processSaleItems(array $validatedData, Sale $saleHeader, &$newTotalSaleAmount)
-    {
-        $warehouseId = $saleHeader->warehouse_id;
-
-        // --- MERGE DUPLICATE PRODUCTS ---
-        $mergedItems = [];
-        foreach ($validatedData['items'] as $item) {
-            $productId = $item['product_id'];
-            if (isset($mergedItems[$productId])) {
-                // If price is different, we could either average it or keep one. 
-                // Usually in POS, if you add the same item twice, it's just more quantity.
-                // We'll add the quantity.
-                $mergedItems[$productId]['quantity'] += $item['quantity'];
-                // We'll keep the last unit_price for the merged item (or we could use the first).
-                $mergedItems[$productId]['unit_price'] = $item['unit_price'];
-            } else {
-                $mergedItems[$productId] = $item;
-            }
-        }
-
-        // 2. Process Sale Items and Stock (Total stock check, FIFO allocation or direct stock decrement)
-        foreach ($mergedItems as $itemData) {
-            $product = Product::findOrFail($itemData['product_id']);
-            $requestedSellableUnits = (int) $itemData['quantity'];
-            $unitSalePrice = (float) $itemData['unit_price'];
-
-            // --- Stock check (product_warehouse SSOT) ---
-            // Refresh product to get latest status (though countStock does a fresh query usually)
-            $availableStock = $product->countStock($warehouseId);
-
-            // Check if product has any stock
-            if ($availableStock <= 0) {
-                $msg = "Product '{$product->name}' is out of stock in Warehouse {$warehouseId}. Available quantity: 0";
-
-                $pendingStock = $product->countPendingStock($warehouseId);
-                if ($pendingStock > 0) {
-                    $msg .= " (Found {$pendingStock} units in PENDING purchases. mark purchase as RECEIVED.)";
-                }
-
-                throw ValidationException::withMessages([
-                    'items' => [$msg]
-                ]);
-            }
-
-            if ($availableStock < $requestedSellableUnits) {
-                $msg = "Insufficient stock for product '{$product->name}' in Warehouse {$warehouseId}. Available: {$availableStock} {$product->sellable_unit_name_plural}, Requested: {$requestedSellableUnits}.";
-
-                $pendingStock = $product->countPendingStock($warehouseId);
-                if ($pendingStock > 0) {
-                    $msg .= " (Note: {$pendingStock} additional units are in PENDING purchases.)";
-                }
-
-                throw ValidationException::withMessages([
-                    'items' => [$msg]
-                ]);
-            }
-
-            // Stock is in product_warehouse only. Optionally pick a batch for cost/expiry reference.
-            $refBatch = PurchaseItem::where('product_id', $product->id)
-                ->whereHas('purchase', function ($q) use ($warehouseId) {
-                    $q->where('warehouse_id', $warehouseId);
-                })
-                ->orderBy('expiry_date', 'asc')
-                ->orderBy('created_at', 'asc')
-                ->first();
-
-            $costPriceAtSale = $refBatch ? ($refBatch->cost_per_sellable_unit ?? 0) : 0;
-            $batchNumberSold = $refBatch ? $refBatch->batch_number : null;
-            $purchaseItemId = $refBatch ? $refBatch->id : null;
-
-            $saleHeader->items()->create([
-                'product_id' => $product->id,
-                'purchase_item_id' => $purchaseItemId,
-                'batch_number_sold' => $batchNumberSold,
-                'quantity' => $requestedSellableUnits,
-                'unit_price' => $unitSalePrice,
-                'cost_price_at_sale' => $costPriceAtSale,
-                'total_price' => $requestedSellableUnits * $unitSalePrice,
-            ]);
-
-            $product->decrementWarehouseStock($warehouseId, $requestedSellableUnits);
-            $newTotalSaleAmount += $requestedSellableUnits * $unitSalePrice;
-        } // End loop through merged items
-
-    }
-    private function createPaymentRecords(array $validatedData, Sale $saleHeader, Request $request)
-    {
-        if (!empty($validatedData['payments'])) {
-            foreach ($validatedData['payments'] as $paymentData) {
-                if (isset($paymentData['amount']) && is_numeric($paymentData['amount']) && (float) $paymentData['amount'] > 0) {
-                    $saleHeader->payments()->create([
-                        'user_id' => $request->user()->id,
-                        'method' => $paymentData['method'],
-                        'amount' => (float) $paymentData['amount'],
-                        'payment_date' => $paymentData['payment_date'],
-                        'reference_number' => $paymentData['reference_number'] ?? null,
-                        'notes' => $paymentData['notes'] ?? null,
-                    ]);
-                }
-            }
-        }
-    }
+  
     /**
      * Display the specified sale.
      */
@@ -608,60 +271,7 @@ class SaleController extends Controller
         ]);
     }
 
-    /**
-     * Remove the specified sale from storage.
-     * Strongly discouraged. Implement stock reversal if allowed.
-     */
-    public function destroy(Sale $sale)
-    {
-        try {
-            // Note: status column no longer exists, so we can't check it
-            // Sales can be deleted if they have no payments or if business logic allows
-            // For now, allow deletion but warn if there are payments
-            if ($sale->payments()->count() > 0) {
-                return response()->json([
-                    'message' => 'Cannot delete sales with payments. Consider creating a return instead.'
-                ], Response::HTTP_FORBIDDEN);
-            }
 
-            DB::transaction(function () use ($sale) {
-                // Return stock to inventory for each sale item
-                foreach ($sale->items as $saleItem) {
-                    $product = $saleItem->product;
-                    $quantity = $saleItem->quantity;
-
-                    // Return stock to warehouse (SSOT)
-                    if ($sale->warehouse_id) {
-                        $product->incrementWarehouseStock($sale->warehouse_id, $quantity);
-                    }
-                }
-
-                // Delete all payments for this sale
-                $sale->payments()->delete();
-
-                // Delete all sale items
-                $sale->items()->delete();
-
-                // Delete the sale header
-                $sale->delete();
-            });
-
-            return response()->json([
-                'message' => 'Sale deleted successfully. Stock has been returned to inventory.'
-            ], Response::HTTP_OK);
-        } catch (\Exception $e) {
-            Log::error('Error deleting sale: ' . $e->getMessage(), [
-                'sale_id' => $sale->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to delete sale. Please try again.',
-                'error' => $e->getMessage()
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-    }
 
     /**
      * Add a payment to an existing sale.
@@ -1907,31 +1517,3 @@ class SaleController extends Controller
         return $invoiceService->viewInvoice($sale);
     }
 }
-
-
-// Key Changes and Considerations for Batch Tracking in store():
-//     Stock Pre-Check (Optional): Added an initial check before the transaction to see if the total stock for each product is sufficient. This provides faster feedback to the user.
-//     Transaction: The core logic is wrapped in DB::transaction.
-//     FIFO Batch Selection:
-//     Inside the loop for each item in the sale request:
-//     It fetches PurchaseItem records (batches) for the given product_id that have remaining_quantity > 0.
-//     It orders these batches by expiry_date (oldest first) and then created_at (oldest purchase first) to achieve FIFO.
-//     It uses lockForUpdate() on these batches to prevent race conditions if multiple sales are processed concurrently for the same product.
-//     It iterates through these fetched batches, fulfilling the requested quantity for the sale item from the oldest batches first.
-//     Stock Check Inside Transaction: A critical stock check is performed again inside the transaction for the sum of available batches for that specific product to ensure atomicity.
-//     Create SaleItem: For each portion taken from a batch, a new SaleItem record is created.
-//     It now stores purchase_item_id to link back to the specific batch.
-//     It stores batch_number_sold (copied from the PurchaseItem batch) for easier display on invoices/reports.
-//     Decrement PurchaseItem.remaining_quantity: Instead of decrementing Product.stock_quantity directly, we now decrement remaining_quantity on the specific PurchaseItem (batch) that the stock was taken from.
-//     PurchaseItemObserver: This observer (created earlier) should automatically listen for saves/updates on PurchaseItem and recalculate and save the total stock_quantity on the parent Product model. This keeps the products.stock_quantity as an accurate aggregate.
-//     Error Handling: If stock is insufficient at any point within the transaction (either total for the product or from available batches), a ValidationException is thrown, which rolls back the entire transaction.
-//     update() Method (Simplified):
-//     The provided update() method only allows updating header information of the sale (like status, notes, client, date).
-//     It explicitly DOES NOT handle item modifications (add/edit/delete items within an existing sale). This is because the logic for reversing stock from original batches and reapplying stock for new/modified items, while ensuring stock availability, is extremely complex and prone to errors.
-//     For a real-world system, if item modification on completed sales is required, it's usually handled by:
-//     A "Return" process (creates a new return record, increments stock).
-//     Issuing a "Credit Note".
-//     Then creating a new, corrected Sale.
-//     Or, only allowing item edits if the sale is in a "Draft" status.
-//     destroy(): Remains a forbidden action.
-//     This SaleController with FIFO batch logic is significantly more complex but provides accurate stock depletion from specific batches. The frontend will need to be adapted if you want users to manually select which batch to sell from; otherwise, this FIFO logic handles it automatically on the backend.

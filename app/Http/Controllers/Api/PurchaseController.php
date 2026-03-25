@@ -210,11 +210,7 @@ class PurchaseController extends Controller
             'purchase_date' => 'required|date_format:Y-m-d',
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
             'status' => ['required', Rule::in(['received', 'pending', 'ordered'])],
-            'currency' => ['sometimes', 'required', Rule::in(['SDG', 'USD'])],
-            'tax_amount' => 'sometimes|numeric|min:0',
-            'customs_amount' => 'sometimes|numeric|min:0',
-            'tax_details' => 'nullable|array',
-            'customs_details' => 'nullable|array',
+
             'notes' => 'nullable|string|max:65535',
             'items' => 'nullable|array',
             'items.*.product_id' => 'required|exists:products,id',
@@ -237,11 +233,7 @@ class PurchaseController extends Controller
                     'reference_number' => $validatedData['reference_number'] ?? null,
                     'status' => $validatedData['status'],
                     'notes' => $validatedData['notes'] ?? null,
-                    'currency' => $validatedData['currency'] ?? 'SDG',
-                    'tax_amount' => $validatedData['tax_amount'] ?? 0,
-                    'customs_amount' => $validatedData['customs_amount'] ?? 0,
-                    'tax_details' => $validatedData['tax_details'] ?? null,
-                    'customs_details' => $validatedData['customs_details'] ?? null,
+
                     'total_amount' => 0, // Initialize total amount
                 ];
                 $purchase = Purchase::create($purchaseHeaderData);
@@ -409,11 +401,7 @@ class PurchaseController extends Controller
             'purchase_date' => 'sometimes|required|date_format:Y-m-d',
             'reference_number' => ['sometimes', 'nullable', 'string', 'max:255', Rule::unique('purchases')->ignore($purchase->id)],
             'status' => ['sometimes', 'required', Rule::in(['received', 'pending', 'ordered'])],
-            'currency' => ['sometimes', 'required', Rule::in(['SDG', 'USD'])],
-            'tax_amount' => 'sometimes|numeric|min:0',
-            'customs_amount' => 'sometimes|numeric|min:0',
-            'tax_details' => 'nullable|array',
-            'customs_details' => 'nullable|array',
+
             'notes' => 'sometimes|nullable|string|max:65535',
             // DO NOT allow updating 'items' array here without extremely complex logic
             // for stock reversal and re-application.
@@ -523,36 +511,24 @@ class PurchaseController extends Controller
      */
     public function destroy(Purchase $purchase)
     {
-        // Option 1: Disallow (Recommended)
-        return response()->json(['message' => 'Deleting purchase records is generally not allowed. Consider a cancellation status instead.'], Response::HTTP_FORBIDDEN);
+        if ($purchase->status === 'received') {
+            return response()->json([
+                'message' => 'لا يمكن حذف هذا الشراء لأنه تم استلامه بالفعل وأُضيف للمخزون.',
+            ], Response::HTTP_FORBIDDEN);
+        }
 
-        // Option 2: Implement deletion WITH stock reversal and item deletion (Complex)
-        /*
         try {
             DB::transaction(function () use ($purchase) {
-                // Before deleting the purchase items (which will happen by cascade or manually),
-                // reverse the stock that was added by these items.
-                foreach ($purchase->items as $item) {
-                    $product = $item->product; // Assumes product relationship exists
-                    if ($product) {
-                        // Ensure stock doesn't go negative, though for purchases it's less likely
-                        $product->decrement('stock_quantity', $item->quantity);
-                         Log::info("Stock reversed for product {$product->id} due to purchase deletion. Removed: {$item->quantity}. Purchase ID: {$purchase->id}");
-                    }
-                    // PurchaseItemObserver would also trigger on item deletion to update product stock.
-                    // If not using observer, product stock update must be explicit here.
-                }
-                // Items are deleted by cascade constraint defined in migration
-                // OR $purchase->items()->delete(); (if no cascade)
+                $purchase->items()->delete();
                 $purchase->delete();
             });
-            return response()->json(['message' => 'Purchase deleted successfully and stock reversed.'], Response::HTTP_OK);
+            return response()->json(['message' => 'تم حذف الشراء بنجاح.'], Response::HTTP_OK);
         } catch (\Throwable $e) {
-            Log::error("Purchase deletion critical error for ID {$purchase->id}: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-            return response()->json(['message' => 'Failed to delete purchase. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+            Log::error("Purchase deletion error for ID {$purchase->id}: " . $e->getMessage());
+            return response()->json(['message' => 'فشل حذف الشراء.'], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-        */
     }
+
 
     /**
      * Export purchase details to PDF.

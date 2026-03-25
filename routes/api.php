@@ -31,7 +31,6 @@ use App\Http\Controllers\Api\{
   WarehouseController,
   StockTransferController,
   WhatsAppCloudApiController,
-  PackageController
 };
 use App\Http\Controllers\UpdateController;
 
@@ -209,7 +208,6 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/products/{product}/sales-history', [ProductController::class, 'salesHistory']);
   Route::post('/products/{product}/image', [ProductController::class, 'uploadImage'])->name('api.products.upload-image');
   Route::apiResource('products', ProductController::class);
-  Route::apiResource('packages', PackageController::class);
 
   // -- Warehouses Management --
   Route::apiResource('warehouses', WarehouseController::class);
@@ -268,7 +266,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/sales/{sale}/a4-invoice-pdf/view', [SaleController::class, 'viewA4InvoicePdf'])->name('api.sales.a4Invoice.view'); // <-- A4 English Invoice (view)
 
   // ... existing Sale routes ...
-  Route::get('/sales-print/last-completed-id', [SaleController::class, 'getLastCompletedSaleId'])->name('api.sales.lastCompletedId'); // <-- New Route
+
 
 
   //reports/sales/pdf
