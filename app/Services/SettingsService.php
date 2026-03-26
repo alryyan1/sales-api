@@ -53,6 +53,10 @@ class SettingsService
             'firebase_collection_name' => 'string',
             'usd_to_sdg_factor' => 'float',
             'product_row_color_highlight' => 'bool',
+            'product_scientific_name_visible' => 'bool',
+            'product_scientific_name_required' => 'bool',
+            'pos_show_expired_products' => 'bool',
+            'pos_show_out_of_stock_products' => 'bool',
         ];
     }
 
@@ -99,6 +103,10 @@ class SettingsService
             'firebase_collection_name' => $c['firebase_collection_name'] ?? 'one_care',
             'usd_to_sdg_factor' => $c['usd_to_sdg_factor'] ?? 1.0,
             'product_row_color_highlight' => $c['product_row_color_highlight'] ?? true,
+            'product_scientific_name_visible' => $c['product_scientific_name_visible'] ?? true,
+            'product_scientific_name_required' => $c['product_scientific_name_required'] ?? false,
+            'pos_show_expired_products' => $c['pos_show_expired_products'] ?? false,
+            'pos_show_out_of_stock_products' => $c['pos_show_out_of_stock_products'] ?? false,
         ];
     }
 

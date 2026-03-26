@@ -21,10 +21,8 @@ use App\Http\Controllers\Api\{
   SaleReturnController,
   SettingController,
   StockAdjustmentController,
-  StockRequisitionController,
   SupplierController,
   SupplierPaymentController,
-  SystemController,
   UnitController,
   UserController,
   ShiftController,
@@ -73,8 +71,6 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Autocomplete Routes --
   Route::get('/products/autocomplete', [ProductController::class, 'autocomplete'])->name('api.products.autocomplete');
   Route::get('/clients/autocomplete', [ClientController::class, 'autocomplete'])->name('api.clients.autocomplete');
-  Route::apiResource('stock-requisitions', StockRequisitionController::class)->except(['update']);
-  Route::post('/stock-requisitions/{stock_requisition}/process', [StockRequisitionController::class, 'processRequisition'])->name('api.stock-requisitions.process');
   // -- Clients Management --
   Route::apiResource('clients', ClientController::class);
   Route::get('/clients/{client}/ledger', [\App\Http\Controllers\Api\ClientLedgerController::class, 'getLedger']);
@@ -155,16 +151,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('roles', RoleController::class);
     Route::get('/permissions', [PermissionController::class, 'index'])->name('permissions.index');
 
-    // -- System Management Routes --
-    Route::prefix('system')->name('system.')->group(function () {
-      Route::get('/version', [SystemController::class, 'getVersion'])->name('version');
-      Route::get('/check-updates', [SystemController::class, 'checkForUpdates'])->name('check-updates');
-      Route::post('/update-backend', [SystemController::class, 'updateBackend'])->name('update-backend');
-      Route::post('/update-frontend', [SystemController::class, 'updateFrontend'])->name('update-frontend');
-      Route::post('/update-both', [SystemController::class, 'updateBoth'])->name('update-both');
-      Route::get('/frontend-instructions', [SystemController::class, 'getFrontendUpdateInstructions'])->name('frontend-instructions');
-    });
-
     // -- WhatsApp Cloud API Routes --
     Route::prefix('whatsapp-cloud')->group(function () {
       Route::post('/send-text', [WhatsAppCloudApiController::class, 'sendTextMessage']);
@@ -207,6 +193,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/products/{product}/purchase-history', [ProductController::class, 'purchaseHistory']);
   Route::get('/products/{product}/sales-history', [ProductController::class, 'salesHistory']);
   Route::post('/products/{product}/image', [ProductController::class, 'uploadImage'])->name('api.products.upload-image');
+  Route::post('/products/bulk-update-units', [ProductController::class, 'bulkUpdateUnits']);
   Route::apiResource('products', ProductController::class);
 
   // -- Warehouses Management --
@@ -225,8 +212,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
   // -- Units Management --
-  Route::get('/units/stocking', [UnitController::class, 'stocking'])->name('api.units.stocking');
-  Route::get('/units/sellable', [UnitController::class, 'sellable'])->name('api.units.sellable');
+  Route::get('/units/all', [UnitController::class, 'all'])->name('api.units.all');
   Route::apiResource('units', UnitController::class);
 
   // -- Purchases Management --

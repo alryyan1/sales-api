@@ -541,4 +541,23 @@ class ProductController extends Controller
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
+    public function bulkUpdateUnits(Request $request)
+    {
+        $validatedData = $request->validate([
+            'unit_id' => 'required|exists:units,id',
+        ]);
+
+        $unitId = $validatedData['unit_id'];
+
+        // Update all products to use this unit for both stocking and sellable
+        Product::query()->update([
+            'stocking_unit_id' => $unitId,
+            'sellable_unit_id' => $unitId,
+            'units_per_stocking_unit' => 1 // Reset to 1 since it's the same unit
+        ]);
+
+        return response()->json([
+            'message' => 'All products updated successfully to the selected unit.'
+        ]);
+    }
 }

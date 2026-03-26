@@ -27,11 +27,6 @@ class UnitController extends Controller
             });
         }
 
-        // Filter by type
-        if ($request->has('type') && in_array($request->type, ['stocking', 'sellable'])) {
-            $query->where('type', $request->type);
-        }
-
         // Include inactive units
         if (!$request->boolean('include_inactive', false)) {
             $query->where('is_active', true);
@@ -53,27 +48,11 @@ class UnitController extends Controller
     }
 
     /**
-     * Get stocking units only
+     * Get all active units
      */
-    public function stocking(): JsonResponse
+    public function all(Request $request): JsonResponse
     {
-        $units = Unit::where('type', 'stocking')
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get();
-
-        return response()->json([
-            'data' => $units,
-        ]);
-    }
-
-    /**
-     * Get sellable units only
-     */
-    public function sellable(): JsonResponse
-    {
-        $units = Unit::where('type', 'sellable')
-            ->where('is_active', true)
+        $units = Unit::where('is_active', true)
             ->orderBy('name')
             ->get();
 
@@ -88,8 +67,7 @@ class UnitController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'type' => ['required', Rule::in(['stocking', 'sellable'])],
+            'name' => 'required|string|max:255|unique:units,name',
             'description' => 'nullable|string|max:1000',
             'is_active' => 'boolean',
             'is_default' => 'boolean',
@@ -102,21 +80,9 @@ class UnitController extends Controller
             ], 422);
         }
 
-        // Check for unique name and type combination
-        $existingUnit = Unit::where('name', $request->name)
-            ->where('type', $request->type)
-            ->first();
-
-        if ($existingUnit) {
-            return response()->json([
-                'message' => 'A unit with this name and type already exists.',
-            ], 422);
-        }
-
-        // If setting as default, unset other defaults of the same type
+        // If setting as default, unset other defaults
         if ($request->boolean('is_default', false)) {
-            Unit::where('type', $request->type)
-                ->where('is_default', true)
+            Unit::where('is_default', true)
                 ->update(['is_default' => false]);
         }
 
@@ -144,8 +110,7 @@ class UnitController extends Controller
     public function update(Request $request, Unit $unit): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'type' => ['required', Rule::in(['stocking', 'sellable'])],
+            'name' => ['required', 'string', 'max:255', Rule::unique('units', 'name')->ignore($unit->id)],
             'description' => 'nullable|string|max:1000',
             'is_active' => 'boolean',
             'is_default' => 'boolean',
@@ -158,22 +123,9 @@ class UnitController extends Controller
             ], 422);
         }
 
-        // Check for unique name and type combination (excluding current unit)
-        $existingUnit = Unit::where('name', $request->name)
-            ->where('type', $request->type)
-            ->where('id', '!=', $unit->id)
-            ->first();
-
-        if ($existingUnit) {
-            return response()->json([
-                'message' => 'A unit with this name and type already exists.',
-            ], 422);
-        }
-
-        // If setting as default, unset other defaults of the same type
+        // If setting as default, unset other defaults
         if ($request->boolean('is_default', false)) {
-            Unit::where('type', $request->type)
-                ->where('is_default', true)
+            Unit::where('is_default', true)
                 ->where('id', '!=', $unit->id)
                 ->update(['is_default' => false]);
         }

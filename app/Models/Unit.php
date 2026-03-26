@@ -38,7 +38,6 @@ class Unit extends Model
 
     protected $fillable = [
         'name',
-        'type',
         'description',
         'is_active',
         'is_default',
@@ -63,22 +62,6 @@ class Unit extends Model
     public function sellableProducts()
     {
         return $this->hasMany(Product::class, 'sellable_unit_id');
-    }
-
-    /**
-     * Scope to get only stocking units
-     */
-    public function scopeStocking($query)
-    {
-        return $query->where('type', 'stocking');
-    }
-
-    /**
-     * Scope to get only sellable units
-     */
-    public function scopeSellable($query)
-    {
-        return $query->where('type', 'sellable');
     }
 
     /**
