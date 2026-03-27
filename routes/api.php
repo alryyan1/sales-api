@@ -97,7 +97,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('admin/settings/header', [SettingController::class, 'uploadHeader'])->name('settings.uploadHeader');
 
   // -- Database Backup Management --
-  Route::middleware(['role:admin'])->prefix('admin')->name('api.admin.')->group(function () {
+  Route::prefix('admin')->name('api.admin.')->group(function () {
     Route::get('/backups', [BackupController::class, 'index'])->name('backups.index');
     Route::post('/backups', [BackupController::class, 'store'])->name('backups.store');
     Route::get('/backups/statistics', [BackupController::class, 'statistics'])->name('backups.statistics');

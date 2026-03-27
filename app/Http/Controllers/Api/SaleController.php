@@ -203,7 +203,7 @@ class SaleController extends Controller
     public function show(Sale $sale)
     {
         $sale->load([
-            'client:id,name,email',
+            'client:id,name,email,phone',
             'user:id,name',
             'items',
             'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',

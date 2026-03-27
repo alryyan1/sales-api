@@ -160,64 +160,78 @@ class BackupController extends Controller
         $database = config('database.connections.mysql.database');
         $username = config('database.connections.mysql.username');
         $password = config('database.connections.mysql.password');
-        $host = config('database.connections.mysql.host');
-        $port = config('database.connections.mysql.port', 3306);
+        $host     = config('database.connections.mysql.host', '127.0.0.1');
+        $port     = config('database.connections.mysql.port', 3306);
 
-        $timestamp = now()->format('Y-m-d_H-i-s');
-        $filename = "backup_{$database}_{$timestamp}.sql";
-        $backupPath = storage_path("app/backups/{$filename}");
+        $timestamp  = now()->format('Y-m-d_H-i-s');
+        $filename   = "backup_{$database}_{$timestamp}.sql";
+        $backupDir  = storage_path('app/backups');
+        $backupPath = $backupDir . DIRECTORY_SEPARATOR . $filename;
 
-        // Ensure backups directory exists
-        Storage::makeDirectory('backups');
-
-        // Build mysqldump command
-        $command = "C:\\xampp\\mysql\\bin\\mysqldump.exe";
-        
-        if ($host) {
-            $command .= " -h {$host}";
-        }
-        
-        if ($port) {
-            $command .= " -P {$port}";
-        }
-        
-        $command .= " -u {$username}";
-        
-        if ($password) {
-            $command .= " -p{$password}";
+        // Ensure backups directory exists (Storage::makeDirectory can silently fail)
+        if (!is_dir($backupDir)) {
+            mkdir($backupDir, 0755, true);
         }
 
-        // Add options based on user preferences
-        if (!$includeData) {
-            $command .= " --no-data";
-        }
-        
-        if (!$includeStructure) {
-            $command .= " --no-create-info";
+        // Locate mysqldump — check common XAMPP path first, then PATH
+        $mysqldump = 'C:\\xampp\\mysql\\bin\\mysqldump.exe';
+        if (!file_exists($mysqldump)) {
+            $mysqldump = 'mysqldump'; // fall back to PATH
         }
 
-        $command .= " {$database} > \"{$backupPath}\"";
+        // Build command arguments
+        $args = [];
+        $args[] = '-h ' . escapeshellarg($host);
+        $args[] = '-P ' . escapeshellarg((string) $port);
+        $args[] = '-u ' . escapeshellarg($username);
+        if ($password !== '' && $password !== null) {
+            // Use --password= to safely handle special characters
+            $args[] = '--password=' . escapeshellarg($password);
+        }
+        if (!$includeData)      $args[] = '--no-data';
+        if (!$includeStructure) $args[] = '--no-create-info';
+        $args[] = escapeshellarg($database);
 
-        // Execute the command
-        $output = [];
-        $returnCode = 0;
-        exec($command . " 2>&1", $output, $returnCode);
+        $command = escapeshellarg($mysqldump) . ' ' . implode(' ', $args);
+
+        // Use proc_open so we can capture stderr separately from the SQL output file
+        $descriptors = [
+            0 => ['pipe', 'r'],                      // stdin  (unused)
+            1 => ['file', $backupPath, 'w'],          // stdout → backup file
+            2 => ['pipe', 'w'],                       // stderr → captured
+        ];
+
+        $process = proc_open($command, $descriptors, $pipes);
+
+        if (!is_resource($process)) {
+            throw new \Exception('Failed to start mysqldump process. Check that mysqldump is installed and accessible.');
+        }
+
+        fclose($pipes[0]);
+        $stderr     = stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+        $returnCode = proc_close($process);
 
         if ($returnCode !== 0) {
-            throw new \Exception('mysqldump failed: ' . implode("\n", $output));
+            if (file_exists($backupPath)) @unlink($backupPath);
+            throw new \Exception("mysqldump exited with code {$returnCode}: " . trim($stderr));
+        }
+
+        // Verify the file was actually created and has content
+        if (!file_exists($backupPath) || filesize($backupPath) === 0) {
+            if (file_exists($backupPath)) @unlink($backupPath);
+            throw new \Exception('Backup file was not created or is empty. ' . trim($stderr));
         }
 
         // Store backup metadata
-        $metadata = [
-            'filename' => $filename,
-            'description' => $description,
-            'size' => Storage::size("backups/{$filename}"),
-            'created_at' => now()->toISOString(),
-            'include_data' => $includeData,
-            'include_structure' => $includeStructure,
-        ];
-
-        Storage::put("backups/{$filename}.meta", json_encode($metadata));
+        Storage::put("backups/{$filename}.meta", json_encode([
+            'filename'           => $filename,
+            'description'        => $description,
+            'size'               => filesize($backupPath),
+            'created_at'         => now()->toISOString(),
+            'include_data'       => $includeData,
+            'include_structure'  => $includeStructure,
+        ]));
 
         Log::info("Database backup created: {$filename}");
 
@@ -255,8 +269,11 @@ class BackupController extends Controller
         }
 
         // Sort by creation date (newest first)
+        // created_at may be an ISO string or a raw Unix timestamp integer (from lastModified)
         usort($backups, function($a, $b) {
-            return strtotime($b['created_at']) - strtotime($a['created_at']);
+            $ta = is_numeric($a['created_at']) ? (int)$a['created_at'] : strtotime($a['created_at']);
+            $tb = is_numeric($b['created_at']) ? (int)$b['created_at'] : strtotime($b['created_at']);
+            return $tb - $ta;
         });
 
         return $backups;

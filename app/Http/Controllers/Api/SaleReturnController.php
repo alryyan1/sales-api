@@ -113,7 +113,7 @@ class SaleReturnController extends Controller
         $warehouseId = $sale->warehouse_id ?? $user->warehouse_id ?? 1;
 
         try {
-            $saleReturn = DB::transaction(function () use ($validated, $user, $warehouseId) {
+            $saleReturn = DB::transaction(function () use ($validated, $user, $warehouseId, $sale) {
                 $header = SaleReturn::create([
                     'user_id' => $user->id,
                     'sale_id' => $validated['sale_id'],
@@ -137,6 +137,9 @@ class SaleReturnController extends Controller
                     // Increase stock in the user's warehouse
                     $product->incrementWarehouseStock($warehouseId, $quantity);
                 }
+
+                // Mark the original sale as returned
+                $sale->update(['is_returned' => true]);
 
                 return $header->load(['user:id,name', 'sale:id,number,sale_date', 'items.product:id,name,sku']);
             });
