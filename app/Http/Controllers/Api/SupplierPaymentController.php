@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\PurchasePayment;
 use App\Models\Supplier;
-use App\Models\SupplierPayment;
+use App\Services\SupplierLedgerPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -14,75 +15,89 @@ class SupplierPaymentController extends Controller
 {
     /**
      * Get supplier ledger with payments and purchases.
+     * Refactored to be Purchase-Centric.
      */
     public function getLedger(Supplier $supplier)
     {
         try {
-            // Get supplier with relationships
-            $supplier->load(['payments.user', 'purchases']);
-
-            // Get payments
-            $payments = $supplier->payments()
-                ->with('user')
-                ->orderBy('payment_date', 'desc')
-                ->orderBy('created_at', 'desc')
-                ->get();
-
-            // Get purchases
+            // Get all purchases for this supplier with their payments
             $purchases = $supplier->purchases()
+                ->with(['payments.user'])
                 ->orderBy('purchase_date', 'desc')
                 ->orderBy('created_at', 'desc')
                 ->get();
 
-            // Calculate totals
+            // Get direct payments (not linked to any purchase)
+            $directPayments = $supplier->payments()
+                ->whereNull('purchase_id')
+                ->with('user')
+                ->get();
+
             $totalPurchases = $purchases->sum('total_amount');
-            $totalPayments = $payments->sum('amount');
+            
+            // Total payments = payments linked to purchases + direct payments
+            $totalPaymentsAcrossPurchases = $purchases->sum(function($p) {
+                return $p->payments->sum('amount');
+            });
+            $totalDirectPayments = $directPayments->sum('amount');
+            
+            $totalPayments = $totalPaymentsAcrossPurchases + $totalDirectPayments;
             $balance = $totalPurchases - $totalPayments;
 
-            // Create ledger entries
             $ledgerEntries = collect();
 
-            // Add purchases to ledger
+            // 1. Add Purchases as the main ledger entries
             foreach ($purchases as $purchase) {
+                $purchasePaid = $purchase->payments->sum('amount');
+                $purchaseBalance = $purchase->total_amount - $purchasePaid;
+
                 $ledgerEntries->push([
-                    'id' => 'purchase_' . $purchase->id, // Keep prefix for purchases
-                    'purchase_id' => $purchase->id, // Add actual purchase ID
-                    'date' => $purchase->purchase_date,
+                    'id' => 'purchase_' . $purchase->id,
+                    'purchase_id' => $purchase->id,
+                    'date' => $purchase->purchase_date->format('Y-m-d'),
                     'type' => 'purchase',
-                    'description' => 'Purchase #' . $purchase->id,
+                    'description' => 'Purchase #' . $purchase->id . ($purchase->reference_number ? ' (' . $purchase->reference_number . ')' : ''),
                     'debit' => $purchase->total_amount,
-                    'credit' => 0,
-                    'balance' => null, // Will be calculated
+                    'credit' => $purchasePaid,
+                    'balance' => $purchaseBalance,
                     'reference' => $purchase->reference_number,
-                    'notes' => $purchase->notes,
                     'created_at' => $purchase->created_at,
+                    'payments' => $purchase->payments->map(function($p) {
+                        return [
+                            'id' => $p->id,
+                            'amount' => $p->amount,
+                            'method' => $p->method,
+                            'payment_date' => $p->payment_date->format('Y-m-d'),
+                            'reference_number' => $p->reference_number,
+                            'user' => $p->user ? ['name' => $p->user->name] : null,
+                        ];
+                    }),
                 ]);
             }
 
-            // Add payments to ledger
-            foreach ($payments as $payment) {
+            // 2. Add a virtual entry for Direct Payments if any exist
+            if ($directPayments->isNotEmpty()) {
                 $ledgerEntries->push([
-                    'id' => $payment->id, // Use actual payment ID
-                    'date' => $payment->payment_date,
+                    'id' => 'direct_payments',
+                    'date' => now()->format('Y-m-d'),
                     'type' => 'payment',
-                    'description' => ucfirst($payment->type) . ' - ' . ucfirst($payment->method),
+                    'description' => 'المدفوعات المباشرة (غير مرتبطة بمشتريات)',
                     'debit' => 0,
-                    'credit' => $payment->amount,
-                    'balance' => null, // Will be calculated
-                    'reference' => $payment->reference_number,
-                    'notes' => $payment->notes,
-                    'created_at' => $payment->created_at,
-                    'user' => $payment->user->name,
+                    'credit' => $totalDirectPayments,
+                    'balance' => -$totalDirectPayments,
+                    'reference' => '-',
+                    'created_at' => $directPayments->first()->created_at,
+                    'payments' => $directPayments->map(function($p) {
+                        return [
+                            'id' => $p->id,
+                            'amount' => $p->amount,
+                            'method' => $p->method,
+                            'payment_date' => $p->payment_date->format('Y-m-d'),
+                            'reference_number' => $p->reference_number,
+                            'user' => $p->user ? ['name' => $p->user->name] : null,
+                        ];
+                    }),
                 ]);
-            }
-
-            // Sort by date and calculate running balance
-            $ledgerEntries = $ledgerEntries->sortByDesc('date')->sortByDesc('created_at');
-            $runningBalance = 0;
-
-            foreach ($ledgerEntries as $entry) {
-                $runningBalance += $entry['debit'] - $entry['credit'];
-                $entry['balance'] = $runningBalance;
             }
 
             return response()->json([
@@ -110,30 +125,48 @@ class SupplierPaymentController extends Controller
     }
 
     /**
+     * Export supplier ledger as PDF (web route — inline display).
+     */
+    public function exportLedgerPdf(Supplier $supplier)
+    {
+        try {
+            $service    = new SupplierLedgerPdfService();
+            $pdfContent = $service->generate($supplier);
+
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="supplier_ledger_' . $supplier->id . '.pdf"');
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error'   => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * Store a new supplier payment.
      */
     public function store(Request $request, Supplier $supplier)
     {
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
-            'type' => ['required', Rule::in(['payment', 'credit', 'adjustment'])],
-            'method' => ['required', Rule::in(['cash', 'bank_transfer', 'check', 'credit_card', 'other'])],
+            'method' => ['required', Rule::in(['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'refund', 'other', 'bankak', 'fawry', 'ocash'])],
             'reference_number' => 'nullable|string|max:255',
-            'notes' => 'nullable|string',
             'payment_date' => 'required|date',
+            'purchase_id' => 'nullable|exists:purchases,id', // Optional purchase linking
         ]);
 
         try {
             DB::beginTransaction();
 
-            $payment = SupplierPayment::create([
+            $payment = PurchasePayment::create([
                 'supplier_id' => $supplier->id,
+                'purchase_id' => $request->purchase_id,
                 'user_id' => auth()->id(),
                 'amount' => $request->amount,
-                'type' => $request->type,
-                'method' => $request->method,
+                'method' => $request->input('method'),
                 'reference_number' => $request->reference_number,
-                'notes' => $request->notes,
                 'payment_date' => $request->payment_date,
             ]);
 
@@ -156,15 +189,23 @@ class SupplierPaymentController extends Controller
     /**
      * Update a supplier payment.
      */
-    public function update(Request $request, SupplierPayment $payment)
+    public function update(Request $request, $id)
     {
+        $payment = PurchasePayment::find($id);
+
+        if (!$payment) {
+            return response()->json([
+                'message' => 'Payment not found',
+                'payment_id' => $id,
+            ], Response::HTTP_NOT_FOUND);
+        }
+
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
-            'type' => ['required', Rule::in(['payment', 'credit', 'adjustment'])],
-            'method' => ['required', Rule::in(['cash', 'bank_transfer', 'check', 'credit_card', 'other'])],
+            'method' => ['required', Rule::in(['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'refund', 'other', 'bankak', 'fawry', 'ocash'])],
             'reference_number' => 'nullable|string|max:255',
-            'notes' => 'nullable|string',
             'payment_date' => 'required|date',
+            'purchase_id' => 'nullable|exists:purchases,id',
         ]);
 
         try {
@@ -172,11 +213,10 @@ class SupplierPaymentController extends Controller
 
             $payment->update([
                 'amount' => $request->amount,
-                'type' => $request->type,
-                'method' => $request->method,
+                'method' => $request->input('method'),
                 'reference_number' => $request->reference_number,
-                'notes' => $request->notes,
                 'payment_date' => $request->payment_date,
+                'purchase_id' => $request->purchase_id,
             ]);
 
             DB::commit();
@@ -200,11 +240,9 @@ class SupplierPaymentController extends Controller
      */
     public function destroy($id)
     {
-        // Find the payment manually to debug route model binding
-        $payment = SupplierPayment::find($id);
-        
+        $payment = PurchasePayment::find($id);
+
         if (!$payment) {
-            \Log::error('Payment not found for deletion:', ['payment_id' => $id]);
             return response()->json([
                 'message' => 'Payment not found',
                 'payment_id' => $id,
@@ -214,51 +252,23 @@ class SupplierPaymentController extends Controller
         try {
             DB::beginTransaction();
 
-            // Log the payment being deleted for debugging
-            \Log::info('Attempting to delete payment:', [
-                'payment_id' => $payment->id,
-                'supplier_id' => $payment->supplier_id,
-                'amount' => $payment->amount,
-                'type' => $payment->type,
-                'method' => $payment->method,
-                'exists_before_delete' => $payment->exists,
-            ]);
-
-            // Force delete to bypass any soft deletes if they exist
             $deleted = $payment->forceDelete();
 
             DB::commit();
 
-            // Check if payment still exists after deletion
-            $paymentStillExists = SupplierPayment::find($payment->id);
-            
-            \Log::info('Payment deletion result:', [
-                'payment_id' => $payment->id,
-                'delete_returned' => $deleted,
-                'payment_still_exists' => $paymentStillExists ? true : false,
-            ]);
-
-            if ($deleted && !$paymentStillExists) {
+            if ($deleted) {
                 return response()->json([
                     'message' => 'Payment deleted successfully',
-                    'payment_id' => $payment->id,
+                    'payment_id' => $id,
                 ]);
-            } else {
-                return response()->json([
-                    'message' => 'Payment was not deleted or still exists',
-                    'payment_id' => $payment->id,
-                    'delete_returned' => $deleted,
-                    'still_exists' => $paymentStillExists ? true : false,
-                ], Response::HTTP_BAD_REQUEST);
             }
+
+            return response()->json([
+                'message' => 'Failed to delete payment',
+            ], Response::HTTP_BAD_REQUEST);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            \Log::error('Failed to delete payment:', [
-                'payment_id' => $payment->id ?? 'unknown',
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
             return response()->json([
                 'message' => 'Failed to delete payment',
                 'error' => $e->getMessage()
@@ -274,9 +284,9 @@ class SupplierPaymentController extends Controller
         return response()->json([
             'methods' => [
                 ['value' => 'cash', 'label' => 'Cash'],
-                ['value' => 'bank_transfer', 'label' => 'Bank Transfer'],
-                ['value' => 'check', 'label' => 'Check'],
-                ['value' => 'credit_card', 'label' => 'Credit Card'],
+                ['value' => 'bankak', 'label' => 'Bankak'],
+                ['value' => 'fawry', 'label' => 'Fawry'],
+                ['value' => 'ocash', 'label' => 'oCash'],
                 ['value' => 'other', 'label' => 'Other'],
             ]
         ]);
@@ -290,8 +300,6 @@ class SupplierPaymentController extends Controller
         return response()->json([
             'types' => [
                 ['value' => 'payment', 'label' => 'Payment'],
-                ['value' => 'credit', 'label' => 'Credit'],
-                ['value' => 'adjustment', 'label' => 'Adjustment'],
             ]
         ]);
     }

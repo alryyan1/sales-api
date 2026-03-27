@@ -4,20 +4,20 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class PurchasePayment extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'purchase_id',
+        'supplier_id',
         'user_id',
         'amount',
         'method',
-        'payment_date',
         'reference_number',
-        'notes',
+        'payment_date',
     ];
 
     protected $casts = [
@@ -25,12 +25,26 @@ class PurchasePayment extends Model
         'payment_date' => 'date',
     ];
 
-    public function purchase(): BelongsTo
+    /**
+     * Relationship: The purchase this payment belongs to (optional).
+     */
+    public function purchase()
     {
         return $this->belongsTo(Purchase::class);
     }
 
-    public function user(): BelongsTo
+    /**
+     * Relationship: The supplier this payment belongs to.
+     */
+    public function supplier()
+    {
+        return $this->belongsTo(Supplier::class);
+    }
+
+    /**
+     * Relationship: The user who recorded the payment.
+     */
+    public function user()
     {
         return $this->belongsTo(User::class);
     }

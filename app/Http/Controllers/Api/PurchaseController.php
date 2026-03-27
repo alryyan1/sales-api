@@ -149,8 +149,8 @@ class PurchaseController extends Controller
             $query->with(['items', 'items.product:id,name,sku,stocking_unit_name,sellable_unit_name']);
         }
 
-        // Always include payment sums for ledger on the list view
-        $query->withSum('payments', 'amount');
+        // Always include payment sums and items count on the list view
+        $query->withSum('payments', 'amount')->withCount('items');
 
         $purchases = $query->latest('id')->paginate($request->input('per_page', 15));
         return PurchaseResource::collection($purchases);

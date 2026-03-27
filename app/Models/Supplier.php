@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property-read float $total_owed
- * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\SupplierPayment> $payments
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\PurchasePayment> $payments
  * @property-read int|null $payments_count
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Purchase> $purchases
  * @property-read int|null $purchases_count
@@ -85,7 +85,7 @@ class Supplier extends Model
      */
     public function payments(): HasMany
     {
-        return $this->hasMany(SupplierPayment::class);
+        return $this->hasMany(PurchasePayment::class, 'supplier_id');
     }
 
     /**

@@ -57,6 +57,8 @@ class SettingsService
             'product_scientific_name_required' => 'bool',
             'pos_show_expired_products' => 'bool',
             'pos_show_out_of_stock_products' => 'bool',
+            'purchase_use_batch_number' => 'bool',
+            'purchase_use_expiry_date' => 'bool',
         ];
     }
 
@@ -107,6 +109,8 @@ class SettingsService
             'product_scientific_name_required' => $c['product_scientific_name_required'] ?? false,
             'pos_show_expired_products' => $c['pos_show_expired_products'] ?? false,
             'pos_show_out_of_stock_products' => $c['pos_show_out_of_stock_products'] ?? false,
+            'purchase_use_batch_number' => $c['purchase_use_batch_number'] ?? true,
+            'purchase_use_expiry_date' => $c['purchase_use_expiry_date'] ?? true,
         ];
     }
 

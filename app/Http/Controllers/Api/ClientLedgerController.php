@@ -22,81 +22,40 @@ class ClientLedgerController extends Controller
     public function getLedger(Client $client)
     {
         try {
-            // Load related sales and payments
+            // Load related sales with their items and payments
             $client->load(['sales' => function ($q) {
                 $q->orderBy('sale_date', 'desc')->orderBy('created_at', 'desc');
-            }, 'sales.payments']);
+            }, 'sales.items.product:id,name', 'sales.payments']);
 
             $sales = $client->sales;
 
-            // Flatten payments across sales with dates
-            $payments = $sales->flatMap(function ($sale) {
-                return $sale->payments->map(function ($payment) use ($sale) {
-                    return [
-                        'id' => $payment->id,
-                        'date' => $payment->payment_date,
-                        'type' => 'payment',
-                        'description' => 'Payment - ' . ($payment->method ?? 'N/A'),
-                        'debit' => 0,
-                        'credit' => (float) $payment->amount,
-                        'balance' => null,
-                        'reference' => $payment->reference_number,
-                        'notes' => $payment->notes,
-                        'created_at' => $payment->created_at,
-                    ];
-                });
-            });
-
-            // Build sale entries
-            $saleEntries = $sales->map(function ($sale) {
-                // Compute sale total from items minus discount (stored as amount)
+            // Build one entry per sale with aggregated payment info
+            $ledgerEntries = $sales->map(function ($sale) {
                 $itemsTotal = (float) $sale->items->sum('total_price');
-                $discount = (float) ($sale->discount_amount ?? 0);
-                $saleTotal = max(0.0, $itemsTotal - $discount);
+                $discount   = (float) ($sale->discount_amount ?? 0);
+                $total      = max(0.0, $itemsTotal - $discount);
+                $paid       = (float) $sale->payments->sum('amount');
+                $due        = max(0.0, $total - $paid);
+
                 return [
-                    'id' => 'sale_' . $sale->id,
-                    'sale_id' => $sale->id,
-                    'date' => $sale->sale_date,
-                    'type' => 'sale',
-                    'description' => 'Sale #' . $sale->id,
-                    'debit' => $saleTotal,
-                    'credit' => 0,
-                    'balance' => null,
-                    'reference' => 'S-' . $sale->id,
-                    'notes' => null,
-                    'created_at' => $sale->created_at,
+                    'id'          => 'sale_' . $sale->id,
+                    'sale_id'     => $sale->id,
+                    'date'        => $sale->sale_date,
+                    'total'       => $total,
+                    'paid'        => $paid,
+                    'due'         => $due,
+                    'items_count' => $sale->items->count(),
+                    'created_at'  => $sale->created_at,
+                    'items'       => $sale->items->map(fn($item) => [
+                        'product_id'   => $item->product_id,
+                        'product_name' => $item->product?->name ?? '',
+                    ])->values(),
                 ];
-            });
+            })->sortByDesc('created_at')->values();
 
-            $ledgerEntries = $saleEntries->concat($payments);
-
-            // Sort and calculate running balance
-            // Compute running balance in chronological ascending order,
-            // then return entries in descending order for display
-            $entriesAsc = $ledgerEntries->sortBy([
-                ['date', 'asc'],
-                ['created_at', 'asc'],
-            ]);
-
-            $runningBalance = 0.0;
-            $entriesWithBalance = $entriesAsc->values()->map(function ($entry) use (&$runningBalance) {
-                $runningBalance += ((float)($entry['debit'] ?? 0) - (float)($entry['credit'] ?? 0));
-                $entry['balance'] = $runningBalance;
-                return $entry;
-            });
-
-            $ledgerEntries = $entriesWithBalance->sortBy([
-                ['date', 'desc'],
-                ['created_at', 'desc'],
-            ]);
-
-            $totalSales = (float) $sales->sum(function ($sale) {
-                $itemsTotal = (float) $sale->items->sum('total_price');
-                $discount = (float) ($sale->discount_amount ?? 0);
-                return max(0.0, $itemsTotal - $discount);
-            });
-            $totalPayments = (float) $payments->sum('credit');
-            $balance = $totalSales - $totalPayments;
+            $totalSales    = (float) $ledgerEntries->sum('total');
+            $totalPayments = (float) $ledgerEntries->sum('paid');
+            $balance       = $totalSales - $totalPayments;
 
             return response()->json([
                 'client' => [

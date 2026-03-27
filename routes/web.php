@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\PurchaseController;
+use App\Http\Controllers\Api\SupplierPaymentController;
 use Illuminate\Support\Facades\Route;
 use App\Services\WhatsAppService;
 
@@ -38,6 +39,9 @@ Route::middleware('guest.access')->group(function () {
 
     // Purchase Excel Export Route
     Route::get('/purchases/export/excel', [PurchaseController::class, 'exportExcel']);
+
+    // Supplier Ledger PDF Export Route
+    Route::get('/suppliers/{supplier}/ledger/pdf', [SupplierPaymentController::class, 'exportLedgerPdf']);
 });
 
 Route::get('/test-whatsapp', function () {

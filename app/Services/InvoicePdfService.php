@@ -254,12 +254,18 @@ class InvoicePdfService
 
     private function generateArabicProformaHeader(\App\Services\Pdf\MyCustomTCPDF $pdf, Sale $sale, array $settings, string $title): void
     {
-        $y = $pdf->GetY();
+        $pageW     = $pdf->getPageWidth(); // 210mm
+        $leftM     = 10;
+        $rightM    = 10;
+        $usableW   = $pageW - $leftM - $rightM; // 190mm
+        $startY    = $pdf->GetY();
+        $logoW     = 35;
+        $logoMaxH  = 24;
 
-        // Logo and Company Info
+        // ── LOGO (left side, absolute coordinates) ──────────────────────────
+        $logoPlaced = false;
         if (!empty($settings['company_logo_url'])) {
             $logoPath = $settings['company_logo_url'];
-            // Handle relative storage paths
             if (strpos($logoPath, 'http') === false) {
                 $logoPath = public_path('storage/' . $logoPath);
             } else {
@@ -267,7 +273,7 @@ class InvoicePdfService
                 if ($path) {
                     $storagePos = strpos($path, '/storage/');
                     if ($storagePos !== false) {
-                        $relative = substr($path, $storagePos + strlen('/storage/'));
+                        $relative  = substr($path, $storagePos + strlen('/storage/'));
                         $candidate = public_path('storage/' . ltrim($relative, '/'));
                         if (file_exists($candidate)) {
                             $logoPath = $candidate;
@@ -275,44 +281,85 @@ class InvoicePdfService
                     }
                 }
             }
-
             if (file_exists($logoPath)) {
-                $pdf->Image($logoPath, 170, $y, 25, 0, '', '', 'T', false, 300, '', false, false, 0);
+                $pdf->Image($logoPath, $leftM, $startY, $logoW, 0, '', '', 'T', false, 300, '', false, false, 0);
+                $logoPlaced = true;
             }
         }
 
-        $pdf->SetY($y);
-        $pdf->SetFont('dejavusans', 'B', 14);
-        $pdf->Cell(0, 10, $settings['company_name'] ?? '', 0, 1, 'L');
-        $pdf->SetFont('dejavusans', '', 10);
-        $pdf->Cell(0, 6, $settings['company_address'] ?? '', 0, 1, 'L');
-        $pdf->Cell(0, 6, 'الهاتف: ' . ($settings['company_phone'] ?? ''), 0, 1, 'L');
+        // ── COMPANY INFO (right side, right-aligned) ─────────────────────────
+        $companyX = $leftM + ($logoPlaced ? $logoW + 4 : 0);
+        $companyW = $pageW - $rightM - $companyX;
 
-        $pdf->Ln(5);
+        $pdf->SetXY($companyX, $startY);
+        $pdf->SetFont('dejavusans', 'B', 13);
+        $pdf->Cell($companyW, 9, $settings['company_name'] ?? '', 0, 1, 'R');
+
+        if (!empty($settings['company_address'])) {
+            $pdf->SetX($companyX);
+            $pdf->SetFont('dejavusans', '', 10);
+            $pdf->Cell($companyW, 6, $settings['company_address'], 0, 1, 'R');
+        }
+        if (!empty($settings['company_phone'])) {
+            $pdf->SetX($companyX);
+            $pdf->SetFont('dejavusans', '', 10);
+            $pdf->Cell($companyW, 6, 'هاتف: ' . $settings['company_phone'], 0, 1, 'R');
+        }
+
+        // Move Y below header block (logo or company text, whichever is taller)
+        $afterY = max($pdf->GetY(), $startY + $logoMaxH);
+        $pdf->SetY($afterY + 3);
+
+        // ── DIVIDER ──────────────────────────────────────────────────────────
+        $pdf->SetDrawColor(180, 180, 180);
+        $pdf->Line($leftM, $pdf->GetY(), $pageW - $rightM, $pdf->GetY());
+        $pdf->SetDrawColor(0, 0, 0);
+        $pdf->Ln(3);
+
+        // ── TITLE BANNER ─────────────────────────────────────────────────────
         $pdf->SetFont('dejavusans', 'B', 16);
         $pdf->SetFillColor(230, 230, 230);
         $pdf->Cell(0, 12, $title, 0, 1, 'C', true);
-        $pdf->Ln(5);
+        $pdf->Ln(4);
 
-        // Customer and Invoice Info
-        $pdf->SetFont('dejavusans', '', 11);
-        $infoY = $pdf->GetY();
+        // ── CUSTOMER / INVOICE INFO (2-column bordered box) ───────────────────
+        $infoY  = $pdf->GetY();
+        $rowH   = 8;
+        $colW   = $usableW / 2; // ~95mm each column
 
-        $pdf->Cell(30, 8, 'تاريخ العرض:', 0, 0, 'R');
-        $pdf->Cell(60, 8, date('Y/m/d', strtotime($sale->sale_date)), 0, 0, 'R');
+        // Light background box
+        $pdf->SetFillColor(248, 248, 248);
+        $pdf->Rect($leftM, $infoY, $usableW, $rowH * 2, 'DF');
 
-        $pdf->SetX(110);
-        $pdf->Cell(30, 8, 'إسم العميل:', 0, 0, 'R');
-        $pdf->Cell(60, 8, ($sale->client ? $sale->client->name : 'عميل نقدي'), 0, 1, 'R');
+        // Row 1 — right column: invoice date | left column: client name
+        // Right column (date)
+        $pdf->SetXY($leftM + $colW, $infoY);
+        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->Cell($colW * 0.45, $rowH, 'تاريخ الفاتورة:', 0, 0, 'R');
+        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->Cell($colW * 0.55, $rowH, date('Y/m/d', strtotime($sale->sale_date)), 0, 0, 'C');
 
-        $pdf->Cell(30, 8, 'رقم العرض:', 0, 0, 'R');
-        $pdf->Cell(60, 8, 'P-' . $sale->id, 0, 0, 'R');
+        // Left column (client name)
+        $pdf->SetXY($leftM, $infoY);
+        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->Cell($colW * 0.4, $rowH, 'اسم العميل:', 0, 0, 'R');
+        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? $sale->client->name : 'عميل نقدي'), 0, 0, 'L');
 
-        $pdf->SetX(110);
-        $pdf->Cell(30, 8, 'رقم الهاتف:', 0, 0, 'R');
-        $pdf->Cell(60, 8, ($sale->client ? $sale->client->phone : ''), 0, 1, 'R');
+        // Row 2 — right column: invoice number | left column: phone
+        $pdf->SetXY($leftM + $colW, $infoY + $rowH);
+        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->Cell($colW * 0.45, $rowH, 'رقم الفاتورة:', 0, 0, 'R');
+        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->Cell($colW * 0.55, $rowH, (string) $sale->id, 0, 0, 'C');
 
-        $pdf->Ln(5);
+        $pdf->SetXY($leftM, $infoY + $rowH);
+        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->Cell($colW * 0.4, $rowH, 'رقم الهاتف:', 0, 0, 'R');
+        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? ($sale->client->phone ?? '') : ''), 0, 0, 'L');
+
+        $pdf->SetY($infoY + $rowH * 2 + 5);
     }
 
     private function generateArabicProformaTable(\App\Services\Pdf\MyCustomTCPDF $pdf, Sale $sale): void

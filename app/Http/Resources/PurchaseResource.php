@@ -37,6 +37,8 @@ class PurchaseResource extends JsonResource
             'created_at' => $this->created_at->toISOString(),
             'currency' => $this->currency,
 
+            'items_count' => $this->items_count ?? null,
+
             // Conditionally include purchase items (usually for the 'show' endpoint)
             // Use PurchaseItemResource::collection to format each item
             'items' => PurchaseItemResource::collection($this->whenLoaded('items')),
