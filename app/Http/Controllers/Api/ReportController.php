@@ -116,7 +116,7 @@ class ReportController extends Controller
         // has_discount filter removed (discount_amount column dropped)
 
         // --- Sorting (Default: Newest first) ---
-        $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc'); // Sort by date then ID
+        $query->orderBy('id', 'desc'); // Sort by date then ID
 
         // --- Pagination ---
         $perPage = $validated['per_page'] ?? 25; // Default to 25 items per page

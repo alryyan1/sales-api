@@ -292,17 +292,17 @@ class InvoicePdfService
         $companyW = $pageW - $rightM - $companyX;
 
         $pdf->SetXY($companyX, $startY);
-        $pdf->SetFont('dejavusans', 'B', 13);
+        $pdf->SetFont('arial', 'B', 13);
         $pdf->Cell($companyW, 9, $settings['company_name'] ?? '', 0, 1, 'R');
 
         if (!empty($settings['company_address'])) {
             $pdf->SetX($companyX);
-            $pdf->SetFont('dejavusans', '', 10);
+            $pdf->SetFont('arial', '', 10);
             $pdf->Cell($companyW, 6, $settings['company_address'], 0, 1, 'R');
         }
         if (!empty($settings['company_phone'])) {
             $pdf->SetX($companyX);
-            $pdf->SetFont('dejavusans', '', 10);
+            $pdf->SetFont('arial', '', 10);
             $pdf->Cell($companyW, 6, 'هاتف: ' . $settings['company_phone'], 0, 1, 'R');
         }
 
@@ -317,7 +317,7 @@ class InvoicePdfService
         $pdf->Ln(3);
 
         // ── TITLE BANNER ─────────────────────────────────────────────────────
-        $pdf->SetFont('dejavusans', 'B', 16);
+        $pdf->SetFont('arial', 'B', 16);
         $pdf->SetFillColor(230, 230, 230);
         $pdf->Cell(0, 12, $title, 0, 1, 'C', true);
         $pdf->Ln(4);
@@ -334,29 +334,29 @@ class InvoicePdfService
         // Row 1 — right column: invoice date | left column: client name
         // Right column (date)
         $pdf->SetXY($leftM + $colW, $infoY);
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($colW * 0.45, $rowH, 'تاريخ الفاتورة:', 0, 0, 'R');
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
         $pdf->Cell($colW * 0.55, $rowH, date('Y/m/d', strtotime($sale->sale_date)), 0, 0, 'C');
 
         // Left column (client name)
         $pdf->SetXY($leftM, $infoY);
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($colW * 0.4, $rowH, 'اسم العميل:', 0, 0, 'R');
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
         $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? $sale->client->name : 'عميل نقدي'), 0, 0, 'L');
 
         // Row 2 — right column: invoice number | left column: phone
         $pdf->SetXY($leftM + $colW, $infoY + $rowH);
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($colW * 0.45, $rowH, 'رقم الفاتورة:', 0, 0, 'R');
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
         $pdf->Cell($colW * 0.55, $rowH, (string) $sale->id, 0, 0, 'C');
 
         $pdf->SetXY($leftM, $infoY + $rowH);
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($colW * 0.4, $rowH, 'رقم الهاتف:', 0, 0, 'R');
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
         $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? ($sale->client->phone ?? '') : ''), 0, 0, 'L');
 
         $pdf->SetY($infoY + $rowH * 2 + 5);
@@ -365,7 +365,7 @@ class InvoicePdfService
     private function generateArabicProformaTable(\App\Services\Pdf\MyCustomTCPDF $pdf, Sale $sale): void
     {
         $pdf->SetFillColor(240, 240, 240);
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
 
         // Column widths
         $w = [10, 80, 15, 15, 25, 45]; // م, البيان, الوحده, العدد, السعر, المبلغ
@@ -377,7 +377,7 @@ class InvoicePdfService
         $pdf->Cell($w[4], 8, 'السعر', 1, 0, 'C', true);
         $pdf->Cell($w[5], 8, 'المبلغ', 1, 1, 'C', true);
 
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
         foreach ($sale->items as $idx => $item) {
             $pdf->Cell($w[0], 8, ($idx + 1), 1, 0, 'C');
             $pdf->Cell($w[1], 8, ($item->product->name ?? ''), 1, 0, 'R');
@@ -397,7 +397,7 @@ class InvoicePdfService
         $pdf->Ln(2);
 
         // Total row
-        $pdf->SetFont('dejavusans', 'B', 11);
+        $pdf->SetFont('arial', 'B', 11);
         $pdf->Cell(145, 10, 'الإجمالي الكلي', 1, 0, 'C');
         $pdf->Cell(45, 10, number_format($net, 2), 1, 1, 'C');
 
@@ -413,7 +413,7 @@ class InvoicePdfService
         }
 
         // Sum in words
-        $pdf->SetFont('dejavusans', '', 11);
+        $pdf->SetFont('arial', '', 11);
         $wordAmount = $this->numberToArabicWords($net);
         $pdf->Cell(0, 10, 'فقط وقدره: ' . $wordAmount . ' لا غير', 0, 1, 'R');
         $pdf->Ln(5);

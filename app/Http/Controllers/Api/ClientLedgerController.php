@@ -6,13 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Models\Client;
 use App\Models\Payment;
 use App\Models\Sale;
+use App\Services\ClientLedgerPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Log;
-use App\Services\Pdf\MyCustomTCPDF;
-use Carbon\Carbon;
 
 class ClientLedgerController extends Controller
 {
@@ -159,87 +157,10 @@ class ClientLedgerController extends Controller
     public function downloadLedgerPDF(Client $client)
     {
         try {
-            // Reuse the ledger generation logic
-            $response = $this->getLedger($client);
-            $data = $response->getData(true);
-
-            // Prepare PDF
-            $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
-            $pdf->SetTitle('Client Ledger - ' . $client->name);
-            $pdf->AddPage();
-            $pdf->setRTL(true);
-
-            // Header
-            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 14);
-            $pdf->Cell(0, 10, 'كشف حساب العميل', 0, 1, 'C');
-            $pdf->Ln(2);
-
-            // Client Info
-            $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
-            $pdf->Cell(0, 6, 'العميل: ' . ($data['client']['name'] ?? ''), 0, 1, 'R');
-            if (!empty($data['client']['phone'])) {
-                $pdf->Cell(0, 6, 'الهاتف: ' . $data['client']['phone'], 0, 1, 'R');
-            }
-            if (!empty($data['client']['email'])) {
-                $pdf->Cell(0, 6, 'البريد الإلكتروني: ' . $data['client']['email'], 0, 1, 'R');
-            }
-            if (!empty($data['client']['address'])) {
-                $pdf->MultiCell(0, 6, 'العنوان: ' . $data['client']['address'], 0, 'R', 0, 1);
-            }
-            $pdf->Ln(4);
-
-            // Summary
-            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
-            $pdf->Cell(0, 7, 'الملخص', 0, 1, 'R');
-            $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
-            $pdf->Cell(0, 6, 'إجمالي المبيعات: ' . number_format((float)($data['summary']['total_sales'] ?? 0), 2), 0, 1, 'R');
-            $pdf->Cell(0, 6, 'إجمالي المدفوعات: ' . number_format((float)($data['summary']['total_payments'] ?? 0), 2), 0, 1, 'R');
-            $pdf->Cell(0, 6, 'الرصيد: ' . number_format((float)($data['summary']['balance'] ?? 0), 2), 0, 1, 'R');
-            $pdf->Ln(4);
-
-            // Table header - auto fit to page width (after margins)
-            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
-            $pdf->SetFillColor(220, 220, 220);
-            $numCols = 6;
-            $margins = $pdf->getMargins();
-            $usableWidth = $pdf->getPageWidth() - ($margins['left'] ?? 0) - ($margins['right'] ?? 0);
-            $baseColWidth = round($usableWidth / $numCols, 2);
-            $colWidths = array_fill(0, $numCols, $baseColWidth);
-            // Adjust last column to absorb rounding diff
-            $colWidths[$numCols - 1] = $usableWidth - array_sum(array_slice($colWidths, 0, $numCols - 1));
-
-            // Ensure we start at left margin (works with RTL too)
-            $pdf->SetX($margins['left'] ?? 0);
-            $pdf->Cell($colWidths[0], 7, 'التاريخ', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[1], 7, 'النوع', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[2], 7, 'الوصف', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[3], 7, 'مدين', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[4], 7, 'دائن', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[5], 7, 'الرصيد', 1, 1, 'C', true);
-
-            // Table rows
-            $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
-            foreach ($data['ledger_entries'] as $entry) {
-                $dateRaw = isset($entry['date']) ? (string)$entry['date'] : '';
-                $date = $dateRaw ? Carbon::parse($dateRaw)->format('d m Y') : '';
-                $type = ($entry['type'] ?? '') === 'sale' ? 'مبيع' : 'سداد';
-                $description = (string)($entry['description'] ?? '');
-                $debit = number_format((float)($entry['debit'] ?? 0), 2);
-                $credit = number_format((float)($entry['credit'] ?? 0), 2);
-                $balance = number_format((float)($entry['balance'] ?? 0), 2);
-
-                // Start at margin for each row
-                $pdf->SetX($margins['left'] ?? 0);
-                $pdf->Cell($colWidths[0], 6, $date, 1, 0, 'C');
-                $pdf->Cell($colWidths[1], 6, $type, 1, 0, 'C');
-                $pdf->Cell($colWidths[2], 6, $description, 1, 0, 'R');
-                $pdf->Cell($colWidths[3], 6, $debit, 1, 0, 'R');
-                $pdf->Cell($colWidths[4], 6, $credit, 1, 0, 'R');
-                $pdf->Cell($colWidths[5], 6, $balance, 1, 1, 'R');
-            }
+            $service = new ClientLedgerPdfService('P', 'mm', 'A4', true, 'UTF-8', false);
+            $pdfContent = $service->generate($client);
 
             $fileName = 'client_ledger_' . $client->id . '_' . now()->format('Ymd') . '.pdf';
-            $pdfContent = $pdf->Output($fileName, 'S');
 
             return response($pdfContent, 200)
                 ->header('Content-Type', 'application/pdf')
@@ -247,11 +168,11 @@ class ClientLedgerController extends Controller
         } catch (\Throwable $e) {
             Log::error('Failed to generate client ledger PDF', [
                 'client_id' => $client->id,
-                'error' => $e->getMessage(),
+                'error'     => $e->getMessage(),
             ]);
             return response()->json([
                 'message' => 'Failed to generate ledger PDF',
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
