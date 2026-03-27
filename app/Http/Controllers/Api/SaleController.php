@@ -14,6 +14,7 @@ use Illuminate\Http\Response;
 use App\Http\Resources\SaleResource;
 use App\Services\Pdf\MyCustomTCPDF;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -278,6 +279,10 @@ class SaleController extends Controller
      */
     public function addPayment(Request $request, Sale $sale)
     {
+        if (!Auth::user()->can('سداد')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $validatedData = $request->validate([
             'payments' => 'required|array',
             'payments.*.method' => 'nullable|string|in:cash,bankak,fawry,ocash',
@@ -422,6 +427,10 @@ class SaleController extends Controller
 
     public function updateDiscount(Request $request, Sale $sale)
     {
+        if (!Auth::user()->can('تخفيض')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $validated = $request->validate([
             'discount_amount' => 'required|numeric|min:0',
             'discount_type' => ['required', Rule::in(['percentage', 'fixed'])],
@@ -497,6 +506,10 @@ class SaleController extends Controller
 
     public function deleteSinglePayment(Sale $sale, $paymentId)
     {
+        if (!Auth::user()->can('الغاء سداد')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         try {
             DB::transaction(function () use ($sale, $paymentId) {
                 // Find and delete the specific payment
@@ -798,6 +811,10 @@ class SaleController extends Controller
 
     public function deleteSaleItem(Request $request, Sale $sale, $saleItemId)
     {
+        if (!Auth::user()->can('حذف منتج مضاف في عمليه بيع')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         try {
             // Find the sale item
             $saleItem = $sale->items()->findOrFail($saleItemId);

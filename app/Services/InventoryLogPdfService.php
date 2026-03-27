@@ -67,33 +67,43 @@ class InventoryLogPdfService
     {
         $pdf->SetFont('dejavusans', 'B', 12);
         $pdf->SetFillColor(240, 240, 240);
-        $pdf->Cell(0, 8, 'Filters Applied:', 0, 1, 'L', true);
-        
+        $pdf->Cell(0, 8, 'الفلاتر المطبقة:', 0, 1, 'R', true);
+
         $pdf->SetFont('dejavusans', '', 10);
         $filterText = [];
-        
+
         if (!empty($filters['start_date'])) {
-            $filterText[] = 'From: ' . $filters['start_date'];
+            $filterText[] = 'من: ' . $filters['start_date'];
         }
         if (!empty($filters['end_date'])) {
-            $filterText[] = 'To: ' . $filters['end_date'];
+            $filterText[] = 'إلى: ' . $filters['end_date'];
         }
         if (!empty($filters['product_id'])) {
             $productName = DB::table('products')->where('id', $filters['product_id'])->value('name');
-            $filterText[] = 'Product: ' . ($productName ?? 'Unknown');
+            $filterText[] = 'المنتج: ' . ($productName ?? 'غير معروف');
+        }
+        if (!empty($filters['warehouse_id'])) {
+            $warehouseName = DB::table('warehouses')->where('id', $filters['warehouse_id'])->value('name');
+            $filterText[] = 'المستودع: ' . ($warehouseName ?? 'غير معروف');
         }
         if (!empty($filters['type'])) {
-            $filterText[] = 'Type: ' . ucfirst($filters['type']);
+            $typeLabels = [
+                'purchase' => 'شراء',
+                'sale' => 'بيع',
+                'adjustment' => 'تعديل مخزني',
+                'requisition_issue' => 'صرف طلبية',
+            ];
+            $filterText[] = 'النوع: ' . ($typeLabels[$filters['type']] ?? $filters['type']);
         }
         if (!empty($filters['search'])) {
-            $filterText[] = 'Search: ' . $filters['search'];
+            $filterText[] = 'بحث: ' . $filters['search'];
         }
-        
+
         if (empty($filterText)) {
-            $filterText[] = 'All records';
+            $filterText[] = 'جميع السجلات';
         }
-        
-        $pdf->Cell(0, 6, implode(' | ', $filterText), 0, 1, 'L');
+
+        $pdf->Cell(0, 6, implode('  |  ', $filterText), 0, 1, 'R');
         $pdf->Ln(5);
     }
     
@@ -207,6 +217,7 @@ class InventoryLogPdfService
         $startDate = isset($filters['start_date']) ? Carbon::parse($filters['start_date'])->startOfDay() : null;
         $endDate = isset($filters['end_date']) ? Carbon::parse($filters['end_date'])->endOfDay() : null;
         $productId = $filters['product_id'] ?? null;
+        $warehouseId = $filters['warehouse_id'] ?? null;
         $type = $filters['type'] ?? null;
         $search = $filters['search'] ?? null;
 
@@ -303,6 +314,9 @@ class InventoryLogPdfService
             }
             if ($productId) {
                 $query->where('prod.id', $productId);
+            }
+            if ($warehouseId) {
+                $query->where('w.id', $warehouseId);
             }
             if ($search) {
                 $query->where(function($q) use ($search) {

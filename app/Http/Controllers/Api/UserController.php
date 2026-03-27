@@ -18,7 +18,6 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests; // For policy checks
 
 class UserController extends Controller
 {
-    use AuthorizesRequests; // Use trait for $this->authorize()
 
     /**
      * Display a listing of the users.
@@ -26,7 +25,6 @@ class UserController extends Controller
     public function index(Request $request)
     {
         // Check authorization using UserPolicy@viewAny
-        $this->authorize('viewAny', User::class);
 
         $query = User::with(['roles:id,name', 'warehouse:id,name']); // Eager load roles (only id and name)
 
@@ -56,7 +54,6 @@ class UserController extends Controller
     public function store(Request $request)
     {
         // Check authorization using UserPolicy@create
-        $this->authorize('create', User::class);
 
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
@@ -102,7 +99,6 @@ class UserController extends Controller
     public function show(User $user) // Route model binding
     {
         // Check authorization using UserPolicy@view
-        $this->authorize('view', $user);
 
         $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name'); // Load roles and permissions for detail view
         return new UserResource($user);
@@ -115,7 +111,6 @@ class UserController extends Controller
     public function update(Request $request, User $user)
     {
         // Check authorization using UserPolicy@update
-        $this->authorize('update', $user);
 
         $validatedData = $request->validate([
             'name' => 'sometimes|required|string|max:255',
@@ -165,7 +160,6 @@ class UserController extends Controller
     public function destroy(Request $request, User $user) // Added Request for authenticated user check
     {
         // Check authorization using UserPolicy@delete
-        $this->authorize('delete', $user);
 
         // Prevent user from deleting themselves
         if ($request->user()->id === $user->id) {
@@ -202,87 +196,4 @@ class UserController extends Controller
         ]);
     }
 
-    /**
-     * Get navigation items structure for permissions management
-     */
-    public function getNavigationItems(Request $request)
-    {
-        // Check authorization
-        $this->authorize('viewAny', User::class);
-
-        // Define navigation structure matching current frontend routes/navItems.ts
-        $navigationItems = [
-            [
-                'category' => 'لوحة التحكم ',
-                'items' => [
-                    ['route' => '/dashboard', 'label' =>  ' لوحة التحكم']
-                ]
-            ],
-            [
-                'category' => 'المبيعات',
-                'items' => [
-                    ['route' => '/sales/pos-blank', 'label' => 'المعرض'],
-                    ['route' => '/sales/returns', 'label' => 'مردودات المبيعات'],
-                    ['route' => '/clients', 'label' => 'العملاء']
-                ]
-            ],
-            [
-                'category' => 'المخزون',
-                'items' => [
-                    ['route' => '/products', 'label' => 'المعدات'],
-                    ['route' => '/inventory/adjustments', 'label' => 'تعديلات المخزون'],
-                    ['route' => '/inventory/transfers', 'label' => 'تحويل المخزون'],
-                    ['route' => '/inventory/counts', 'label' => 'جرد المخزون']
-                ]
-            ],
-            [
-                'category' => 'الواردات',
-                'items' => [
-                    ['route' => '/suppliers', 'label' => 'الموردون'],
-                    ['route' => '/purchases', 'label' => 'قائمة المشتريات']
-                ]
-            ],
-            [
-                'category' => 'التقارير',
-                'items' => [
-                    ['route' => '/reports/sales', 'label' => 'تقرير المبيعات'],
-                    ['route' => '/reports/sale-returns', 'label' => 'تقرير مردودات المبيعات'],
-                    // ['route' => '/reports/purchases', 'label' => 'تقرير المشتريات'],
-                    // ['route' => '/reports/suppliers-summary', 'label' => 'ملخص الموردين'],
-                    ['route' => '/reports/inventory-log', 'label' => 'سجل المخزون'],
-                    // ['route' => '/reports/sales-discounts', 'label' => 'المبيعات المخفضة'],
-                    ['route' => '/reports/daily-income', 'label' => 'تقرير المبيعات الشهري'],
-                    ['route' => '/reports/monthly-expenses', 'label' => 'تقرير المصروفات الشهرية'],
-                    // ['route' => '/reports/profit-loss', 'label' => 'الأرباح والخسائر'],
-                    ['route' => '/reports/best-selling-products', 'label' => 'المنتجات الأكثر مبيعاً'],
-                    ['route' => '/reports/stagnant-products', 'label' => 'المنتجات الراكدة'],
-                    ['route' => '/reports/low-stock-products', 'label' => 'المنتجات منخفضة المخزون'],
-                    ['route' => '/reports/shortages', 'label' => 'الطلبية (النواقص)'],
-                    // ['route' => '/reports/moved-expired-products', 'label' => 'المنتجات التالفة/المنتهية'],
-                    ['route' => '/reports/monthly-shifts', 'label' => 'تقرير الورديات '],
-                ]
-            ],
-            [
-                'category' => 'الإدارة',
-                'items' => [
-                    ['route' => '/admin/users', 'label' => 'المستخدمون'],
-                    ['route' => '/admin/roles', 'label' => 'الأدوار'],
-                    ['route' => '/admin/expenses', 'label' => 'المصروفات'],
-                    ['route' => '/admin/settings', 'label' => 'الإعدادات'],
-                    ['route' => '/admin/system', 'label' => 'النظام'],
-                    ['route' => '/admin/backups', 'label' => 'النسخ الاحتياطي'],
-                    ['route' => '/admin/warehouses', 'label' => 'المخازن'],
-                    ['route' => '/admin/whatsapp-schedulers', 'label' => 'جدولة واتساب'],
-                    ['route' => '/admin/whatsapp-test', 'label' => 'تجربة الواتساب'],
-                    ['route' => '/admin/inventory/requisitions/request', 'label' => 'طلب مخزون'],
-                    ['route' => '/admin/inventory/requisitions', 'label' => 'طلبات المخزون'],
-                    ['route' => '/admin/idb-manager', 'label' => 'إدارة DB المحلية']
-                ]
-            ]
-        ];
-
-        return response()->json([
-            'data' => $navigationItems
-        ]);
-    }
 }

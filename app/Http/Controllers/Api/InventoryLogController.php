@@ -215,6 +215,7 @@ class InventoryLogController extends Controller
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
             'product_id' => 'nullable|integer|exists:products,id',
+            'warehouse_id' => 'nullable|integer|exists:warehouses,id',
             'type' => 'nullable|string|in:purchase,sale,adjustment,requisition_issue',
             'search' => 'nullable|string|max:255'
         ]);

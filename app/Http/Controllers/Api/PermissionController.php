@@ -17,9 +17,7 @@ class PermissionController extends Controller
     public function index(Request $request)
     {
         // Authorization: Ensure only users who can manage roles/permissions can see this list
-        if ($request->user()->cannot('manage-roles') && $request->user()->cannot('manage-permissions')) {
-            abort(403, 'This action is unauthorized.');
-        }
+      
         // Or use a dedicated permission like 'view-permissions'
 
         $permissions = Permission::select(['id', 'name'])

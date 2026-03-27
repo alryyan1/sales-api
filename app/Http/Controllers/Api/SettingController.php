@@ -23,7 +23,6 @@ class SettingController extends Controller
      */
     public function index(Request $request)
     {
-        $this->checkAuthorization('manage-settings'); // Policy or Gate check
         $service = new SettingsService();
         $settings = $service->getAll();
         return response()->json(['data' => $settings]);
@@ -46,20 +45,9 @@ class SettingController extends Controller
         $isUpdatingOtherSettings = count(array_diff(array_keys($validated), ['usd_to_sdg_factor'])) > 0;
 
         // If updating general settings (anything except/besides dollar rate)
-        if ($isUpdatingOtherSettings) {
-            // Require general update-settings or the older manage-settings
-            if (!Auth::user()->can('update-settings') && !Auth::user()->can('manage-settings')) {
-                abort(403, 'This action is unauthorized.');
-            }
-        }
-
+      
         // If updating dollar rate
-        if ($isUpdatingDollarRate) {
-            // Require specific permission or general update permisison
-            if (!Auth::user()->can('update-dollar-rate') && !Auth::user()->can('update-settings') && !Auth::user()->can('manage-settings')) {
-                abort(403, 'You do not have permission to update the dollar rate.');
-            }
-        }
+     
 
         $newSettings = $service->update($validated);
         return response()->json([
@@ -73,7 +61,6 @@ class SettingController extends Controller
      */
     public function uploadLogo(Request $request)
     {
-        $this->checkAuthorization('manage-settings');
 
         $request->validate([
             'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:2048'],
@@ -100,7 +87,6 @@ class SettingController extends Controller
      */
     public function uploadHeader(Request $request)
     {
-        $this->checkAuthorization('manage-settings');
 
         $request->validate([
             'header' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:5120'], // Allow larger size for header

@@ -22,7 +22,6 @@ class RoleController extends Controller
      */
     public function index(Request $request)
     {
-        $this->authorize('viewAny', Role::class); // Assumes RolePolicy exists or checks manage-roles
 
         // Eager load permission count or specific permissions if needed for list display
         $roles = Role::with('permissions')->withCount(['permissions', 'users'])->orderBy('name')->paginate($request->input('per_page', 20));
@@ -36,7 +35,6 @@ class RoleController extends Controller
      */
     public function store(Request $request)
     {
-        $this->authorize('create', Role::class);
 
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:100', Rule::unique('roles', 'name')],
@@ -66,7 +64,6 @@ class RoleController extends Controller
      */
     public function show(Role $role) // Route model binding
     {
-        $this->authorize('view', $role);
 
         $role->load('permissions:id,name'); // Eager load permissions
         return new RoleResource($role);
@@ -77,7 +74,6 @@ class RoleController extends Controller
      */
     public function update(Request $request, Role $role)
     {
-        $this->authorize('update', $role);
 
         // Prevent editing critical roles maybe?
         if (in_array($role->name, ['admin'])) { // Example: Protect 'admin' role
@@ -113,7 +109,6 @@ class RoleController extends Controller
      */
     public function destroy(Role $role)
     {
-        $this->authorize('delete', $role);
 
         // Prevent deleting critical roles
         if (in_array($role->name, ['admin'])) { // Example

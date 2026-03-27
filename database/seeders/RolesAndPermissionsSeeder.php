@@ -61,11 +61,14 @@ class RolesAndPermissionsSeeder extends Seeder
     {
         $permissions = [
             // Core POS / Cashier Permissions
-            'update-dollar-rate',
-            // Sidebar Navigation Permissions (view-*)
-            // Derived from navItems.ts and common access needs
 
-            // Main Navigation
+            // POS Permissions
+            'سداد',
+            'الغاء سداد',
+            'تخفيض',
+            'حذف منتج مضاف في عمليه بيع',
+            'فتح ورديه',
+            'اغلاق ورديه',
         ];
 
         foreach ($permissions as $permission) {

@@ -197,6 +197,10 @@ class ShiftController extends Controller
      */
     public function open(Request $request)
     {
+        if (!Auth::user()->can('فتح ورديه')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $user = $request->user();
 
         // Prevent opening multiple shifts
@@ -246,6 +250,10 @@ class ShiftController extends Controller
      */
     public function close(Request $request, \App\Services\WhatsAppCloudApiService $whatsapp, \App\Services\AirtelSmsService $sms)
     {
+        if (!Auth::user()->can('اغلاق ورديه')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $user = $request->user();
 
         $shift = Shift::with(['sales.payments', 'saleReturns.items', 'expenses'])
