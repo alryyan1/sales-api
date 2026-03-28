@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany; // Import HasMany
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
@@ -66,9 +67,20 @@ class Supplier extends Model
         'email',
         'phone',
         'address',
-        // 'website', // Add if you included these fields
-        // 'notes',
+        'client_id',
     ];
+
+    protected $appends = ['is_client'];
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(Client::class);
+    }
+
+    public function getIsClientAttribute(): bool
+    {
+        return $this->client_id !== null;
+    }
 
     /**
      * Get the purchases made from this supplier.

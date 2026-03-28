@@ -21,8 +21,8 @@ class SupplierResource extends JsonResource
             'email' => $this->email,
             'phone' => $this->phone,
             'address' => $this->address,
-            // 'website' => $this->website, // Add if needed
-            // 'notes' => $this->notes,   // Add if needed
+            'client_id' => $this->client_id,
+            'is_client' => $this->is_client,
             'created_at' => $this->created_at->toISOString(),
             'updated_at' => $this->updated_at->toISOString(),
 

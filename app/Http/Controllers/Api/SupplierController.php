@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Client;
 use App\Models\Supplier; // Use Supplier model
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\SupplierResource; // Use SupplierResource
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule; // For unique rule on update
 
@@ -93,18 +95,35 @@ class SupplierController extends Controller
      */
     public function store(Request $request)
     {
-        $validatedData = $request->validate([
+        $validated = $request->validate([
             'name' => 'required|string|max:255',
             'contact_person' => 'nullable|string|max:255',
-            'email' => 'nullable|string|email|max:255|unique:suppliers,email', // Unique in suppliers table
+            'email' => 'nullable|string|email|max:255|unique:suppliers,email',
             'phone' => 'nullable|string|max:30',
             'address' => 'nullable|string|max:65535',
-            // Add validation for other fields if needed
+            'is_client' => 'sometimes|boolean',
         ]);
 
-        $supplier = Supplier::create($validatedData);
+        $isClient = $request->boolean('is_client');
+        $supplierData = array_diff_key($validated, ['is_client' => null]);
 
-        // Return created resource
+        $supplier = DB::transaction(function () use ($isClient, $supplierData) {
+            $supplier = Supplier::create($supplierData);
+
+            if ($isClient) {
+                $emailInUse = $supplier->email && Client::where('email', $supplier->email)->exists();
+                $client = Client::create([
+                    'name'    => $supplier->name,
+                    'email'   => $emailInUse ? null : $supplier->email,
+                    'phone'   => $supplier->phone,
+                    'address' => $supplier->address,
+                ]);
+                $supplier->update(['client_id' => $client->id]);
+            }
+
+            return $supplier->fresh();
+        });
+
         return response()->json(['supplier' => new SupplierResource($supplier)], Response::HTTP_CREATED);
     }
 
@@ -176,7 +195,7 @@ class SupplierController extends Controller
      */
     public function update(Request $request, Supplier $supplier) // Route model binding
     {
-        $validatedData = $request->validate([
+        $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'contact_person' => 'sometimes|nullable|string|max:255',
             'email' => [
@@ -185,17 +204,46 @@ class SupplierController extends Controller
                 'string',
                 'email',
                 'max:255',
-                Rule::unique('suppliers')->ignore($supplier->id), // Ignore self on update
+                Rule::unique('suppliers')->ignore($supplier->id),
             ],
             'phone' => 'sometimes|nullable|string|max:30',
             'address' => 'sometimes|nullable|string|max:65535',
-            // Add validation for other fields if needed
+            'is_client' => 'sometimes|boolean',
         ]);
 
-        $supplier->update($validatedData);
+        $wantsClient = $request->boolean('is_client');
+        $supplierData = array_diff_key($validated, ['is_client' => null]);
 
-        // Return updated resource (use fresh() to get updated timestamps)
-        return response()->json(['supplier' => new SupplierResource($supplier->fresh())]);
+        $supplier = DB::transaction(function () use ($wantsClient, $supplierData, $supplier) {
+            $supplier->update($supplierData);
+            $supplier->refresh();
+
+            if ($wantsClient && !$supplier->client_id) {
+                $emailInUse = $supplier->email && Client::where('email', $supplier->email)->exists();
+                $client = Client::create([
+                    'name'    => $supplier->name,
+                    'email'   => $emailInUse ? null : $supplier->email,
+                    'phone'   => $supplier->phone,
+                    'address' => $supplier->address,
+                ]);
+                $supplier->update(['client_id' => $client->id]);
+
+            } elseif (!$wantsClient && $supplier->client_id) {
+                $supplier->update(['client_id' => null]);
+
+            } elseif ($supplier->client_id) {
+                $supplier->client()->update([
+                    'name'    => $supplier->name,
+                    'email'   => $supplier->email,
+                    'phone'   => $supplier->phone,
+                    'address' => $supplier->address,
+                ]);
+            }
+
+            return $supplier->fresh();
+        });
+
+        return response()->json(['supplier' => new SupplierResource($supplier)]);
     }
 
     /**
