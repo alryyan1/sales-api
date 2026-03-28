@@ -13,7 +13,6 @@ use App\Models\Payment;
 use App\Models\Product;
 use App\Models\PurchaseItem;
 use App\Models\SaleItem;
-use App\Services\Pdf\MyCustomTCPDF;
 use App\Services\DailySalesPdfService;
 use App\Services\InventoryPdfService;
 use App\Services\SalesReportPdfService;

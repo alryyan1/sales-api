@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Purchase;
+use App\Services\Pdf\PdfHeaderRenderer;
 use TCPDF;
 use Exception;
 use Illuminate\Support\Facades\Log;
@@ -24,6 +25,8 @@ class PurchasePdfService
      * @var TCPDF PDF instance
      */
     private $pdf;
+
+    private PdfHeaderRenderer $renderer;
 
     // ============================================
     // COLOR SCHEME CONSTANTS
@@ -99,11 +102,13 @@ class PurchasePdfService
             // Load all required relationships
             $this->loadPurchaseRelationships($purchase);
 
-            // Initialize PDF instance
+            // Initialize renderer and PDF instance
+            $this->renderer = new PdfHeaderRenderer('purchase');
             $this->initializePdf($purchase);
 
             // Add first page
             $this->pdf->AddPage();
+            $this->renderer->render($this->pdf);
 
             // Build the professional report
             $this->buildReport($purchase);
@@ -151,6 +156,7 @@ class PurchasePdfService
     {
         // Create new PDF instance (Portrait, mm, A4, Unicode support)
         $this->pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $this->pdf->setPrintHeader(false);
 
         // Set document metadata
         $this->pdf->SetCreator('Sales Management System');
@@ -159,19 +165,18 @@ class PurchasePdfService
         $this->pdf->SetSubject('تفاصيل أمر الشراء');
         $this->pdf->SetKeywords('purchase, order, invoice, ' . $purchase->id);
 
-        // Disable default header and footer
-        $this->pdf->setPrintHeader(false);
+        // Disable default footer
         $this->pdf->setPrintFooter(false);
 
         // Set page margins
-        $this->pdf->SetMargins(self::MARGIN, self::MARGIN, self::MARGIN);
+        $this->pdf->SetMargins(self::MARGIN, $this->renderer->getTopMargin(), self::MARGIN);
         $this->pdf->SetAutoPageBreak(true, self::MARGIN + 5);
 
         // Set default font
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
 
         // Enable RTL (Right-to-Left) for Arabic
-        $this->pdf->setRTL(true);
+        $this->pdf->setRTL(false);
     }
 
     /**

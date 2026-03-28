@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Shift;
+use App\Services\Pdf\PdfHeaderRenderer;
 use TCPDF;
 
 class ShiftSoldItemsPdfService
@@ -14,13 +15,16 @@ class ShiftSoldItemsPdfService
     private const FONT_MAIN = 'arial';
 
     private string $companyName;
+    private PdfHeaderRenderer $renderer;
 
     public function generate(Shift $shift): string
     {
         $this->initializeSettings();
+        $this->renderer = new PdfHeaderRenderer('shift_sold_items');
         $pdf = $this->initializePdf();
 
         $pdf->AddPage();
+        $this->renderer->render($pdf);
         $this->renderHeader($pdf, $shift);
 
         // Aggregate sold items from all sales in this shift
@@ -69,22 +73,20 @@ class ShiftSoldItemsPdfService
     private function initializePdf(): TCPDF
     {
         $pdf = new TCPDF(self::ORIENTATION, self::UNIT, self::FORMAT, true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
         $pdf->SetCreator('System');
         $pdf->SetAuthor($this->companyName);
         $pdf->SetTitle('تقرير الأصناف المباعة للوردية');
-        $pdf->SetMargins(self::MARGIN, self::MARGIN, self::MARGIN);
+        $pdf->SetMargins(self::MARGIN, $this->renderer->getTopMargin(), self::MARGIN);
         $pdf->SetAutoPageBreak(true, 15);
-        $pdf->setRTL(true);
+        $pdf->setRTL(false);
         $pdf->SetFont(self::FONT_MAIN, '', 10);
         return $pdf;
     }
 
     private function renderHeader(TCPDF $pdf, Shift $shift): void
     {
-        $pdf->SetFont(self::FONT_MAIN, 'B', 16);
-        $pdf->Cell(0, 8, $this->companyName, 0, 1, 'R');
-        $pdf->Ln(5);
-
         $pdf->SetFont(self::FONT_MAIN, 'B', 14);
         $pdf->Cell(0, 8, 'تقرير الأصناف المباعة - وردية رقم #' . $shift->id, 0, 1, 'C');
 
@@ -129,6 +131,7 @@ class ShiftSoldItemsPdfService
         foreach ($items as $item) {
             if ($pdf->GetY() > 260) {
                 $pdf->AddPage();
+                $this->renderer->render($pdf);
                 $pdf->SetFont(self::FONT_MAIN, 'B', 10);
                 $pdf->SetFillColor(230, 230, 230);
                 foreach ($cols as $col) {

@@ -12,7 +12,8 @@ use App\Events\SaleCreated;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\SaleResource;
-use App\Services\Pdf\MyCustomTCPDF;
+use App\Services\Pdf\PdfHeaderRenderer;
+use TCPDF;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -925,60 +926,39 @@ class SaleController extends Controller
             'payments' // Load payments made against this invoice
         ]);
 
-        // --- Create PDF using your custom TCPDF class ---
-        // P for Portrait, L for Landscape
-        $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $renderer = new PdfHeaderRenderer('invoice');
 
         // --- Company & Invoice Info (from config and Sale) ---
         $settings = (new \App\Services\SettingsService())->getAll();
-        $companyName = $settings['company_name'] ?? 'Your Company LLC';
-        $companyAddress = $settings['company_address'] ?? '123 Business Rd, Suite 404, City, Country';
-        $companyPhone = $settings['company_phone'] ?? 'N/A';
-        $companyEmail = $settings['company_email'] ?? 'N/A';
         $invoicePrefix = $settings['invoice_prefix'] ?? 'INV-';
 
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->SetMargins(15, $renderer->getTopMargin() + 5, 15);
+        $pdf->SetAutoPageBreak(true, 15);
 
         // --- Set PDF Metadata ---
         $pdf->SetTitle('فاتورة مبيعات - ' . $sale->id);
         $pdf->SetSubject('فاتورة مبيعات');
-        // SetAuthor is done in MyCustomTCPDF constructor
 
         $pdf->AddPage();
-        $pdf->setRTL(true); // Ensure RTL for the content
+        $pdf->setRTL(false);
+        $renderer->render($pdf);
 
         // --- Invoice Header ---
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
-        $pdf->Cell(0, 12, 'فاتورة مبيعات', 0, 1, 'C'); // Sales Invoice
+        $pdf->SetFont('arial', 'B', 16);
+        $pdf->Cell(0, 8, 'فاتورة مبيعات', 0, 1, 'C');
+        $pdf->SetFont('arial', '', 9);
+        $pdf->Cell(0, 6, 'رقم الفاتورة: ' . ($invoicePrefix . $sale->id), 0, 1, 'C');
+        $pdf->Cell(0, 5, 'تاريخ الفاتورة: ' . Carbon::parse($sale->sale_date)->format('Y-m-d'), 0, 1, 'C');
         $pdf->Ln(5);
-
-        // Company Details (Right Side in RTL)
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
-        $pdf->Cell(90, 6, $companyName, 0, 0, 'R'); // Width 90mm, align right
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
-        $pdf->Cell(0, 6, 'رقم الفاتورة: ' . ($invoicePrefix . $sale->id), 0, 1, 'L'); // Align left
-
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
-        $pdf->MultiCell(90, 5, $companyAddress, 0, 'R', 0, 0, null, null, true, 0, false, true, 0, 'T');
-        $pdf->Cell(0, 5, 'تاريخ الفاتورة: ' . Carbon::parse($sale->sale_date)->format('Y-m-d'), 0, 1, 'L');
-
-        $currentY = $pdf->GetY(); // Store Y after address
-        $pdf->SetXY(15, $currentY); // Reset X for next line on right, use stored Y
-        $pdf->Cell(90, 5, 'الهاتف: ' . $companyPhone, 0, 0, 'R');
-        $pdf->SetXY(105, $currentY); // Move X for next cell on left, use stored Y
-        $pdf->Cell(0, 5, 'تاريخ الاستحقاق: ' . Carbon::parse($sale->sale_date)->format('Y-m-d'), 0, 1, 'L'); // Assuming due date is sale date for now
-
-        $currentY = $pdf->GetY();
-        $pdf->SetXY(15, $currentY);
-        $pdf->Cell(90, 5, 'البريد الإلكتروني: ' . $companyEmail, 0, 0, 'R');
-        // Optional: VAT Number if applicable
-        // $pdf->Cell(0, 5, 'الرقم الضريبي: ' . config('app_settings.vat_number', 'N/A'), 0, 1, 'L');
-        $pdf->Ln(8);
 
 
         // --- Bill To (Client Details) ---
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(0, 7, 'فاتورة إلى:', 0, 1, 'R'); // "Bill To:"
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
+        $pdf->SetFont('arial', '', 9);
         if ($sale->client) {
             $pdf->Cell(0, 5, $sale->client->name, 0, 1, 'R');
             if ($sale->client->address) {
@@ -996,7 +976,7 @@ class SaleController extends Controller
         $pdf->Ln(8);
 
         // --- Items Table ---
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
+        $pdf->SetFont('arial', 'B', 9);
         $pdf->SetFillColor(220, 220, 220); // Header fill color
         $pdf->SetTextColor(0);
         $pdf->SetDrawColor(128, 128, 128);
@@ -1012,7 +992,7 @@ class SaleController extends Controller
         }
         $pdf->Ln();
 
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
+        $pdf->SetFont('arial', '', 8);
         $pdf->SetFillColor(245, 245, 245); // Row fill
         $fill = false;
         foreach ($sale->items as $item) {
@@ -1052,20 +1032,20 @@ class SaleController extends Controller
         $netTotal = $subtotalValue;
         $due = max(0, $netTotal - $paidValue);
 
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
+        $pdf->SetFont('arial', '', 9);
         $pdf->Cell($col1Width, 6, 'المجموع الفرعي:', 'LTR', 0, 'L', false);
         $pdf->Cell($col2Width, 6, number_format($subtotalValue, 0), 'TR', 1, 'R', false);
 
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
         $pdf->SetFillColor(220, 220, 220);
         $pdf->Cell($col1Width, 7, 'الإجمالي المستحق:', 'LTRB', 0, 'L', true);
         $pdf->Cell($col2Width, 7, number_format($netTotal, 0), 'TRB', 1, 'R', true);
 
-        $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
+        $pdf->SetFont('arial', '', 9);
         $pdf->Cell($col1Width, 6, 'المبلغ المدفوع:', 'LR', 0, 'L', false);
         $pdf->Cell($col2Width, 6, number_format($paidValue, 0), 'R', 1, 'R', false);
 
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
+        $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($col1Width, 7, 'المبلغ المتبقي:', 'LTRB', 0, 'L', false);
         $pdf->Cell($col2Width, 7, number_format($due, 0), 'TRB', 1, 'R', false);
 
@@ -1073,9 +1053,9 @@ class SaleController extends Controller
         // --- Payments Information ---
         if ($sale->payments && $sale->payments->count() > 0) {
             $pdf->Ln(6);
-            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 10);
+            $pdf->SetFont('arial', 'B', 10);
             $pdf->Cell(0, 7, 'تفاصيل الدفع:', 0, 1, 'R');
-            $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
+            $pdf->SetFont('arial', '', 8);
             foreach ($sale->payments as $payment) {
                 $paymentText = "طريقة الدفع: " . config('app_settings.payment_methods.' . $payment->method, $payment->method); // Assuming payment_methods in config
                 $paymentText .= "  |  المبلغ: " . number_format((float) $payment->amount, 0);
@@ -1090,13 +1070,13 @@ class SaleController extends Controller
         // --- Notes / Terms & Conditions ---
         if ($sale->notes) {
             $pdf->Ln(6);
-            $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 9);
+            $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell(0, 6, 'ملاحظات:', 0, 1, 'R');
-            $pdf->SetFont($pdf->getDefaultFontFamily(), '', 8);
+            $pdf->SetFont('arial', '', 8);
             $pdf->MultiCell(0, 5, $sale->notes, 0, 'R', 0, 1);
         }
         $pdf->Ln(10);
-        $pdf->SetFont($pdf->getDefaultFontFamily(), 'I', 8);
+        $pdf->SetFont('arial', 'I', 8);
         $terms = $settings['invoice_terms'] ?? 'شكراً لتعاملكم معنا. تطبق الشروط والأحكام.';
         $pdf->MultiCell(0, 5, $terms, 0, 'C', 0, 1);
 
@@ -1130,7 +1110,7 @@ class SaleController extends Controller
 
             // Log::info("Generating thermal PDF for Sale {$sale->id}. Height: {$pageHeightMm}mm");
 
-            $pdf = new MyCustomTCPDF('P', 'mm', [80, $pageHeightMm], true, 'UTF-8', false); // Custom page size [width, height]
+            $pdf = new TCPDF('P', 'mm', [80, $pageHeightMm], true, 'UTF-8', false); // Custom page size [width, height]
             // $pdf->setThermalDefaults(80, 250); // Or use your preset method
 
             $pdf->setPrintHeader(false);
@@ -1138,7 +1118,7 @@ class SaleController extends Controller
             $pdf->SetMargins(4, 5, 4); // L, T, R
             $pdf->SetAutoPageBreak(TRUE, 5); // Bottom margin
             $pdf->AddPage();
-            $pdf->setRTL(true); // Ensure RTL for Arabic content
+            $pdf->setRTL(false); // Ensure RTL for Arabic content
 
             // --- Company Info (Simplified for Thermal) ---
             $settingsThermal = (new \App\Services\SettingsService())->getAll();

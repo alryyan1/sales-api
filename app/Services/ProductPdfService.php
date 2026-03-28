@@ -4,8 +4,9 @@ namespace App\Services;
 
 use App\Models\Product;
 use App\Models\PurchaseItem;
-use App\Services\Pdf\MyCustomTCPDF;
+use App\Services\Pdf\PdfHeaderRenderer;
 use Illuminate\Support\Facades\DB;
+use TCPDF;
 
 class ProductPdfService
 {
@@ -59,16 +60,21 @@ class ProductPdfService
         // Get all products (no pagination for PDF)
         $products = $query->orderBy('name')->get();
 
-        // Create PDF using the custom TCPDF class
-        $pdf = new MyCustomTCPDF('L', 'mm', 'A4', true, 'UTF-8', false); // Landscape for better table fit
+        // Create PDF using TCPDF with PdfHeaderRenderer
+        $renderer = new PdfHeaderRenderer('product');
+        $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false); // Landscape for better table fit
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
 
         // Set document information
         $pdf->SetTitle('Products Report');
         $pdf->SetSubject('Products Report');
+        $pdf->SetMargins(15, $renderer->getTopMargin(), 15);
         $pdf->SetAutoPageBreak(true, 15);
 
         // Add a page
         $pdf->AddPage();
+        $renderer->render($pdf);
 
         // Generate PDF content using cells
         $this->generatePdfContent($pdf, $products, $filters);
@@ -80,12 +86,12 @@ class ProductPdfService
     /**
      * Generate PDF content using TCPDF cells
      *
-     * @param MyCustomTCPDF $pdf
+     * @param TCPDF $pdf
      * @param \Illuminate\Database\Eloquent\Collection $products
      * @param array $filters
      * @return void
      */
-    private function generatePdfContent($pdf, $products, array $filters): void
+    private function generatePdfContent(TCPDF $pdf, $products, array $filters): void
     {
         $totalProducts = $products->count();
         $totalInStock = $products->where('stock_quantity', '>', 0)->count();

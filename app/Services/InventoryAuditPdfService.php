@@ -5,8 +5,9 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\Category;
 use App\Models\Warehouse;
-use App\Services\Pdf\MyCustomTCPDF;
+use App\Services\Pdf\PdfHeaderRenderer;
 use Illuminate\Support\Facades\DB;
+use TCPDF;
 
 class InventoryAuditPdfService
 {
@@ -38,22 +39,19 @@ class InventoryAuditPdfService
             $query->orderBy('name');
         }, 'products.sellableUnit'])->get();
 
-        // Create PDF - A5 size
-        $pdf = new MyCustomTCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
+        // Create PDF - A4 Landscape
+        $renderer = new PdfHeaderRenderer('inventory_audit');
+        $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
         $pdf->SetTitle('محضر حصر كميات');
-        $pdf->setPrintHeader(false); // Custom header in the body
-        $pdf->SetMargins(5, 5, 5); // Smaller margins for A5
+        $pdf->SetMargins(5, $renderer->getTopMargin(), 5);
         $pdf->SetAutoPageBreak(true, 10);
         $pdf->AddPage();
-        $pdf->setRTL(true);
+        $renderer->render($pdf);
+        $pdf->setRTL(false);
 
         // Header Section
-        $pdf->SetFont('arial', 'B', 12);
-        $pdf->Cell(0, 7, 'بسم الله الرحمن الرحيم', 0, 1, 'C');
-        $pdf->SetFont('arial', 'B', 14);
-        $pdf->Cell(0, 8, 'شركة أوقر للإستثمار والإنتاج الغذائي المحدودة', 0, 1, 'C');
-        $pdf->Ln(2);
-        
         $pdf->SetFont('arial', 'B', 10);
         $whNames = $warehouses->pluck('name')->implode(' + ');
         $reportTitle = 'محضر حصر بكميات بضائع الطاقة الشمسية الموجود بمخازن الشركة ( ' . $whNames . ' ) بتاريخ ' . now()->format('d/m/Y') . 'م';
@@ -131,6 +129,7 @@ class InventoryAuditPdfService
             foreach ($products as $index => $product) {
                 if ($pdf->GetY() + 8 > $pdf->getPageHeight() - 10) {
                      $pdf->AddPage();
+                     $renderer->render($pdf);
                      $startY = $pdf->GetY();
                 }
 

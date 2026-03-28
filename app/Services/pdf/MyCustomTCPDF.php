@@ -4,37 +4,45 @@ namespace App\Services\Pdf;
 
 use TCPDF; // Directly use the base TCPDF class
 
-// Define K_PATH_MAIN, K_PATH_URL, K_PATH_FONTS, K_PATH_IMAGES if not already defined globally or by TCPDF config
-// This is often needed when using TCPDF outside its standard integration in some frameworks.
-// However, Composer's autoloading and TCPDF's internal path resolution might handle some of these.
-// Test without first, add if you get "constant not defined" errors.
-// if (!defined('K_PATH_IMAGES')) {
-//     define('K_PATH_IMAGES', public_path('images/pdf_assets/')); // Example for images
-// }
-
 class MyCustomTCPDF extends TCPDF
 {
     protected $companyName;
     protected $companyAddress;
     protected $companyLogoUrl;
+    protected $companyHeaderUrl;
     protected $defaultFontFamily = 'arial'; // Changed to dejavusans for better Arabic support
     protected $defaultFontSize = 10;
     protected $defaultFontBold = 'arial'; // Bold variant for Arabic support
+
+    // Global branding settings
+    protected $globalBrandingType  = 'logo'; // 'logo' | 'header' | 'none'
+    protected $globalLogoPosition  = 'right';
+    protected $globalLogoHeight    = 24;
+    protected $globalLogoWidth     = 24;
+
+    // Per-report overrides (loaded via loadReportSettings)
+    protected $reportSettings = null;
 
     public function __construct($orientation = 'P', $unit = 'mm', $format = 'A4', $unicode = true, $encoding = 'UTF-8', $diskcache = false, $pdfa = false)
     {
         parent::__construct($orientation, $unit, $format, $unicode, $encoding, $diskcache, $pdfa);
 
         $settings = (new \App\Services\SettingsService())->getAll();
-        $this->companyName = $settings['company_name'] ?? 'Your Company';
-        $this->companyAddress = $settings['company_address'] ?? '';
-        $this->companyLogoUrl = $settings['company_logo_url'] ?? null;
+        $this->companyName      = $settings['company_name']       ?? 'Your Company';
+        $this->companyAddress   = $settings['company_address']    ?? '';
+        $this->companyLogoUrl   = $settings['company_logo_url']   ?? null;
+        $this->companyHeaderUrl = $settings['company_header_url'] ?? null;
+
+        $this->globalBrandingType = $settings['invoice_branding_type'] ?? 'logo';
+        $this->globalLogoPosition = $settings['logo_position']         ?? 'right';
+        $this->globalLogoHeight   = (int) ($settings['logo_height']    ?? 24);
+        $this->globalLogoWidth    = (int) ($settings['logo_width']     ?? 24);
 
         $this->SetCreator('Sales Management System');
         $this->SetAuthor($this->companyName);
         $this->SetSubject('Professional Business Report');
         $this->SetKeywords('sales, report, business, management');
-        
+
         // Set header and footer fonts using the default
         $this->setHeaderFont([$this->defaultFontFamily, '', ($this->defaultFontSize + 2)]); // Slightly larger for header
         $this->setFooterFont([$this->defaultFontFamily, 'I', ($this->defaultFontSize - 2)]); // Italic, smaller for footer
@@ -57,38 +65,152 @@ class MyCustomTCPDF extends TCPDF
             'a_meta_charset' => 'UTF-8',
             'a_meta_dir' => 'rtl', // Default direction for document elements
             'a_meta_language' => 'ar', // Document language
-            // 'w_page' => 'صفحة', // Example for internal TCPDF string localization
         ]);
 
         // Set default RTL mode for text. You can toggle it off for specific LTR sections.
-        $this->setRTL(true);
+        $this->setRTL(false);
+    }
+
+    /**
+     * Load per-report branding settings from the database.
+     * Call this right after instantiation in each PDF service.
+     */
+    public function loadReportSettings(string $reportKey): void
+    {
+        $this->reportSettings = \App\Models\PdfReportSetting::where('report_key', $reportKey)->first();
+    }
+
+    /**
+     * Resolve the effective branding type (per-report override or global).
+     */
+    protected function effectiveBrandingType(): string
+    {
+        if ($this->reportSettings && $this->reportSettings->branding_type !== null) {
+            return $this->reportSettings->branding_type;
+        }
+        return $this->globalBrandingType;
+    }
+
+    /**
+     * Resolve the effective logo position.
+     */
+    protected function effectiveLogoPosition(): string
+    {
+        if ($this->reportSettings && $this->reportSettings->logo_position !== null) {
+            return $this->reportSettings->logo_position;
+        }
+        return $this->globalLogoPosition;
+    }
+
+    /**
+     * Resolve the effective logo height (in mm for TCPDF).
+     */
+    protected function effectiveLogoHeight(): int
+    {
+        if ($this->reportSettings && $this->reportSettings->logo_height !== null) {
+            return $this->reportSettings->logo_height;
+        }
+        return $this->globalLogoHeight;
+    }
+
+    /**
+     * Resolve the effective logo width (in mm for TCPDF).
+     */
+    protected function effectiveLogoWidth(): int
+    {
+        if ($this->reportSettings && $this->reportSettings->logo_width !== null) {
+            return $this->reportSettings->logo_width;
+        }
+        return $this->globalLogoWidth;
+    }
+
+    /**
+     * Resolve a filesystem path from a URL (storage URL → absolute path).
+     */
+    protected function resolveImagePath(string $url): ?string
+    {
+        $path = parse_url($url, PHP_URL_PATH) ?: '';
+        if (!$path) return null;
+
+        $storagePos = strpos($path, '/storage/');
+        if ($storagePos !== false) {
+            $relative  = substr($path, $storagePos + strlen('/storage/'));
+            $candidate = public_path('storage/' . ltrim($relative, '/'));
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+        return null;
     }
 
     // Override Header() method
     public function Header()
     {
-        // Try to place logo on the left if available
+        $brandingType = $this->effectiveBrandingType();
+        $pageWidth    = $this->getPageWidth();
+
+        if ($brandingType === 'header' && !empty($this->companyHeaderUrl)) {
+            // --- Full-width header image ---
+            try {
+                $headerPath = $this->resolveImagePath($this->companyHeaderUrl) ?? $this->companyHeaderUrl;
+                $headerHeight = 30; // mm
+                @$this->Image($headerPath, 0, 0, $pageWidth, $headerHeight, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+            } catch (\Throwable $e) {
+                // Fallback to text header on error
+                $this->renderTextHeader();
+            }
+        } elseif ($brandingType === 'logo') {
+            // --- Logo + text header ---
+            $this->renderLogoAndTextHeader();
+        } else {
+            // --- Text only (branding_type = 'none' or no image available) ---
+            $this->renderTextHeader();
+        }
+
+        // Watermark (drawn on every page)
+        if ($this->reportSettings && $this->reportSettings->show_watermark) {
+            $this->addWatermark();
+        }
+    }
+
+    /**
+     * Render company name + address as text (no image).
+     */
+    protected function renderTextHeader(): void
+    {
+        $this->SetY(10);
+        $this->SetFont($this->defaultFontBold ?: $this->defaultFontFamily, 'B', 12);
+        $this->Cell(0, 10, $this->companyName, 0, 1, 'C', 0, '', 0, false, 'M', 'M');
+        $this->SetFont($this->defaultFontFamily, '', 9);
+        $this->Cell(0, 8, $this->companyAddress, 0, 1, 'C', 0, '', 0, false, 'M', 'M');
+        $this->Ln(5);
+    }
+
+    /**
+     * Render logo on the appropriate side + company text centered.
+     */
+    protected function renderLogoAndTextHeader(): void
+    {
         $logoPlaced = false;
+
         if (!empty($this->companyLogoUrl)) {
             try {
-                $x = 15;
-                $y = 10;
-                $w = 24;
-                $logoPath = $this->companyLogoUrl;
-                if (is_string($logoPath)) {
-                    $path = parse_url($logoPath, PHP_URL_PATH) ?: '';
-                    if ($path) {
-                        $storagePos = strpos($path, '/storage/');
-                        if ($storagePos !== false) {
-                            $relative = substr($path, $storagePos + strlen('/storage/'));
-                            $candidate = public_path('storage/' . ltrim($relative, '/'));
-                            if (file_exists($candidate)) {
-                                $logoPath = $candidate;
-                            }
-                        }
-                    }
+                $logoPath = $this->resolveImagePath($this->companyLogoUrl) ?? $this->companyLogoUrl;
+                $w        = $this->effectiveLogoWidth();
+                $position = $this->effectiveLogoPosition();
+                $pageWidth = $this->getPageWidth();
+                $margins   = $this->getMargins();
+
+                // Image() uses absolute page coordinates (RTL mode does NOT flip Image x)
+                if ($position === 'left') {
+                    $x = $margins['left'];
+                } elseif ($position === 'center') {
+                    $x = ($pageWidth - $w) / 2;
+                } else { // right (default)
+                    $x = $pageWidth - $margins['right'] - $w;
                 }
-                @$this->Image($logoPath, $x +20, $y, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+
+                @$this->Image($logoPath, $x, 8, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
                 $logoPlaced = true;
             } catch (\Throwable $e) {
                 // ignore logo errors
@@ -101,21 +223,43 @@ class MyCustomTCPDF extends TCPDF
         $this->Cell(0, 10, $this->companyName, 0, 1, 'C', 0, '', 0, false, 'M', 'M');
         $this->SetFont($this->defaultFontFamily, '', 9);
         $this->Cell(0, 8, $this->companyAddress, 0, 1, 'C', 0, '', 0, false, 'M', 'M');
-        // $this->Line($this->GetX(), $this->GetY() + 2, $this->getPageWidth() - $this->GetX(), $this->GetY() + 2);
         $this->Ln(5);
+    }
+
+    /**
+     * Draw the logo as a semi-transparent watermark centered on the page.
+     */
+    protected function addWatermark(): void
+    {
+        if (empty($this->companyLogoUrl)) return;
+
+        try {
+            $logoPath  = $this->resolveImagePath($this->companyLogoUrl) ?? $this->companyLogoUrl;
+            $pageWidth  = $this->getPageWidth();
+            $pageHeight = $this->getPageHeight();
+            $wmSize     = min($pageWidth, $pageHeight) * 0.5; // 50% of the smaller dimension
+            $x = ($pageWidth  - $wmSize) / 2;
+            $y = ($pageHeight - $wmSize) / 2;
+
+            // Save current alpha and set low opacity
+            $this->setAlpha(0.08);
+            @$this->Image($logoPath, $x, $y, $wmSize, $wmSize, '', '', '', false, 72, '', false, false, 0, false, false, false);
+            // Restore full opacity
+            $this->setAlpha(1);
+        } catch (\Throwable $e) {
+            // ignore watermark errors
+        }
     }
 
     // Override Footer() method
     public function Footer()
     {
         $this->SetY(-15);
-        // Footer font already set by setFooterFont in constructor
-        // $this->SetFont($this->defaultFontFamily, 'I', 8);
         $this->Cell(0, 10, 'صفحة ' . $this->getAliasNumPage() . '/' . $this->getAliasNbPages(), 0, false, 'C', 0, '', 0, false, 'T', 'M');
     }
 
     // --- Professional styling methods ---
-    
+
     /**
      * Create a professional section header
      */
@@ -154,7 +298,7 @@ class MyCustomTCPDF extends TCPDF
 
         // Calculate the maximum height needed for this row
         $maxHeight = $rowHeight;
-        
+
         // Check if any cell needs more height due to text wrapping
         foreach ($data as $i => $cellData) {
             $cellHeight = $this->calculateStringHeight($columnWidths[$i], $cellData);
@@ -166,14 +310,14 @@ class MyCustomTCPDF extends TCPDF
         foreach ($data as $i => $cellData) {
             $x = $this->GetX();
             $y = $startY;
-            
+
             // Use MultiCell for text wrapping
             $this->SetXY($x, $y);
             $this->MultiCell($columnWidths[$i], $maxHeight, $cellData, 'LRB', 'C', $fill, 0);
-            
+
             $this->SetXY($x + $columnWidths[$i], $y);
         }
-        
+
         $this->SetY($startY + $maxHeight);
     }
 
@@ -194,7 +338,7 @@ class MyCustomTCPDF extends TCPDF
         $words = explode(' ', $text);
         $lines = [];
         $currentLine = '';
-        
+
         foreach ($words as $word) {
             $testLine = $currentLine . ($currentLine ? ' ' : '') . $word;
             if ($this->GetStringWidth($testLine) <= $width) {
@@ -210,11 +354,11 @@ class MyCustomTCPDF extends TCPDF
                 }
             }
         }
-        
+
         if ($currentLine) {
             $lines[] = $currentLine;
         }
-        
+
         return $lines;
     }
 
@@ -230,24 +374,21 @@ class MyCustomTCPDF extends TCPDF
 
         $this->SetFont($this->defaultFontFamily, '', 10);
         $colWidth = 190 / $columns; // 190mm available width divided by columns
-        
+
         $i = 0;
         foreach ($data as $label => $value) {
             if ($i % $columns == 0 && $i > 0) {
                 $this->Ln(6);
             }
-            
-            $x = $this->GetX();
-            $y = $this->GetY();
-            
+
             $this->Cell($colWidth, 6, $label . ': ' . $value, 0, 0, 'L');
-            
+
             if ($i % $columns == $columns - 1) {
                 $this->Ln(6);
             }
             $i++;
         }
-        
+
         if ($i % $columns != 0) {
             $this->Ln(6);
         }
@@ -266,26 +407,19 @@ class MyCustomTCPDF extends TCPDF
         $this->SetFillColor(248, 248, 248);
         $this->SetDrawColor(200, 200, 200);
         $this->Rect($this->GetX(), $this->GetY(), $width, $height, 'DF');
-        
+
         $this->SetFont($this->defaultFontFamily, 'I', 10);
         $this->SetTextColor(128);
         $this->SetXY($this->GetX(), $this->GetY() + $height/2 - 5);
         $this->Cell($width, 10, 'Chart visualization would appear here', 0, 1, 'C');
-        
+
         $this->SetY($this->GetY() + $height + 5);
     }
 
-    // --- Optional: Override methods to use default font if not specified ---
-    // This ensures your default font is used by Cell, MultiCell, Write, etc.,
-    // unless a different font is explicitly set right before calling them.
+    // --- Override base methods to preserve font defaults ---
 
     public function Cell($w, $h = 0, $txt = '', $border = 0, $ln = 0, $align = '', $fill = false, $link = '', $stretch = 0, $ignore_min_height = false, $calign = 'T', $valign = 'M')
     {
-        // If current font family is not set or different from default, set default.
-        // This is a bit aggressive; usually, SetFont in constructor is enough.
-        // if ($this->FontFamily != $this->defaultFontFamily) {
-        //    $this->SetFont($this->defaultFontFamily, $this->FontStyle, $this->FontSizePt);
-        // }
         parent::Cell($w, $h, $txt, $border, $ln, $align, $fill, $link, $stretch, $ignore_min_height, $calign, $valign);
     }
 
@@ -303,7 +437,7 @@ class MyCustomTCPDF extends TCPDF
     {
         return $this->defaultFontFamily;
     }
-    
+
     public function setThermalDefaults(float $width = 80, float $height = 200): void
     {
         // Page format: custom width, height in mm
@@ -319,8 +453,7 @@ class MyCustomTCPDF extends TCPDF
 
         // Use a simple, clear font
         $this->SetFont('dejavusansmono', '', 8); // Monospaced font, small size
-        // Or a simple sans-serif: $this->SetFont('dejavusans', '', 8);
 
-        $this->setRTL(true); // For Arabic content
+        $this->setRTL(false); // For Arabic content
     }
 }

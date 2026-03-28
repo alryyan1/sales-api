@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Supplier;
+use App\Services\Pdf\PdfHeaderRenderer;
 use TCPDF;
 use Exception;
 use Illuminate\Support\Facades\Log;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 class SupplierLedgerPdfService
 {
     private TCPDF $pdf;
+    private PdfHeaderRenderer $renderer;
 
     // ── Palette (black & white only) ─────────────────────────────────────────
     private const BLACK  = [0,   0,   0];
@@ -29,8 +31,10 @@ class SupplierLedgerPdfService
     {
         try {
             $data = $this->buildLedgerData($supplier);
+            $this->renderer = new PdfHeaderRenderer('supplier_ledger');
             $this->initPdf($supplier);
             $this->pdf->AddPage();
+            $this->renderer->render($this->pdf);
 
             $this->drawHeader($supplier);
             $this->drawSupplierBox($supplier);
@@ -110,16 +114,16 @@ class SupplierLedgerPdfService
     private function initPdf(Supplier $supplier): void
     {
         $this->pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $this->pdf->setPrintHeader(false);
         $this->pdf->SetCreator('Sales Management System');
         $this->pdf->SetAuthor('Sales Management System');
         $this->pdf->SetTitle('كشف حساب مورد — ' . $supplier->name);
         $this->pdf->SetSubject('Supplier Account Statement');
-        $this->pdf->setPrintHeader(false);
         $this->pdf->setPrintFooter(false);
-        $this->pdf->SetMargins(self::M, self::M, self::M);
+        $this->pdf->SetMargins(self::M, $this->renderer->getTopMargin(), self::M);
         $this->pdf->SetAutoPageBreak(true, 25);
         $this->pdf->SetFont(self::F, '', 9);
-        $this->pdf->setRTL(true);
+        $this->pdf->setRTL(false);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -284,6 +288,7 @@ class SupplierLedgerPdfService
         foreach ($entries as $i => $entry) {
             if ($this->pdf->GetY() + self::RH > $this->pdf->getPageHeight() - 28) {
                 $this->pdf->AddPage();
+                $this->renderer->render($this->pdf);
                 $this->drawTableHeader($w);
             }
 

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Services\Pdf\PdfHeaderRenderer;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 use TCPDF;
@@ -10,8 +11,11 @@ class InventoryLogPdfService
 {
     public function generatePdf(array $filters = []): string
     {
+        $renderer = new PdfHeaderRenderer('inventory_log');
         $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
-        
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+
         // Set document information
         $pdf->SetCreator('Sales Management System');
         $pdf->SetAuthor('System Admin');
@@ -19,7 +23,7 @@ class InventoryLogPdfService
         $pdf->SetSubject('Inventory Movement Log');
         
         // Set margins
-        $pdf->SetMargins(15, 15, 15);
+        $pdf->SetMargins(15, $renderer->getTopMargin(), 15);
         $pdf->SetHeaderMargin(5);
         $pdf->SetFooterMargin(10);
         
@@ -34,7 +38,8 @@ class InventoryLogPdfService
         
         // Add a page
         $pdf->AddPage();
-        
+        $renderer->render($pdf);
+
         // Generate header
         $this->generateHeader($pdf);
         

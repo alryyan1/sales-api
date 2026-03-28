@@ -32,9 +32,7 @@ class InvoicePdfService
         return $this->generateArabicProformaPdf($sale, $settings, $title, $isFinal);
     }
 
-    /**
-     * Generate PDF header section
-     */
+    /** @deprecated — kept for reference only, not called */
     private function generateHeader(TCPDF $pdf, Sale $sale, array $settings): void
     {
         $y = $pdf->GetY();
@@ -231,20 +229,19 @@ class InvoicePdfService
      */
     private function generateArabicProformaPdf(Sale $sale, array $settings, string $title, bool $isFinal = false): string
     {
-        $pdf = new \App\Services\Pdf\MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $renderer = new \App\Services\Pdf\PdfHeaderRenderer('invoice');
 
-        // Use Arabic fonts and RTL
-        $pdf->setRTL(true);
-        $pdf->SetFont('arial', '', 10);
-
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
-        $pdf->SetMargins(10, 10, 10);
+        $pdf->setRTL(false);
+        $pdf->SetFont('arial', '', 10);
+        $pdf->SetMargins(10, $renderer->getTopMargin() + 5, 10);
         $pdf->SetAutoPageBreak(true, 10);
 
         $pdf->AddPage();
 
-        $this->generateArabicProformaHeader($pdf, $sale, $settings, $title);
+        $this->generateArabicProformaHeader($pdf, $renderer, $sale, $title);
         $this->generateArabicProformaTable($pdf, $sale);
         $this->generateArabicProformaSummary($pdf, $sale, $isFinal);
         $this->generateArabicProformaTerms($pdf, $sale);
@@ -252,65 +249,17 @@ class InvoicePdfService
         return $pdf->Output('', 'S');
     }
 
-    private function generateArabicProformaHeader(\App\Services\Pdf\MyCustomTCPDF $pdf, Sale $sale, array $settings, string $title): void
+    private function generateArabicProformaHeader(TCPDF $pdf, \App\Services\Pdf\PdfHeaderRenderer $renderer, Sale $sale, string $title): void
     {
-        $pageW     = $pdf->getPageWidth(); // 210mm
-        $leftM     = 10;
-        $rightM    = 10;
-        $usableW   = $pageW - $leftM - $rightM; // 190mm
-        $startY    = $pdf->GetY();
-        $logoW     = 35;
-        $logoMaxH  = 24;
+        $pageW   = $pdf->getPageWidth(); // 210mm
+        $leftM   = 10;
+        $rightM  = 10;
+        $usableW = $pageW - $leftM - $rightM; // 190mm
 
-        // ── LOGO (left side, absolute coordinates) ──────────────────────────
-        $logoPlaced = false;
-        if (!empty($settings['company_logo_url'])) {
-            $logoPath = $settings['company_logo_url'];
-            if (strpos($logoPath, 'http') === false) {
-                $logoPath = public_path('storage/' . $logoPath);
-            } else {
-                $path = parse_url($logoPath, PHP_URL_PATH) ?: '';
-                if ($path) {
-                    $storagePos = strpos($path, '/storage/');
-                    if ($storagePos !== false) {
-                        $relative  = substr($path, $storagePos + strlen('/storage/'));
-                        $candidate = public_path('storage/' . ltrim($relative, '/'));
-                        if (file_exists($candidate)) {
-                            $logoPath = $candidate;
-                        }
-                    }
-                }
-            }
-            if (file_exists($logoPath)) {
-                $pdf->Image($logoPath, $leftM, $startY, $logoW, 0, '', '', 'T', false, 300, '', false, false, 0);
-                $logoPlaced = true;
-            }
-        }
+        // ── BRANDING HEADER (logo / header image / text) ──────────────────────
+        $renderer->render($pdf);
 
-        // ── COMPANY INFO (right side, right-aligned) ─────────────────────────
-        $companyX = $leftM + ($logoPlaced ? $logoW + 4 : 0);
-        $companyW = $pageW - $rightM - $companyX;
-
-        $pdf->SetXY($companyX, $startY);
-        $pdf->SetFont('arial', 'B', 13);
-        $pdf->Cell($companyW, 9, $settings['company_name'] ?? '', 0, 1, 'R');
-
-        if (!empty($settings['company_address'])) {
-            $pdf->SetX($companyX);
-            $pdf->SetFont('arial', '', 10);
-            $pdf->Cell($companyW, 6, $settings['company_address'], 0, 1, 'R');
-        }
-        if (!empty($settings['company_phone'])) {
-            $pdf->SetX($companyX);
-            $pdf->SetFont('arial', '', 10);
-            $pdf->Cell($companyW, 6, 'هاتف: ' . $settings['company_phone'], 0, 1, 'R');
-        }
-
-        // Move Y below header block (logo or company text, whichever is taller)
-        $afterY = max($pdf->GetY(), $startY + $logoMaxH);
-        $pdf->SetY($afterY + 3);
-
-        // ── DIVIDER ──────────────────────────────────────────────────────────
+        // ── DIVIDER ───────────────────────────────────────────────────────────
         $pdf->SetDrawColor(180, 180, 180);
         $pdf->Line($leftM, $pdf->GetY(), $pageW - $rightM, $pdf->GetY());
         $pdf->SetDrawColor(0, 0, 0);
@@ -319,27 +268,25 @@ class InvoicePdfService
         // ── TITLE BANNER ─────────────────────────────────────────────────────
         $pdf->SetFont('arial', 'B', 16);
         $pdf->SetFillColor(230, 230, 230);
-        $pdf->Cell(0, 12, $title, 0, 1, 'C', true);
+        $pdf->Cell(0, 5, $title, 0, 1, 'C', false);
         $pdf->Ln(4);
 
         // ── CUSTOMER / INVOICE INFO (2-column bordered box) ───────────────────
-        $infoY  = $pdf->GetY();
-        $rowH   = 8;
-        $colW   = $usableW / 2; // ~95mm each column
+        $infoY = $pdf->GetY();
+        $rowH  = 8;
+        $colW  = $usableW / 2; // ~95mm each column
 
         // Light background box
         $pdf->SetFillColor(248, 248, 248);
         $pdf->Rect($leftM, $infoY, $usableW, $rowH * 2, 'DF');
 
         // Row 1 — right column: invoice date | left column: client name
-        // Right column (date)
         $pdf->SetXY($leftM + $colW, $infoY);
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($colW * 0.45, $rowH, 'تاريخ الفاتورة:', 0, 0, 'R');
         $pdf->SetFont('arial', '', 10);
         $pdf->Cell($colW * 0.55, $rowH, date('Y/m/d', strtotime($sale->sale_date)), 0, 0, 'C');
 
-        // Left column (client name)
         $pdf->SetXY($leftM, $infoY);
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($colW * 0.4, $rowH, 'اسم العميل:', 0, 0, 'R');
@@ -362,7 +309,7 @@ class InvoicePdfService
         $pdf->SetY($infoY + $rowH * 2 + 5);
     }
 
-    private function generateArabicProformaTable(\App\Services\Pdf\MyCustomTCPDF $pdf, Sale $sale): void
+    private function generateArabicProformaTable(TCPDF $pdf, Sale $sale): void
     {
         $pdf->SetFillColor(240, 240, 240);
         $pdf->SetFont('arial', 'B', 10);
@@ -388,7 +335,7 @@ class InvoicePdfService
         }
     }
 
-    private function generateArabicProformaSummary(\App\Services\Pdf\MyCustomTCPDF $pdf, Sale $sale, bool $isFinal = false): void
+    private function generateArabicProformaSummary(TCPDF $pdf, Sale $sale, bool $isFinal = false): void
     {
         $total = $sale->items->sum('total_price');
         $discount = $sale->discount_amount ?? 0;
@@ -523,7 +470,7 @@ class InvoicePdfService
         return $result;
     }
 
-    private function generateArabicProformaTerms(\App\Services\Pdf\MyCustomTCPDF $pdf, Sale $sale): void
+    private function generateArabicProformaTerms(TCPDF $pdf, Sale $sale): void
     {
         // Removed as per request
     }

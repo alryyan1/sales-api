@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Client;
+use App\Services\Pdf\PdfHeaderRenderer;
 use Carbon\Carbon;
 use TCPDF;
 use Exception;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 class ClientLedgerPdfService extends TCPDF
 {
     private array $settings = [];
+    private PdfHeaderRenderer $renderer;
     // ── Palette ───────────────────────────────────────────────────────────────
     private const BLACK  = [0,   0,   0];
     private const DARK   = [30,  30,  30];
@@ -35,7 +37,7 @@ class ClientLedgerPdfService extends TCPDF
 
             // ── Page 1: cover with client info + summary ──
             $this->AddPage();
-            $this->drawCompanyHeader();
+            $this->renderer->render($this);
             $this->drawPageHeader('كشف حساب عميل');
             $this->drawIssueLine($client);
             $this->drawClientSection($client);
@@ -44,7 +46,7 @@ class ClientLedgerPdfService extends TCPDF
 
             // ── Page 2+: invoices table ──
             $this->AddPage();
-            $this->drawCompanyHeader();
+            $this->renderer->render($this);
             $this->drawPageHeader('تفاصيل الفواتير');
             $this->drawInvoicesTable($data['entries'], $data['summary']);
             $this->drawPageFooter();
@@ -109,16 +111,17 @@ class ClientLedgerPdfService extends TCPDF
     {
         $this->settings = app(\App\Services\SettingsService::class)->getAll();
 
+        $this->renderer = new PdfHeaderRenderer('client_ledger');
+        $this->setPrintHeader(false);
         $this->SetCreator('Sales Management System');
         $this->SetAuthor($this->settings['company_name'] ?? 'Sales Management System');
         $this->SetTitle('كشف حساب — ' . $client->name);
         $this->SetSubject('Client Account Statement');
-        $this->setPrintHeader(false);
         $this->setPrintFooter(false);
-        $this->SetMargins(self::M, self::M, self::M);
+        $this->SetMargins(self::M, $this->renderer->getTopMargin(), self::M);
         $this->SetAutoPageBreak(true, 25);
         $this->SetFont(self::F, '', 10);
-        $this->setRTL(true);
+        $this->setRTL(false);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -127,63 +130,7 @@ class ClientLedgerPdfService extends TCPDF
 
     private function drawCompanyHeader(): void
     {
-        $W            = $this->W();
-        $companyName  = $this->settings['company_name']    ?? '';
-        $companyAddr  = $this->settings['company_address'] ?? '';
-        $logoUrl      = $this->settings['company_logo_url'] ?? null;
-        $y0           = self::M;
-        $logoW        = 28;   // logo width (mm)
-        $logoH        = 18;   // max logo height (mm)
-        $logoPlaced   = false;
-
-        // ── Logo (right side in RTL) ──────────────────────────────────────────
-        if (!empty($logoUrl)) {
-            try {
-                // Resolve URL → local filesystem path
-                $path = parse_url($logoUrl, PHP_URL_PATH) ?? '';
-                $pos  = strpos($path, '/storage/');
-                if ($pos !== false) {
-                    $relative = substr($path, $pos + strlen('/storage/'));
-                    $candidate = public_path('storage/' . ltrim($relative, '/'));
-                    if (file_exists($candidate)) {
-                        $logoUrl = $candidate;
-                    }
-                }
-                // Place logo at the right margin (RTL: x = M, in LTR coords = right edge)
-                $logoX = self::M + $W - $logoW;
-                $this->Image($logoUrl, $logoX, $y0, $logoW, $logoH,
-                    '', '', 'T', false, 300, '', false, false, 0);
-                $logoPlaced = true;
-            } catch (\Throwable) {
-                // Silently skip if logo fails
-            }
-        }
-
-        // ── Company name & address (centred, leaving room for logo) ───────────
-        $textW = $logoPlaced ? $W - $logoW - 4 : $W;
-
-        $this->SetXY(self::M, $y0 + 1);
-        $this->SetFont(self::F, 'B', 14);
-        $this->SetTextColor(...self::BLACK);
-        $this->Cell($textW, 9, $companyName, 0, 1, 'C');
-
-        if (!empty($companyAddr)) {
-            $this->SetX(self::M);
-            $this->SetFont(self::F, '', 9);
-            $this->SetTextColor(...self::MID);
-            $this->Cell($textW, 5, $companyAddr, 0, 1, 'C');
-        }
-
-        // ── Divider ───────────────────────────────────────────────────────────
-        $divY = max($this->GetY(), $y0 + $logoH) + 3;
-        $this->SetDrawColor(...self::BLACK);
-        $this->SetLineWidth(0.8);
-        $this->Line(self::M, $divY, self::M + $W, $divY);
-        $this->SetLineWidth(0.2);
-        $this->Line(self::M, $divY + 1.5, self::M + $W, $divY + 1.5);
-
-        $this->SetY($divY + 5);
-        $this->SetTextColor(...self::DARK);
+        $this->renderer->render($this);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -378,6 +325,7 @@ class ClientLedgerPdfService extends TCPDF
             if ($this->GetY() + self::RH > $this->getPageHeight() - 30) {
                 $this->drawPageFooter();
                 $this->AddPage();
+                $this->renderer->render($this);
                 $this->drawPageHeader('تفاصيل الفواتير (تابع)');
                 $this->drawInvoiceTableHeader($w);
             }

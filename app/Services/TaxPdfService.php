@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Purchase;
+use App\Services\Pdf\PdfHeaderRenderer;
 use TCPDF;
 use Exception;
 use Illuminate\Support\Facades\Log;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 class TaxPdfService
 {
     private $pdf;
+    private PdfHeaderRenderer $renderer;
 
     private const COLOR_PRIMARY = [80, 80, 80];
     private const COLOR_HEADER_BG = [60, 60, 60];
@@ -29,8 +31,10 @@ class TaxPdfService
     {
         try {
             $this->loadRelationships($purchase);
+            $this->renderer = new PdfHeaderRenderer('tax');
             $this->initializePdf($purchase, $includeDetails);
             $this->pdf->AddPage();
+            $this->renderer->render($this->pdf);
             $this->buildReport($purchase, $includeDetails);
             return $this->pdf->Output('tax_report_' . $purchase->id . '.pdf', 'S');
         } catch (Exception $e) {
@@ -50,14 +54,14 @@ class TaxPdfService
     private function initializePdf(Purchase $purchase, bool $includeDetails): void
     {
         $this->pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $this->pdf->setPrintHeader(false);
         $this->pdf->SetCreator('Sales Management System');
         $this->pdf->SetTitle('تقرير الضرائب والجمارك #' . $purchase->id);
-        $this->pdf->setPrintHeader(false);
         $this->pdf->setPrintFooter(false);
-        $this->pdf->SetMargins(self::MARGIN, self::MARGIN, self::MARGIN);
+        $this->pdf->SetMargins(self::MARGIN, $this->renderer->getTopMargin(), self::MARGIN);
         $this->pdf->SetAutoPageBreak(true, self::MARGIN + 5);
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->setRTL(true);
+        $this->pdf->setRTL(false);
     }
 
     private function buildReport(Purchase $purchase, bool $includeDetails): void

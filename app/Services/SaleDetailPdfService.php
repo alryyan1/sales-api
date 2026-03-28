@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\Sale;
+use App\Services\Pdf\PdfHeaderRenderer;
 use Carbon\Carbon;
+use TCPDF;
 
 class SaleDetailPdfService
 {
@@ -23,35 +25,20 @@ class SaleDetailPdfService
         $currencySymbol = $settings['currency_symbol'] ?? 'SDG';
 
         // Generate PDF
-        $pdf = new \TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $renderer = new PdfHeaderRenderer('sale_detail');
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
         $pdf->SetCreator('Sales System');
         $pdf->SetAuthor('Sales System');
         $pdf->SetTitle('Sale Detail Report #' . $sale->id);
         $pdf->SetSubject('Sale Detail Report');
-        $pdf->SetMargins(20, 25, 20);
+        $pdf->SetMargins(20, $renderer->getTopMargin(), 20);
         $pdf->SetAutoPageBreak(true, 20);
-        $pdf->setRTL(true);
+        $pdf->setRTL(false);
         $pdf->AddPage();
+        $renderer->render($pdf);
 
-        // Formal Report Header
-        $pdf->SetFont('arial', 'B', 18);
-        $pdf->Cell(0, 8, $companyName, 0, 1, 'C');
-        
-        if ($companyAddress) {
-            $pdf->SetFont('arial', '', 10);
-            $pdf->Cell(0, 5, $companyAddress, 0, 1, 'C');
-        }
-        
-        if ($companyPhone) {
-            $pdf->SetFont('arial', '', 9);
-            $pdf->Cell(0, 5, 'هاتف: ' . $companyPhone, 0, 1, 'C');
-        }
-        
-        // Horizontal line separator
-        $pdf->SetLineWidth(0.5);
-        $pdf->Line(20, $pdf->GetY() + 3, 190, $pdf->GetY() + 3);
-        $pdf->Ln(8);
-        
         // Report Title
         $pdf->SetFont('arial', 'B', 16);
         $pdf->Cell(0, 8, 'تفاصيل عملية البيع', 0, 1, 'C');

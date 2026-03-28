@@ -3,9 +3,10 @@
 namespace App\Services;
 
 use App\Models\Sale;
-use App\Services\Pdf\MyCustomTCPDF;
+use App\Services\Pdf\PdfHeaderRenderer;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use TCPDF;
 
 class DailySalesPdfService
 {
@@ -72,15 +73,21 @@ class DailySalesPdfService
         // Calculate summary statistics
         $summary = $this->calculateSummary($sales);
 
-        // Create PDF using the custom TCPDF class
-        $pdf = new MyCustomTCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        // Create PDF using TCPDF with PdfHeaderRenderer
+        $renderer = new PdfHeaderRenderer('daily_sales');
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
 
         // Set document information
         $pdf->SetTitle($reportTitle);
         $pdf->SetSubject('Sales Report');
+        $pdf->SetMargins(15, $renderer->getTopMargin(), 15);
+        $pdf->SetAutoPageBreak(true, 15);
 
         // Add a page
         $pdf->AddPage();
+        $renderer->render($pdf);
 
         // Generate PDF content using cell method
         $this->generatePdfContent($pdf, $sales, $summary, $filters);
@@ -136,16 +143,16 @@ class DailySalesPdfService
     /**
      * Generate PDF content using TCPDF cell method
      *
-     * @param MyCustomTCPDF $pdf
+     * @param TCPDF $pdf
      * @param \Illuminate\Database\Eloquent\Collection $sales
      * @param array $summary
      * @param array $filters
      * @return void
      */
-    private function generatePdfContent($pdf, $sales, array $summary, array $filters): void
+    private function generatePdfContent(TCPDF $pdf, $sales, array $summary, array $filters): void
     {
         // Set RTL direction
-        $pdf->setRTL(true);
+        $pdf->setRTL(false);
 
         // Professional Header
         $this->generateHeader($pdf, $filters);
@@ -176,11 +183,11 @@ class DailySalesPdfService
     /**
      * Generate professional header
      *
-     * @param MyCustomTCPDF $pdf
+     * @param TCPDF $pdf
      * @param array $filters
      * @return void
      */
-    private function generateHeader($pdf, array $filters): void
+    private function generateHeader(TCPDF $pdf, array $filters): void
     {
         // Company header with border
         $pdf->SetFillColor(51, 122, 183);
@@ -214,11 +221,11 @@ class DailySalesPdfService
     /**
      * Generate executive summary section
      *
-     * @param MyCustomTCPDF $pdf
+     * @param TCPDF $pdf
      * @param array $summary
      * @return void
      */
-    private function generateExecutiveSummary($pdf, array $summary): void
+    private function generateExecutiveSummary(TCPDF $pdf, array $summary): void
     {
         $pdf->SetFont('arial', 'B', 16);
         $pdf->SetTextColor(51, 122, 183);
@@ -263,10 +270,10 @@ class DailySalesPdfService
     /**
      * Generate professional footer
      *
-     * @param MyCustomTCPDF $pdf
+     * @param TCPDF $pdf
      * @return void
      */
-    private function generateFooter($pdf): void
+    private function generateFooter(TCPDF $pdf): void
     {
         $pdf->Ln(15);
         $pdf->SetFont('arial', '', 9);
@@ -299,11 +306,11 @@ class DailySalesPdfService
     /**
      * Generate payment methods table
      *
-     * @param MyCustomTCPDF $pdf
+     * @param TCPDF $pdf
      * @param array $summary
      * @return void
      */
-    private function generatePaymentMethodsTable($pdf, array $summary): void
+    private function generatePaymentMethodsTable(TCPDF $pdf, array $summary): void
     {
         $pdf->SetFont('arial', 'B', 16);
         $pdf->SetTextColor(51, 122, 183);
@@ -337,12 +344,12 @@ class DailySalesPdfService
     /**
      * Generate detailed sales table
      *
-     * @param MyCustomTCPDF $pdf
+     * @param TCPDF $pdf
      * @param \Illuminate\Database\Eloquent\Collection $sales
      * @param array $filters
      * @return void
      */
-    private function generateSalesTable($pdf, $sales, array $filters = []): void
+    private function generateSalesTable(TCPDF $pdf, $sales, array $filters = []): void
     {
         $pdf->SetFont('arial', 'B', 16);
         $pdf->SetTextColor(51, 122, 183);

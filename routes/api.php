@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\{
   DashboardController,
   InventoryCountController,
   PermissionController,
+  PdfReportSettingController,
   ProductController,
   ProfileController,
   PurchaseController,
@@ -96,6 +97,10 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::put('admin/settings', [SettingController::class, 'update'])->name('settings.update');
   Route::post('admin/settings/logo', [SettingController::class, 'uploadLogo'])->name('settings.uploadLogo');
   Route::post('admin/settings/header', [SettingController::class, 'uploadHeader'])->name('settings.uploadHeader');
+
+  // -- PDF Report Branding Settings --
+  Route::get('admin/pdf-report-settings', [PdfReportSettingController::class, 'index'])->name('pdf-report-settings.index');
+  Route::put('admin/pdf-report-settings/{reportKey}', [PdfReportSettingController::class, 'update'])->name('pdf-report-settings.update');
 
   // -- Database Backup Management --
   Route::prefix('admin')->name('api.admin.')->group(function () {

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Sale;
 use App\Models\Client;
 use App\Models\User;
+use App\Services\Pdf\PdfHeaderRenderer;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use TCPDF;
@@ -27,6 +28,7 @@ class SalesReportPdfService
     private string $companyAddress;
     private string $companyPhone;
     private string $currencySymbol;
+    private PdfHeaderRenderer $renderer;
 
     public function generate(
         Collection $sales,
@@ -38,21 +40,20 @@ class SalesReportPdfService
         ?string $baseUrl = null
     ): string {
         $this->initializeSettings($baseUrl);
+        $this->renderer = new PdfHeaderRenderer('sales_report');
         $pdf = $this->initializePdf();
 
         // --- PAGE 1: REPORT OVERVIEW (popup-style summary) ---
         $pdf->AddPage();
+        $this->renderer->render($pdf);
         $totalDiscount = $sales->sum(fn(Sale $s) => (float) ($s->discount_amount ?? 0));
         $this->renderHeader($pdf, $summaryStats, $startDate, $endDate);
         $this->renderFilters($pdf, $validatedFilters);
         $this->renderSummaryPopupStyle($pdf, $summaryStats, $paymentMethods, $totalDiscount);
 
-        // if (!empty($paymentMethods)) {
-        //     $this->renderPaymentMethodTable($pdf, $paymentMethods);
-        // }
-
         // --- PAGE 2+: DETAILED LOG ---
         $pdf->AddPage();
+        $this->renderer->render($pdf);
         $this->renderSectionTitle($pdf, 'سجل المبيعات التفصيلي');
         $this->renderSalesTable($pdf, $sales);
 
@@ -72,32 +73,21 @@ class SalesReportPdfService
     private function initializePdf(): TCPDF
     {
         $pdf = new TCPDF(self::ORIENTATION, self::UNIT, self::FORMAT, true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
         $pdf->SetCreator('System');
         $pdf->SetAuthor($this->companyName);
         $pdf->SetTitle('Sales Report');
-        $pdf->SetMargins(self::MARGIN, self::MARGIN, self::MARGIN);
+        $pdf->SetMargins(self::MARGIN, $this->renderer->getTopMargin(), self::MARGIN);
         $pdf->SetAutoPageBreak(true, 15);
-        $pdf->setRTL(true);
+        $pdf->setRTL(false);
         $pdf->SetFont(self::FONT_MAIN, '', 10);
         return $pdf;
     }
 
     private function renderHeader(TCPDF $pdf, array $summaryStats, ?Carbon $startDate, ?Carbon $endDate): void
     {
-        // 1. Top Right: Company Info
-        $pdf->SetFont(self::FONT_MAIN, 'B', 16);
-        $pdf->Cell(0, 8, $this->companyName, 0, 1, 'R');
-        $pdf->SetFont(self::FONT_MAIN, '', 10);
-        if ($this->companyAddress) {
-            $pdf->Cell(0, 5, $this->companyAddress, 0, 1, 'R');
-        }
-        if ($this->companyPhone) {
-            $pdf->Cell(0, 5, 'Tel: ' . $this->companyPhone, 0, 1, 'R');
-        }
-
-        $pdf->Ln(5);
-
-        // 2. Center: Report Title & Date/Shift Info
+        // Report Title & Date/Shift Info
         $pdf->SetFont(self::FONT_MAIN, 'B', 14);
 
         $title = 'تقرير المبيعات والوردية';
@@ -256,6 +246,7 @@ class SalesReportPdfService
         foreach ($sales as $sale) {
             if ($pdf->GetY() > 185) {
                 $pdf->AddPage();
+                $this->renderer->render($pdf);
                 $pdf->SetFont(self::FONT_MAIN, 'B', 9);
                 foreach ($cols as $col) {
                     $pdf->Cell($col['w'], 9, $col['t'], 1, 0, 'C', true);
