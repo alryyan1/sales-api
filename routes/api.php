@@ -76,6 +76,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/clients/{client}/ledger', [\App\Http\Controllers\Api\ClientLedgerController::class, 'getLedger']);
   Route::get('/clients/{client}/ledger/pdf', [\App\Http\Controllers\Api\ClientLedgerController::class, 'downloadLedgerPDF']);
   Route::post('/clients/{client}/settle-debt', [\App\Http\Controllers\Api\ClientLedgerController::class, 'settleDebt']);
+  Route::get('/clients/{client}/payments', [\App\Http\Controllers\Api\ClientLedgerController::class, 'getPayments']);
   Route::get('products/{product}/available-batches', [ProductController::class, 'getAvailableBatches']);
 
   // -- User Profile Routes --
@@ -231,6 +232,8 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/purchases/{purchase}/add-all-missing-products', [PurchaseController::class, 'addAllMissingProducts'])->name('api.purchases.addAllMissingProducts');
   Route::get('/sales/calculator', [SaleController::class, 'calculator'])->name('api.sales.calculator'); // <-- Calculator Route
   Route::get('/sales/today-by-created-at', [SaleController::class, 'getTodaySalesByCreatedAt'])->name('api.sales.todayByCreatedAt');
+  Route::get('/payments', [\App\Http\Controllers\Api\PaymentController::class, 'index'])->name('api.payments.index');
+  Route::get('/payments/stats', [\App\Http\Controllers\Api\PaymentController::class, 'stats'])->name('api.payments.stats');
   Route::get('/sales/list-all', [SaleController::class, 'listAll'])->name('api.sales.listAll');
   // -- Sales Management --
   Route::apiResource('sales', SaleController::class);

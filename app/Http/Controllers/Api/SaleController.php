@@ -292,8 +292,10 @@ class SaleController extends Controller
             'payments.*.notes' => 'nullable|string|max:65535',
         ]);
 
+        $latestShift = Shift::orderBy('id', 'desc')->first();
+
         try {
-            DB::transaction(function () use ($validatedData, $sale, $request) {
+            DB::transaction(function () use ($validatedData, $sale, $request, $latestShift) {
                 // Delete existing payments for this sale (to replace them all)
                 $sale->payments()->delete();
 
@@ -303,12 +305,13 @@ class SaleController extends Controller
                         // Only create payment if all required fields are present
                         if (isset($paymentData['method']) && isset($paymentData['amount']) && isset($paymentData['payment_date'])) {
                             $sale->payments()->create([
-                                'user_id' => $request->user()->id,
-                                'method' => $paymentData['method'],
-                                'amount' => $paymentData['amount'],
-                                'payment_date' => $paymentData['payment_date'],
+                                'user_id'          => $request->user()->id,
+                                'shift_id'         => $latestShift?->id,
+                                'method'           => $paymentData['method'],
+                                'amount'           => $paymentData['amount'],
+                                'payment_date'     => $paymentData['payment_date'],
                                 'reference_number' => $paymentData['reference_number'] ?? null,
-                                'notes' => $paymentData['notes'] ?? null,
+                                'notes'            => $paymentData['notes'] ?? null,
                             ]);
                         }
                     }
@@ -395,11 +398,19 @@ class SaleController extends Controller
             'notes' => 'nullable|string|max:65535',
         ]);
 
+        $latestShift = Shift::orderBy('id', 'desc')->first();
+        if (!$latestShift) {
+            return response()->json([
+                'message' => 'No shift found. Please open a shift first.'
+            ], Response::HTTP_BAD_REQUEST);
+        }
+
         try {
-            DB::transaction(function () use ($validatedData, $sale, $request) {
+            DB::transaction(function () use ($validatedData, $sale, $request, $latestShift) {
                 // Create a single payment record
                 $sale->payments()->create([
                     'user_id' => $request->user()->id,
+                    'shift_id' =>  $latestShift->id,
                     'method' => $validatedData['method'],
                     'amount' => $validatedData['amount'],
                     'payment_date' => now()->format('Y-m-d'),

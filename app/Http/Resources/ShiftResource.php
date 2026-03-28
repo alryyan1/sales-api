@@ -25,11 +25,10 @@ class ShiftResource extends JsonResource
             'is_open' => $this->is_open,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
-            'stats' => $this->whenLoaded('sales', function () use ($request) {
+            'stats' => $this->whenLoaded('payments', function () use ($request) {
                 $currentUserId = $request->user()?->id;
 
-                // Calculate Sales Breakdown
-                $sales = $this->sales->load('payments');
+                // Calculate Sales Breakdown — iterate payments directly via shift_id
                 $salesBreakdown = [
                     'cash' => 0,
                     'bankak' => 0,
@@ -38,24 +37,19 @@ class ShiftResource extends JsonResource
                     'total' => 0,
                 ];
 
-                foreach ($sales as $sale) {
-                    // Filter by logged-in user
-                    if ($currentUserId && $sale->user_id !== $currentUserId) {
+                foreach ($this->payments as $payment) {
+                    if ($currentUserId && $payment->user_id !== $currentUserId) {
                         continue;
                     }
 
-                    foreach ($sale->payments as $payment) {
-                        $method = $payment->method ?? 'cash';
-                        $amount = (float)$payment->amount;
-                        if (isset($salesBreakdown[$method])) {
-                            $salesBreakdown[$method] += $amount;
-                        } else {
-                            if (in_array($method, ['visa', 'bank', 'bank_transfer'])) {
-                                $salesBreakdown['bankak'] += $amount;
-                            }
-                        }
-                        $salesBreakdown['total'] += $amount;
+                    $method = $payment->method ?? 'cash';
+                    $amount = (float)$payment->amount;
+                    if (isset($salesBreakdown[$method])) {
+                        $salesBreakdown[$method] += $amount;
+                    } elseif (in_array($method, ['visa', 'bank', 'bank_transfer'])) {
+                        $salesBreakdown['bankak'] += $amount;
                     }
+                    $salesBreakdown['total'] += $amount;
                 }
 
                 // Calculate Expenses Breakdown

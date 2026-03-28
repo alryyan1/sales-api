@@ -121,7 +121,7 @@ class ShiftController extends Controller
         $shift = Shift::with([
             'user',
             'closedByUser',
-            'sales.payments',
+            'payments',
             'expenses',
             'saleReturns.items'
         ])
@@ -166,7 +166,7 @@ class ShiftController extends Controller
         $shift = Shift::with([
             'user',
             'closedByUser',
-            'sales.payments',
+            'payments',
             'expenses',
             'saleReturns.items'
         ])->findOrFail($id);
@@ -219,7 +219,7 @@ class ShiftController extends Controller
         $shift->load([
             'user',
             'closedByUser',
-            'sales.payments',
+            'payments',
             'expenses',
             'saleReturns.items'
         ]);
@@ -256,7 +256,7 @@ class ShiftController extends Controller
 
         $user = $request->user();
 
-        $shift = Shift::with(['sales.payments', 'saleReturns.items', 'expenses'])
+        $shift = Shift::with(['payments', 'saleReturns.items', 'expenses'])
             ->whereNull('closed_at')
             ->orderBy('id', 'desc')
             ->first();
@@ -289,7 +289,7 @@ class ShiftController extends Controller
         $shift->load([
             'user',
             'closedByUser',
-            'sales.payments',
+            'payments',
             'expenses',
             'saleReturns.items'
         ]);
@@ -324,7 +324,7 @@ class ShiftController extends Controller
      */
     public function notify(Request $request, $id, \App\Services\WhatsAppCloudApiService $whatsapp, \App\Services\AirtelSmsService $sms)
     {
-        $shift = Shift::with(['sales.payments', 'saleReturns.items', 'expenses'])->findOrFail($id);
+        $shift = Shift::with(['payments', 'saleReturns.items', 'expenses'])->findOrFail($id);
 
         // Delegate stats calculation to the model
         $stats        = $shift->calculateStats();

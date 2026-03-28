@@ -1240,10 +1240,27 @@ class ReportController extends Controller
             }
         }
         $sales = $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc')->get();
-        $sales->load(['items', 'payments']);
+        $sales->load(['items']);
+
+        // Query payments directly by shift_id or payment_date
+        $paymentsBaseQuery = Payment::query();
+        if (!empty($validated['shift_id'])) {
+            $paymentsBaseQuery->where('shift_id', $validated['shift_id']);
+        } else {
+            if ($startDate) {
+                $paymentsBaseQuery->whereDate('payment_date', '>=', $startDate);
+            }
+            if ($endDate) {
+                $paymentsBaseQuery->whereDate('payment_date', '<=', $endDate);
+            }
+        }
+        if (!empty($validated['user_id'])) {
+            $paymentsBaseQuery->where('user_id', $validated['user_id']);
+        }
+        $allPayments = $paymentsBaseQuery->get();
 
         $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
+        $totalPaid = (float) $allPayments->sum('amount');
         $totalSales = $sales->count();
         $totalDiscount = 0;
         $totalDue = max(0, $totalAmount - $totalPaid);
@@ -1332,7 +1349,7 @@ class ReportController extends Controller
             $totalReturns += $returnTotal;
         }
 
-        // Payment methods breakdown (sales payments: cash, bankak, etc.)
+        // Payment methods breakdown — use the already-fetched $allPayments collection
         $paymentMethods = [
             'cash' => 0,
             'bankak' => 0,
@@ -1341,15 +1358,12 @@ class ReportController extends Controller
             'visa' => 0,
             'bank_transfer' => 0
         ];
-
-        foreach ($sales as $sale) {
-            foreach ($sale->payments as $payment) {
-                $method = $payment->method ?? 'cash';
-                if (!isset($paymentMethods[$method])) {
-                    $paymentMethods[$method] = 0;
-                }
-                $paymentMethods[$method] += (float) $payment->amount;
+        foreach ($allPayments as $payment) {
+            $method = $payment->method ?? 'cash';
+            if (!isset($paymentMethods[$method])) {
+                $paymentMethods[$method] = 0;
             }
+            $paymentMethods[$method] += (float) $payment->amount;
         }
 
         // Load shift when filtering by shift_id (for popup-style header)

@@ -61,9 +61,15 @@ class Shift extends Model
         return $this->hasMany(SaleReturn::class);
     }
 
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
     /**
-     * Calculate shift financial stats (sales, returns, expenses, net).
-     * Assumes sales.payments, saleReturns.items, and expenses are already loaded.
+     * Calculate shift financial stats (payments, returns, expenses, net).
+     * Assumes payments, saleReturns.items, and expenses are already loaded.
+     * Mirrors the breakdown logic in ShiftResource.
      *
      * @return array{salesCash: float, salesBank: float, totalSales: float,
      *               returnsCash: float, returnsBank: float, totalReturns: float,
@@ -72,17 +78,18 @@ class Shift extends Model
      */
     public function calculateStats(): array
     {
-        // 1. Sales
+        $bankMethods = ['bank', 'bank_transfer', 'visa', 'bankak'];
+
+        // 1. Sales — iterate payments directly (mirrors ShiftResource)
         $salesCash = 0.0;
         $salesBank = 0.0;
-        foreach ($this->sales as $sale) {
-            foreach ($sale->payments as $payment) {
-                $method = $payment->method ?? 'cash';
-                if ($method === 'cash') {
-                    $salesCash += $payment->amount;
-                } else {
-                    $salesBank += $payment->amount;
-                }
+        foreach ($this->payments as $payment) {
+            $method = $payment->method ?? 'cash';
+            $amount = (float) $payment->amount;
+            if ($method === 'cash') {
+                $salesCash += $amount;
+            } else {
+                $salesBank += $amount;
             }
         }
 
@@ -108,13 +115,12 @@ class Shift extends Model
         foreach ($this->expenses as $expense) {
             $method = $expense->payment_method ?? 'cash';
             if ($method === 'cash') {
-                $expensesCash += $expense->amount;
+                $expensesCash += (float) $expense->amount;
             } else {
-                $expensesBank += $expense->amount;
+                $expensesBank += (float) $expense->amount;
             }
         }
 
-        // 4. Net
         return [
             'salesCash'    => $salesCash,
             'salesBank'    => $salesBank,

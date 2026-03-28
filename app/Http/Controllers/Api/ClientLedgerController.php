@@ -91,8 +91,10 @@ class ClientLedgerController extends Controller
             'notes' => 'nullable|string|max:65535',
         ]);
 
+        $latestShift = \App\Models\Shift::orderBy('id', 'desc')->first();
+
         try {
-            $result = DB::transaction(function () use ($client, $validated, $request) {
+            $result = DB::transaction(function () use ($client, $validated, $request, $latestShift) {
                 $remaining = (float) $validated['amount'];
                 $totalApplied = 0.0;
                 $paymentsCreated = 0;
@@ -118,6 +120,7 @@ class ClientLedgerController extends Controller
                     Payment::create([
                         'sale_id' => $sale->id,
                         'user_id' => $request->user()->id ?? null,
+                        'shift_id' => $latestShift?->id,
                         'method' => $validated['method'],
                         'amount' => $apply,
                         'payment_date' => $validated['payment_date'],
@@ -148,6 +151,44 @@ class ClientLedgerController extends Controller
                 'message' => 'Failed to settle client debt',
                 'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Get all individual payments for a client's sales, with optional date range filtering.
+     */
+    public function getPayments(Request $request, Client $client)
+    {
+        try {
+            $query = Payment::whereHas('sale', fn($q) => $q->where('client_id', $client->id))
+                ->with('sale:id,sale_date');
+
+            if ($dateFrom = $request->input('date_from')) {
+                $query->where('payment_date', '>=', $dateFrom);
+            }
+            if ($dateTo = $request->input('date_to')) {
+                $query->where('payment_date', '<=', $dateTo);
+            }
+
+            $payments = $query->orderBy('payment_date', 'desc')
+                ->orderBy('created_at', 'desc')
+                ->get(['id', 'sale_id', 'method', 'amount', 'payment_date', 'reference_number', 'created_at']);
+
+            return response()->json([
+                'payments' => $payments->map(fn($p) => [
+                    'id'               => $p->id,
+                    'sale_id'          => $p->sale_id,
+                    'sale_date'        => $p->sale?->sale_date,
+                    'payment_date'     => $p->payment_date->format('Y-m-d'),
+                    'method'           => $p->method,
+                    'amount'           => (float) $p->amount,
+                    'reference_number' => $p->reference_number,
+                ]),
+                'total' => (float) $payments->sum('amount'),
+                'count' => $payments->count(),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Failed to retrieve payments', 'error' => $e->getMessage()], 500);
         }
     }
 
