@@ -73,6 +73,7 @@ Route::middleware('auth:sanctum')->group(function () {
   // -- Autocomplete Routes --
   Route::get('/products/autocomplete', [ProductController::class, 'autocomplete'])->name('api.products.autocomplete');
   Route::get('/clients/autocomplete', [ClientController::class, 'autocomplete'])->name('api.clients.autocomplete');
+  Route::post('/clients/sync-to-firestore', [ClientController::class, 'syncToFirestore'])->name('api.clients.sync-to-firestore');
   // -- Clients Management --
   Route::apiResource('clients', ClientController::class);
   Route::get('/clients/{client}/ledger', [\App\Http\Controllers\Api\ClientLedgerController::class, 'getLedger']);
@@ -176,6 +177,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Suppliers Management --
   Route::get('/suppliers/summary', [SupplierController::class, 'summary'])->name('api.suppliers.summary');
+  Route::post('/suppliers/sync-to-firestore', [SupplierController::class, 'syncToFirestore'])->name('api.suppliers.sync-to-firestore');
   Route::apiResource('suppliers', SupplierController::class);
 
   // -- Supplier Payments & Ledger --
@@ -200,6 +202,8 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/products/{product}/sales-history', [ProductController::class, 'salesHistory']);
   Route::post('/products/{product}/image', [ProductController::class, 'uploadImage'])->name('api.products.upload-image');
   Route::post('/products/bulk-update-units', [ProductController::class, 'bulkUpdateUnits']);
+  Route::post('/products/bulk-update-sale-price', [ProductController::class, 'bulkUpdateSalePrice']);
+  Route::post('/products/sync-to-firestore', [ProductController::class, 'syncToFirestore'])->name('api.products.sync-to-firestore');
   Route::apiResource('products', ProductController::class);
 
   // -- Warehouses Management --

@@ -5,12 +5,13 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Client;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log; // Added Log for debugging
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Response;
 use App\Http\Resources\ClientResource;
+use App\Services\FirebaseService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Validation\Rule;
-// Removed PharIo\Manifest\Author which was causing issues
 
 class ClientController extends Controller
 {
@@ -353,5 +354,106 @@ class ClientController extends Controller
             ->get();
 
         return response()->json(['data' => $clients]);
+    }
+
+    /**
+     * Sync all clients (with financial balances) to Firestore.
+     *
+     * POST /api/clients/sync-to-firestore
+     *
+     * Optional body param:
+     *   collection_name  — overrides the firebase_collection_name setting
+     */
+    public function syncToFirestore(Request $request)
+    {
+        $projectId = config('firebase.project_id');
+        if (!$projectId) {
+            return response()->json(['message' => 'Firebase project ID not configured.'], 500);
+        }
+
+        $accessToken = FirebaseService::getAccessToken();
+        if (!$accessToken) {
+            return response()->json(['message' => 'Failed to obtain Firebase access token.'], 500);
+        }
+
+        // Resolve collection name: request param → settings → fallback
+        $collectionName = $request->input('collection_name');
+        if (!$collectionName) {
+            $settings = (new \App\Services\SettingsService())->getAll();
+            $collectionName = $settings['firebase_collection_name'] ?? 'none';
+        }
+
+        // Load all clients with their sales items and payments for balance calculation
+        $clients = Client::with(['sales.items', 'payments'])->get();
+
+        $syncedCount = 0;
+        $batchSize   = 450; // Firestore limit is 500 writes per commit
+        $now         = now()->toIso8601String();
+
+        $chunks = $clients->chunk($batchSize);
+
+        foreach ($chunks as $chunk) {
+            $writes = [];
+
+            foreach ($chunk as $client) {
+                // Calculate financial totals (same logic as index())
+                $totalDebit = $client->sales->sum(function ($sale) {
+                    $itemsTotal = $sale->items->sum('total_price');
+                    $discount   = (float) ($sale->discount_amount ?? 0);
+                    return $itemsTotal - $discount;
+                });
+                $totalCredit = $client->payments->sum('amount');
+                $balance     = $totalDebit - $totalCredit;
+
+                $docPath = "projects/{$projectId}/databases/(default)/documents/pharmacies/{$collectionName}/clients/{$client->id}";
+
+                $writes[] = [
+                    'update' => [
+                        'name'   => $docPath,
+                        'fields' => [
+                            'id'           => ['integerValue' => (string) $client->id],
+                            'name'         => ['stringValue'  => (string) ($client->name ?? '')],
+                            'phone'        => ['stringValue'  => (string) ($client->phone ?? '')],
+                            'email'        => ['stringValue'  => (string) ($client->email ?? '')],
+                            'address'      => ['stringValue'  => (string) ($client->address ?? '')],
+                            'balance'      => ['doubleValue'  => (float) $balance],
+                            'total_debit'  => ['doubleValue'  => (float) $totalDebit],
+                            'total_credit' => ['doubleValue'  => (float) $totalCredit],
+                            'synced_at'    => ['timestampValue' => $now],
+                        ],
+                    ],
+                ];
+            }
+
+            if (empty($writes)) {
+                continue;
+            }
+
+            $commitUrl = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents:commit";
+
+            $response = Http::withToken($accessToken)->post($commitUrl, ['writes' => $writes]);
+
+            if (!$response->successful()) {
+                Log::error('ClientController@syncToFirestore: Firestore batch write failed.', [
+                    'status' => $response->status(),
+                    'body'   => $response->body(),
+                ]);
+                return response()->json([
+                    'message'       => 'Firestore batch write failed.',
+                    'synced_so_far' => $syncedCount,
+                    'error'         => $response->json(),
+                ], 502);
+            }
+
+            $syncedCount += count($writes);
+        }
+
+        Log::info("ClientController@syncToFirestore: synced {$syncedCount} clients to Firestore collection '{$collectionName}'.");
+
+        return response()->json([
+            'message'         => "تمت مزامنة {$syncedCount} عميل بنجاح.",
+            'synced_count'    => $syncedCount,
+            'collection_name' => $collectionName,
+        ]);
     }
 }

@@ -9,8 +9,10 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Http\Resources\SupplierResource; // Use SupplierResource
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\Rule; // For unique rule on update
+use Illuminate\Validation\Rule;
+use App\Services\FirebaseService;
 
 class SupplierController extends Controller
 {
@@ -347,5 +349,98 @@ class SupplierController extends Controller
                 'error' => $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+    }
+
+    /**
+     * Sync all suppliers (with financial balances) to Firestore.
+     *
+     * POST /api/suppliers/sync-to-firestore
+     *
+     * Optional body param:
+     *   collection_name  — overrides the firebase_collection_name setting
+     */
+    public function syncToFirestore(Request $request)
+    {
+        $projectId = config('firebase.project_id');
+        if (!$projectId) {
+            return response()->json(['message' => 'Firebase project ID not configured.'], 500);
+        }
+
+        $accessToken = FirebaseService::getAccessToken();
+        if (!$accessToken) {
+            return response()->json(['message' => 'Failed to obtain Firebase access token.'], 500);
+        }
+
+        $collectionName = $request->input('collection_name');
+        if (!$collectionName) {
+            $settings = (new \App\Services\SettingsService())->getAll();
+            $collectionName = $settings['firebase_collection_name'] ?? 'none';
+        }
+
+        // Load suppliers with purchases and payments for balance calculation
+        $suppliers = Supplier::with(['purchases', 'payments'])->get();
+
+        $syncedCount = 0;
+        $batchSize   = 450;
+        $now         = now()->toIso8601String();
+
+        foreach ($suppliers->chunk($batchSize) as $chunk) {
+            $writes = [];
+
+            foreach ($chunk as $supplier) {
+                $totalDebit  = (float) $supplier->purchases->sum('total_amount');
+                $totalCredit = (float) $supplier->payments->sum('amount');
+                $balance     = $totalDebit - $totalCredit;
+
+                $docPath = "projects/{$projectId}/databases/(default)/documents/pharmacies/{$collectionName}/suppliers/{$supplier->id}";
+
+                $writes[] = [
+                    'update' => [
+                        'name'   => $docPath,
+                        'fields' => [
+                            'id'             => ['integerValue' => (string) $supplier->id],
+                            'name'           => ['stringValue'  => (string) ($supplier->name ?? '')],
+                            'contact_person' => ['stringValue'  => (string) ($supplier->contact_person ?? '')],
+                            'phone'          => ['stringValue'  => (string) ($supplier->phone ?? '')],
+                            'email'          => ['stringValue'  => (string) ($supplier->email ?? '')],
+                            'address'        => ['stringValue'  => (string) ($supplier->address ?? '')],
+                            'total_debit'    => ['doubleValue'  => $totalDebit],
+                            'total_credit'   => ['doubleValue'  => $totalCredit],
+                            'balance'        => ['doubleValue'  => $balance],
+                            'synced_at'      => ['timestampValue' => $now],
+                        ],
+                    ],
+                ];
+            }
+
+            if (empty($writes)) {
+                continue;
+            }
+
+            $commitUrl = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents:commit";
+            $response  = Http::withToken($accessToken)->post($commitUrl, ['writes' => $writes]);
+
+            if (!$response->successful()) {
+                Log::error('SupplierController@syncToFirestore: Firestore batch write failed.', [
+                    'status' => $response->status(),
+                    'body'   => $response->body(),
+                ]);
+                return response()->json([
+                    'message'       => 'Firestore batch write failed.',
+                    'synced_so_far' => $syncedCount,
+                    'error'         => $response->json(),
+                ], 502);
+            }
+
+            $syncedCount += count($writes);
+        }
+
+        Log::info("SupplierController@syncToFirestore: synced {$syncedCount} suppliers to Firestore collection '{$collectionName}'.");
+
+        return response()->json([
+            'message'         => "تمت مزامنة {$syncedCount} مورد بنجاح.",
+            'synced_count'    => $syncedCount,
+            'collection_name' => $collectionName,
+        ]);
     }
 }

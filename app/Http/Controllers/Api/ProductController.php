@@ -11,10 +11,12 @@ use App\Services\ProductPdfService;
 use App\Services\ProductExcelService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use App\Services\FirebaseService;
 
 class ProductController extends Controller
 {
@@ -558,6 +560,121 @@ class ProductController extends Controller
 
         return response()->json([
             'message' => 'All products updated successfully to the selected unit.'
+        ]);
+    }
+
+    public function bulkUpdateSalePrice(Request $request)
+    {
+        $validatedData = $request->validate([
+            'percentage' => 'required|numeric|min:0',
+        ]);
+
+        $multiplier = 1 + ($validatedData['percentage'] / 100);
+        $updatedCount = 0;
+
+        Product::all()->each(function (Product $product) use ($multiplier, &$updatedCount) {
+            $lastPrice = $product->last_sale_price_per_sellable_unit;
+            if ($lastPrice !== null && $lastPrice > 0) {
+                $product->sale_price = round($lastPrice * $multiplier, 2);
+                $product->save();
+                $updatedCount++;
+            }
+        });
+
+        return response()->json([
+            'message' => "تم تحديث سعر البيع لـ {$updatedCount} منتج بنجاح.",
+            'updated_count' => $updatedCount,
+        ]);
+    }
+
+    /**
+     * Sync all products to Firestore.
+     *
+     * POST /api/products/sync-to-firestore
+     *
+     * Optional body param:
+     *   collection_name  — overrides the firebase_collection_name setting
+     */
+    public function syncToFirestore(Request $request)
+    {
+        $projectId = config('firebase.project_id');
+        if (!$projectId) {
+            return response()->json(['message' => 'Firebase project ID not configured.'], 500);
+        }
+
+        $accessToken = FirebaseService::getAccessToken();
+        if (!$accessToken) {
+            return response()->json(['message' => 'Failed to obtain Firebase access token.'], 500);
+        }
+
+        $collectionName = $request->input('collection_name');
+        if (!$collectionName) {
+            $settings = (new \App\Services\SettingsService())->getAll();
+            $collectionName = $settings['firebase_collection_name'] ?? 'none';
+        }
+
+        // Load products with category; accessors handle stock/price/cost/expiry
+        $products = Product::with('category')->get();
+
+        $syncedCount = 0;
+        $batchSize   = 450;
+        $now         = now()->toIso8601String();
+
+        foreach ($products->chunk($batchSize) as $chunk) {
+            $writes = [];
+
+            foreach ($chunk as $product) {
+                $docPath = "projects/{$projectId}/databases/(default)/documents/pharmacies/{$collectionName}/products/{$product->id}";
+
+                $writes[] = [
+                    'update' => [
+                        'name'   => $docPath,
+                        'fields' => [
+                            'id'              => ['integerValue'   => (string) $product->id],
+                            'name'            => ['stringValue'    => (string) ($product->name ?? '')],
+                            'scientific_name' => ['stringValue'    => (string) ($product->scientific_name ?? '')],
+                            'sku'             => ['stringValue'    => (string) ($product->sku ?? '')],
+                            'description'     => ['stringValue'    => (string) ($product->description ?? '')],
+                            'category_name'   => ['stringValue'    => (string) ($product->category?->name ?? $product->category_name ?? '')],
+                            'stock_quantity'  => ['integerValue'   => (string) ($product->current_stock_quantity ?? $product->stock_quantity ?? 0)],
+                            'sale_price'      => ['doubleValue'    => (float) ($product->suggested_sale_price_per_sellable_unit ?? 0)],
+                            'cost'            => ['doubleValue'    => (float) ($product->latest_cost_per_sellable_unit ?? 0)],
+                            'expiry_date'     => ['stringValue'    => (string) ($product->earliest_expiry_date ?? '')],
+                            'updated_at'      => ['timestampValue' => $now],
+                            'synced_at'       => ['timestampValue' => $now],
+                        ],
+                    ],
+                ];
+            }
+
+            if (empty($writes)) {
+                continue;
+            }
+
+            $commitUrl = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents:commit";
+            $response  = Http::withToken($accessToken)->post($commitUrl, ['writes' => $writes]);
+
+            if (!$response->successful()) {
+                Log::error('ProductController@syncToFirestore: Firestore batch write failed.', [
+                    'status' => $response->status(),
+                    'body'   => $response->body(),
+                ]);
+                return response()->json([
+                    'message'       => 'Firestore batch write failed.',
+                    'synced_so_far' => $syncedCount,
+                    'error'         => $response->json(),
+                ], 502);
+            }
+
+            $syncedCount += count($writes);
+        }
+
+        Log::info("ProductController@syncToFirestore: synced {$syncedCount} products to Firestore collection '{$collectionName}'.");
+
+        return response()->json([
+            'message'         => "تمت مزامنة {$syncedCount} منتج بنجاح.",
+            'synced_count'    => $syncedCount,
+            'collection_name' => $collectionName,
         ]);
     }
 }
