@@ -9,6 +9,7 @@ use App\Models\Product; // Use the Product model
 use App\Models\PurchaseItem;
 use App\Services\ProductPdfService;
 use App\Services\ProductExcelService;
+use App\Services\PriceListPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Http;
@@ -338,6 +339,16 @@ class ProductController extends Controller
                 ->header('Content-Type', 'application/pdf')
                 ->header('Content-Disposition', 'attachment; filename="products_report.pdf"');
         }
+    }
+
+    public function priceListPdf(Request $request)
+    {
+        $pdfService = new PriceListPdfService();
+        $pdfContent = $pdfService->generatePriceListPdf();
+
+        return response($pdfContent)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', 'inline; filename="pricelist.pdf"');
     }
 
     public function exportExcel(Request $request)

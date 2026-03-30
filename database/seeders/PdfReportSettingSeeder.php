@@ -27,6 +27,7 @@ class PdfReportSettingSeeder extends Seeder
             ['report_key' => 'shift_cost',               'report_name' => 'تكاليف الوردية'],
             ['report_key' => 'shift_inventory_effects',  'report_name' => 'أثر الوردية على المخزون'],
             ['report_key' => 'moved_expired_products',   'report_name' => 'المنتجات المنتهية الصلاحية'],
+            ['report_key' => 'pricelist',                'report_name' => 'قائمة الأسعار'],
         ];
 
         foreach ($reports as $report) {

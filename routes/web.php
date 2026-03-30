@@ -31,6 +31,9 @@ Route::middleware('guest.access')->group(function () {
     // Products PDF Export Route
     Route::get('/products/export/pdf', [ProductController::class, 'exportPdf']);
 
+    // Price List PDF Report
+    Route::get('/products/pricelist/pdf', [ProductController::class, 'priceListPdf']);
+
     // Products Excel Export Route
     Route::get('/products/export/excel', [ProductController::class, 'exportExcel']);
 
