@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\PurchaseItem;
 use App\Services\Pdf\PdfHeaderRenderer;
 use TCPDF;
 
@@ -16,6 +17,13 @@ class PriceListPdfService
     public function generatePriceListPdf(): string
     {
         $products = Product::query()
+            ->addSelect([
+                'last_sale_price_raw' => PurchaseItem::select('sale_price')
+                    ->whereColumn('product_id', 'products.id')
+                    ->whereNotNull('sale_price')
+                    ->latest('created_at')
+                    ->limit(1),
+            ])
             ->with(['category', 'sellableUnit'])
             ->orderBy('name')
             ->get();
@@ -92,8 +100,8 @@ class PriceListPdfService
         foreach ($products as $product) {
             $pdf->SetFillColor($fill ? 245 : 255, $fill ? 245 : 255, $fill ? 245 : 255);
 
-            $price = $product->sale_price !== null
-                ? number_format((float) $product->sale_price, 2)
+            $price = $product->last_sale_price_per_sellable_unit !== null
+                ? number_format($product->last_sale_price_per_sellable_unit, 2)
                 : '-';
 
             $pdf->Cell($colWidths[0], 6, $rowNum,                                          1, 0, 'C', true);
