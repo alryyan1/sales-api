@@ -56,7 +56,7 @@ class ClientController extends Controller
         // Debugging: Log the search term to see if it reaches the backend
         Log::info('Client search triggered', ['search_term' => $search]);
 
-        $query = Client::with(['sales.items', 'payments']);
+        $query = Client::with(['sales.items', 'payments', 'supplier']);
 
         if (!empty($search)) {
             $query = $query->where(function ($q) use ($search) {
@@ -88,6 +88,8 @@ class ClientController extends Controller
                 $client->total_debit = (float) $totalDebit;
                 $client->total_credit = (float) $totalCredit;
                 $client->balance = (float) $balance;
+                $client->is_supplier = $client->supplier !== null;
+                $client->supplier_id = $client->supplier?->id;
 
                 return $client;
             });
@@ -383,55 +385,138 @@ class ClientController extends Controller
             $collectionName = $settings['firebase_collection_name'] ?? 'none';
         }
 
-        // Load all clients with their sales items and payments for balance calculation
-        $clients = Client::with(['sales.items', 'payments'])->get();
+        // Load clients with sales → items → product, and sales → payments, and client payments
+        $clients = Client::with([
+            'sales.items.product',
+            'sales.payments',
+            'payments',
+        ])->get();
 
-        $syncedCount = 0;
-        $batchSize   = 450; // Firestore limit is 500 writes per commit
-        $now         = now()->toIso8601String();
+        $now          = now()->toIso8601String();
+        $batchSize    = 450;
+        $commitUrl    = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents:commit";
+        $allWrites    = [];
+        $clientCount  = 0;
+        $invoiceCount = 0;
+        $itemCount    = 0;
 
-        $chunks = $clients->chunk($batchSize);
+        foreach ($clients as $client) {
+            // --- Financial totals ---
+            $totalDebit = $client->sales->sum(function ($sale) {
+                return $sale->items->sum('total_price') - (float) ($sale->discount_amount ?? 0);
+            });
+            $totalCredit = $client->payments->sum('amount');
+            $balance     = $totalDebit - $totalCredit;
 
-        foreach ($chunks as $chunk) {
-            $writes = [];
+            // --- Client document ---
+            $clientDocPath = "projects/{$projectId}/databases/(default)/documents"
+                . "/pharmacies/{$collectionName}/clients/{$client->id}";
 
-            foreach ($chunk as $client) {
-                // Calculate financial totals (same logic as index())
-                $totalDebit = $client->sales->sum(function ($sale) {
-                    $itemsTotal = $sale->items->sum('total_price');
-                    $discount   = (float) ($sale->discount_amount ?? 0);
-                    return $itemsTotal - $discount;
-                });
-                $totalCredit = $client->payments->sum('amount');
-                $balance     = $totalDebit - $totalCredit;
+            $allWrites[] = [
+                'update' => [
+                    'name'   => $clientDocPath,
+                    'fields' => [
+                        'id'           => ['integerValue'   => (string) $client->id],
+                        'name'         => ['stringValue'    => (string) ($client->name ?? '')],
+                        'phone'        => ['stringValue'    => (string) ($client->phone ?? '')],
+                        'email'        => ['stringValue'    => (string) ($client->email ?? '')],
+                        'address'      => ['stringValue'    => (string) ($client->address ?? '')],
+                        'balance'      => ['doubleValue'    => (float) $balance],
+                        'total_debit'  => ['doubleValue'    => (float) $totalDebit],
+                        'total_credit' => ['doubleValue'    => (float) $totalCredit],
+                        'synced_at'    => ['timestampValue' => $now],
+                    ],
+                ],
+            ];
+            $clientCount++;
 
-                $docPath = "projects/{$projectId}/databases/(default)/documents/pharmacies/{$collectionName}/clients/{$client->id}";
+            // --- Invoice documents (subcollection) ---
+            foreach ($client->sales as $sale) {
+                $itemsTotal  = (float) $sale->items->sum('total_price');
+                $discount    = (float) ($sale->discount_amount ?? 0);
+                $saleTotal   = $itemsTotal - $discount;
+                $paidAmount  = (float) $sale->payments->sum('amount');
+                $dueAmount   = max(0, $saleTotal - $paidAmount);
 
-                $writes[] = [
+                // Build items array value
+                $itemValues = $sale->items->map(function ($item) {
+                    return [
+                        'mapValue' => [
+                            'fields' => [
+                                'product_id'   => ['integerValue' => (string) ($item->product_id ?? 0)],
+                                'product_name' => ['stringValue'  => (string) ($item->product->name ?? '')],
+                                'quantity'     => ['integerValue' => (string) ((int) ($item->quantity ?? 0))],
+                                'unit_price'   => ['doubleValue'  => (float) ($item->unit_price ?? 0)],
+                                'total_price'  => ['doubleValue'  => (float) ($item->total_price ?? 0)],
+                            ],
+                        ],
+                    ];
+                })->values()->all();
+
+                // Build payments array value
+                $paymentValues = $sale->payments->map(function ($payment) {
+                    return [
+                        'mapValue' => [
+                            'fields' => [
+                                'amount' => ['doubleValue' => (float) ($payment->amount ?? 0)],
+                                'method' => ['stringValue' => (string) ($payment->method ?? '')],
+                            ],
+                        ],
+                    ];
+                })->values()->all();
+
+                $invoiceDocPath = "projects/{$projectId}/databases/(default)/documents"
+                    . "/pharmacies/{$collectionName}/clients/{$client->id}/invoices/{$sale->id}";
+
+                $allWrites[] = [
                     'update' => [
-                        'name'   => $docPath,
+                        'name'   => $invoiceDocPath,
                         'fields' => [
-                            'id'           => ['integerValue' => (string) $client->id],
-                            'name'         => ['stringValue'  => (string) ($client->name ?? '')],
-                            'phone'        => ['stringValue'  => (string) ($client->phone ?? '')],
-                            'email'        => ['stringValue'  => (string) ($client->email ?? '')],
-                            'address'      => ['stringValue'  => (string) ($client->address ?? '')],
-                            'balance'      => ['doubleValue'  => (float) $balance],
-                            'total_debit'  => ['doubleValue'  => (float) $totalDebit],
-                            'total_credit' => ['doubleValue'  => (float) $totalCredit],
-                            'synced_at'    => ['timestampValue' => $now],
+                            'id'              => ['integerValue'   => (string) $sale->id],
+                            'number'          => ['integerValue'   => (string) ($sale->number ?? 0)],
+                            'sale_date'       => ['stringValue'    => (string) ($sale->sale_date ?? '')],
+                            'total'           => ['doubleValue'    => $saleTotal],
+                            'discount_amount' => ['doubleValue'    => $discount],
+                            'paid_amount'     => ['doubleValue'    => $paidAmount],
+                            'due_amount'      => ['doubleValue'    => $dueAmount],
+                            'is_returned'     => ['booleanValue'   => (bool) ($sale->is_returned ?? false)],
+                            'items'           => ['arrayValue'     => ['values' => $itemValues]],
+                            'payments'        => ['arrayValue'     => ['values' => $paymentValues]],
+                            'synced_at'       => ['timestampValue' => $now],
                         ],
                     ],
                 ];
+                $invoiceCount++;
+
+                // --- Item documents (subcollection under invoice) ---
+                foreach ($sale->items as $item) {
+                    $itemDocPath = "projects/{$projectId}/databases/(default)/documents"
+                        . "/pharmacies/{$collectionName}/clients/{$client->id}"
+                        . "/invoices/{$sale->id}/items/{$item->id}";
+
+                    $allWrites[] = [
+                        'update' => [
+                            'name'   => $itemDocPath,
+                            'fields' => [
+                                'id'           => ['integerValue' => (string) $item->id],
+                                'product_id'   => ['integerValue' => (string) ($item->product_id ?? 0)],
+                                'product_name' => ['stringValue'  => (string) ($item->product->name ?? '')],
+                                'quantity'     => ['integerValue' => (string) ((int) ($item->quantity ?? 0))],
+                                'unit_price'   => ['doubleValue'  => (float) ($item->unit_price ?? 0)],
+                                'total_price'  => ['doubleValue'  => (float) ($item->total_price ?? 0)],
+                                'synced_at'    => ['timestampValue' => $now],
+                            ],
+                        ],
+                    ];
+                    $itemCount++;
+                }
             }
+        }
 
-            if (empty($writes)) {
-                continue;
-            }
-
-            $commitUrl = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents:commit";
-
-            $response = Http::withToken($accessToken)->post($commitUrl, ['writes' => $writes]);
+        // Commit in chunks of 450
+        $syncedWrites = 0;
+        foreach (array_chunk($allWrites, $batchSize) as $chunk) {
+            $response = Http::withToken($accessToken)->post($commitUrl, ['writes' => $chunk]);
 
             if (!$response->successful()) {
                 Log::error('ClientController@syncToFirestore: Firestore batch write failed.', [
@@ -440,19 +525,21 @@ class ClientController extends Controller
                 ]);
                 return response()->json([
                     'message'       => 'Firestore batch write failed.',
-                    'synced_so_far' => $syncedCount,
+                    'synced_so_far' => $syncedWrites,
                     'error'         => $response->json(),
                 ], 502);
             }
 
-            $syncedCount += count($writes);
+            $syncedWrites += count($chunk);
         }
 
-        Log::info("ClientController@syncToFirestore: synced {$syncedCount} clients to Firestore collection '{$collectionName}'.");
+        Log::info("ClientController@syncToFirestore: synced {$clientCount} clients, {$invoiceCount} invoices, {$itemCount} items to '{$collectionName}'.");
 
         return response()->json([
-            'message'         => "تمت مزامنة {$syncedCount} عميل بنجاح.",
-            'synced_count'    => $syncedCount,
+            'message'         => "تمت مزامنة {$clientCount} عميل و {$invoiceCount} فاتورة و {$itemCount} صنف بنجاح.",
+            'synced_clients'  => $clientCount,
+            'synced_invoices' => $invoiceCount,
+            'synced_items'    => $itemCount,
             'collection_name' => $collectionName,
         ]);
     }

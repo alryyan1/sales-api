@@ -23,7 +23,7 @@ class ClientLedgerController extends Controller
             // Load related sales with their items and payments
             $client->load(['sales' => function ($q) {
                 $q->orderBy('sale_date', 'desc')->orderBy('created_at', 'desc');
-            }, 'sales.items.product:id,name', 'sales.payments']);
+            }, 'sales.items.product:id,name', 'sales.payments', 'supplier']);
 
             $sales = $client->sales;
 
@@ -57,11 +57,14 @@ class ClientLedgerController extends Controller
 
             return response()->json([
                 'client' => [
-                    'id' => $client->id,
-                    'name' => $client->name,
-                    'email' => $client->email,
-                    'phone' => $client->phone,
-                    'address' => $client->address,
+                    'id'            => $client->id,
+                    'name'          => $client->name,
+                    'email'         => $client->email,
+                    'phone'         => $client->phone,
+                    'address'       => $client->address,
+                    'is_supplier'   => $client->supplier !== null,
+                    'supplier_id'   => $client->supplier?->id,
+                    'supplier_name' => $client->supplier?->name,
                 ],
                 'summary' => [
                     'total_sales' => $totalSales,

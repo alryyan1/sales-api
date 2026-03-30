@@ -4,7 +4,8 @@
       "Read(//c//**)",
       "Bash(bash -c 'grep -rho \"\"->can\\('\"''\"'[^'\"''\"']*'\"''\"'\\)\\\\|checkAuthorization\\('\"''\"'[^'\"''\"']*'\"''\"'\\)\\\\|cannot\\('\"''\"'[^'\"''\"']*'\"''\"'\\)\"\" /c/xampp/htdocs/sales-api/app/Http/Controllers --include=\"\"*.php\"\" | sed \"\"s/.*'\"''\"'\\\\\\([^'\"''\"']*\\\\\\).*/\\\\1/g\"\" | sort -u')",
       "Bash(sed \"s/^[^'''']*''''\\\\\\([^'''']*\\\\\\)''''.*$/\\\\1/\")",
-      "Bash(xargs sed:*)"
+      "Bash(xargs sed:*)",
+      "Bash(find /c/xampp/htdocs/sales-ui/src -type f -name *[Ll]edger*)"
     ]
   }
 }

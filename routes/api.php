@@ -187,6 +187,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::prefix('suppliers/{supplier}')->group(function () {
     Route::get('/ledger', [SupplierPaymentController::class, 'getLedger']);
     Route::post('/payments', [SupplierPaymentController::class, 'store']);
+    Route::post('/settle-debt', [SupplierPaymentController::class, 'settleDebt']);
   });
   Route::apiResource('supplier-payments', SupplierPaymentController::class)->except(['index', 'show']);
   Route::get('/payment-methods', [SupplierPaymentController::class, 'getPaymentMethods']);

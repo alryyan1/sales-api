@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Purchase;
 use App\Models\PurchasePayment;
 use App\Models\Supplier;
 use App\Services\SupplierLedgerPdfService;
@@ -139,6 +140,79 @@ class SupplierPaymentController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to generate PDF',
+                'error'   => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Settle supplier debt by allocating a payment across oldest unpaid purchases (FIFO).
+     */
+    public function settleDebt(Request $request, Supplier $supplier)
+    {
+        $validated = $request->validate([
+            'amount'           => 'required|numeric|min:0.01',
+            'method'           => ['required', Rule::in(['cash', 'visa', 'mastercard', 'bank_transfer', 'mada', 'refund', 'other', 'bankak', 'fawry', 'ocash'])],
+            'payment_date'     => 'required|date_format:Y-m-d',
+            'reference_number' => 'nullable|string|max:255',
+        ]);
+
+        try {
+            $result = DB::transaction(function () use ($supplier, $validated, $request) {
+                $remaining      = (float) $validated['amount'];
+                $totalApplied   = 0.0;
+                $paymentsCreated = 0;
+                $affectedPurchases = [];
+
+                // Fetch purchases oldest-first with a lock
+                $purchases = Purchase::where('supplier_id', $supplier->id)
+                    ->orderBy('purchase_date', 'asc')
+                    ->orderBy('created_at', 'asc')
+                    ->lockForUpdate()
+                    ->get();
+
+                foreach ($purchases as $purchase) {
+                    if ($remaining <= 0) break;
+
+                    $paid = (float) PurchasePayment::where('purchase_id', $purchase->id)->sum('amount');
+                    $due  = max(0.0, (float) $purchase->total_amount - $paid);
+
+                    if ($due <= 0) continue;
+
+                    $apply = min($due, $remaining);
+
+                    PurchasePayment::create([
+                        'supplier_id'      => $supplier->id,
+                        'purchase_id'      => $purchase->id,
+                        'user_id'          => auth()->id(),
+                        'amount'           => $apply,
+                        'method'           => $validated['method'],
+                        'payment_date'     => $validated['payment_date'],
+                        'reference_number' => $validated['reference_number'] ?? null,
+                    ]);
+
+                    $totalApplied      += $apply;
+                    $remaining         -= $apply;
+                    $paymentsCreated++;
+                    $affectedPurchases[] = $purchase->id;
+                }
+
+                return [
+                    'payments_created'    => $paymentsCreated,
+                    'total_applied'       => $totalApplied,
+                    'remaining_unapplied' => max(0, (float) $validated['amount'] - $totalApplied),
+                    'affected_purchases'  => $affectedPurchases,
+                ];
+            });
+
+            return response()->json([
+                'message' => 'Supplier debt settled successfully',
+                'result'  => $result,
+            ], Response::HTTP_OK);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to settle supplier debt',
                 'error'   => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
