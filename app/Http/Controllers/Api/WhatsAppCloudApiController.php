@@ -447,6 +447,7 @@ class WhatsAppCloudApiController extends Controller
                         // Handle incoming messages
                         if (isset($value['messages'])) {
                             foreach ($value['messages'] as $message) {
+                                // Route to per-instance handler based on phone_number_id
                                 if ($recipientPhoneNumberId === '1036370259552771') {
                                     $collection = 'one_care';
                                     if (($message['type'] ?? '') === 'text' && isset($message['text']['body'])) {
@@ -458,6 +459,9 @@ class WhatsAppCloudApiController extends Controller
                                     }
 
                                     $this->handleIncomingMessage($message, $value, $collection, $recipientPhoneNumberId);
+                                } else {
+                                    // For all other phone number IDs (sales system, etc.)
+                                    $this->handleIncomingMessage($message, $value, null, $recipientPhoneNumberId);
                                 }
                             }
                         }
@@ -575,8 +579,16 @@ class WhatsAppCloudApiController extends Controller
 
         if ($isButtonMessage && $buttonData !== null) {
             // Determine which button was pressed by its title or payload
-            $buttonTitle = strtolower(trim($buttonData['title'] ?? $buttonData['text'] ?? $buttonData['id'] ?? ''));
-            $buttonPayload = strtolower(trim($buttonData['payload'] ?? $buttonData['id'] ?? ''));
+            $buttonTitle   = strtolower(trim($buttonData['title']   ?? $buttonData['text'] ?? $buttonData['id'] ?? ''));
+            $buttonPayload = trim($buttonData['payload'] ?? $buttonData['id'] ?? '');
+
+            // ── DOWNLOAD_LEDGER handler ──────────────────────────────────
+            if (str_starts_with($buttonPayload, 'DOWNLOAD_LEDGER')) {
+                $this->handleLedgerDownloadRequest($buttonPayload, $from, $phoneNumberId);
+                return;
+            }
+
+            $buttonPayload = strtolower($buttonPayload);
 
             // Identify the report type from the button
             $isSalesReport   = str_contains($buttonTitle, 'مبيعات')   && !str_contains($buttonTitle, 'مردود') && !str_contains($buttonTitle, 'اصناف');
@@ -740,6 +752,84 @@ class WhatsAppCloudApiController extends Controller
         }
     }
 
+
+    /**
+     * Handle a DOWNLOAD_LEDGER quick-reply button tap.
+     * Payload format: "DOWNLOAD_LEDGER|client_id:123|collection:sales-xyz"
+     *
+     * The frontend already uploaded the PDF to Firebase Storage and stored
+     * the download URL in Firestore at:
+     *   pharmacies/{collection}/client_ledgers/{client_id}
+     * We simply look it up and forward the document to the user.
+     */
+    protected function handleLedgerDownloadRequest(string $payload, string $from, ?string $phoneNumberId): void
+    {
+        // Parse pipe-separated key:value pairs
+        $parts = [];
+        foreach (explode('|', $payload) as $segment) {
+            if (str_contains($segment, ':')) {
+                [$key, $val] = explode(':', $segment, 2);
+                $parts[trim($key)] = trim($val);
+            }
+        }
+
+        $clientId   = $parts['client_id']   ?? null;
+        $collection = $parts['collection']  ?? config('firebase.project_id', 'none');
+
+        if (!$clientId) {
+            $this->sendTextToUser($from, 'عذراً، تعذّر التعرف على بيانات الطلب.', $phoneNumberId);
+            return;
+        }
+
+        try {
+            $projectId   = config('firebase.project_id');
+            $accessToken = \App\Services\FirebaseService::getAccessToken();
+
+            if (!$projectId || !$accessToken) {
+                $this->sendTextToUser($from, 'عذراً، خدمة قاعدة البيانات غير متاحة حالياً.', $phoneNumberId);
+                return;
+            }
+
+            // Firestore path: pharmacies/{collection}/client_ledgers/{client_id}
+            $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents"
+                 . "/pharmacies/{$collection}/client_ledgers/{$clientId}";
+
+            $response = Http::withToken($accessToken)->get($url);
+
+            if (!$response->successful()) {
+                Log::warning('WhatsApp webhook: ledger Firestore doc not found', [
+                    'client_id'  => $clientId,
+                    'collection' => $collection,
+                    'status'     => $response->status(),
+                ]);
+                $this->sendTextToUser($from, 'عذراً، لم يتم العثور على كشف الحساب. يرجى طلبه من المتجر.', $phoneNumberId);
+                return;
+            }
+
+            $fields      = $response->json()['fields'] ?? [];
+            $downloadUrl = $fields['download_url']['stringValue'] ?? null;
+            $clientName  = $fields['client_name']['stringValue']  ?? 'العميل';
+
+            if (!$downloadUrl) {
+                $this->sendTextToUser($from, 'عذراً، رابط كشف الحساب غير متوفر.', $phoneNumberId);
+                return;
+            }
+
+            $this->sendTextToUser($from, "جاري إرسال كشف حساب {$clientName}...", $phoneNumberId);
+            $this->sendDocumentToUser($from, $downloadUrl, "ledger_{$clientId}", $phoneNumberId);
+
+            Log::info('WhatsApp webhook: ledger document sent', [
+                'client_id' => $clientId,
+                'to'        => $from,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp webhook: handleLedgerDownloadRequest failed', [
+                'client_id' => $clientId,
+                'error'     => $e->getMessage(),
+            ]);
+            $this->sendTextToUser($from, 'عذراً، حدث خطأ أثناء إرسال كشف الحساب.', $phoneNumberId);
+        }
+    }
 
     /**
      * Send a document to a user via WhatsApp Cloud API.

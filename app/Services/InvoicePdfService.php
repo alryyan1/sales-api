@@ -351,7 +351,7 @@ class InvoicePdfService
         $pdf->SetFont('arial', '', 8); // Reduced from 10
         foreach ($sale->items as $idx => $item) {
             $pdf->Cell($w[0], 6, ($idx + 1), 1, 0, 'C'); // Reduced height from 8 to 6
-            $pdf->Cell($w[1], 6, ($item->product->name ?? ''), 1, 0, 'R');
+            $pdf->Cell($w[1], 6, ($item->product->name ?? ''), 1, 0, 'C');
             $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
             $pdf->Cell($w[3], 6, $item->quantity, 1, 0, 'C');
             $pdf->Cell($w[4], 6, number_format($item->unit_price, 2), 1, 0, 'C');
