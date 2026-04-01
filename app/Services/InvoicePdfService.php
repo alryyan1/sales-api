@@ -217,7 +217,7 @@ class InvoicePdfService
      */
     private function generateFooter(TCPDF $pdf, Sale $sale): void
     {
-        $pdf->SetY(277); // Near bottom of A4 (297mm - 20mm margin)
+        // $pdf->SetY(277); // Near bottom of A4 (297mm - 20mm margin)
         $pdf->SetFont('arial', '', 9);
 
         $timestamp = date('d/m/Y H:i:s', strtotime($sale->sale_date));
@@ -234,46 +234,70 @@ class InvoicePdfService
         $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
+        $companyAddress = $settings['company_address'] ?? null;
         $pdf->setRTL(false);
         $pdf->SetFont('arial', '', 10);
         $pdf->SetMargins(10, $renderer->getTopMargin() + 5, 10);
-        $pdf->SetAutoPageBreak(true, 10);
+        $pdf->SetAutoPageBreak(false, 10); // Disable auto page break to prevent unwanted page creation
 
         $pdf->AddPage();
 
-        $this->generateArabicProformaHeader($pdf, $renderer, $sale, $title);
+        $this->generateArabicProformaHeader($pdf, $renderer, $sale, $title, $settings);
         $this->generateArabicProformaTable($pdf, $sale);
         $this->generateArabicProformaSummary($pdf, $sale, $isFinal);
         $this->generateArabicProformaTerms($pdf, $sale);
 
+        // ── FOOTER: address ───────────────────────────────────────────────────
+        if ($companyAddress) {
+            $pageHeight = $pdf->getPageHeight();
+            $bottomMargin = 15; // mm from bottom
+            $currentY = $pdf->GetY();
+            
+            // Only add footer if there's space on current page
+            if ($currentY < ($pageHeight - $bottomMargin)) {
+                $pdf->SetY($pageHeight - $bottomMargin);
+                $pdf->SetFont('arial', '', 8);
+                $pdf->Cell(0, 6, $companyAddress, 'T', 0, 'C');
+            }
+        }
+
         return $pdf->Output('', 'S');
     }
 
-    private function generateArabicProformaHeader(TCPDF $pdf, \App\Services\Pdf\PdfHeaderRenderer $renderer, Sale $sale, string $title): void
+    private function generateArabicProformaHeader(TCPDF $pdf, \App\Services\Pdf\PdfHeaderRenderer $renderer, Sale $sale, string $title, array $settings = []): void
     {
         $pageW   = $pdf->getPageWidth(); // 210mm
         $leftM   = 10;
         $rightM  = 10;
         $usableW = $pageW - $leftM - $rightM; // 190mm
 
+        $taxNumber      = $settings['tax_number']      ?? null;
+        $companyAddress = $settings['company_address'] ?? null;
+
         // ── BRANDING HEADER (logo / header image / text) ──────────────────────
         $renderer->render($pdf);
+
+        // ── TAX NUMBER (top, below branding header) ───────────────────────────
+        // if ($taxNumber) {
+        //     $pdf->SetFont('arial', '', 9);
+        //     $pdf->Cell(0, 6, 'الرقم التعريفي: ' . $taxNumber, 0, 1, 'C');
+        // }
 
         // ── DIVIDER ───────────────────────────────────────────────────────────
         $pdf->SetDrawColor(180, 180, 180);
         $pdf->Line($leftM, $pdf->GetY(), $pageW - $rightM, $pdf->GetY());
         $pdf->SetDrawColor(0, 0, 0);
-        $pdf->Ln(3);
+        $pdf->Ln(2); // Reduced from 3
 
         // ── TITLE BANNER ─────────────────────────────────────────────────────
         $pdf->SetFont('arial', 'B', 16);
         $pdf->SetFillColor(230, 230, 230);
         $pdf->Cell(0, 5, $title, 0, 1, 'C', false);
-        $pdf->Ln(4);
+        $pdf->Ln(2); // Reduced from 4
 
         // ── CUSTOMER / INVOICE INFO (2-column bordered box) ───────────────────
         $infoY = $pdf->GetY();
-        $rowH  = 8;
+        $rowH  = 6; // Reduced from 8
         $colW  = $usableW / 2; // ~95mm each column
 
         // Light background box
@@ -282,56 +306,56 @@ class InvoicePdfService
 
         // Row 1 — right column: invoice date | left column: client name
         $pdf->SetXY($leftM + $colW, $infoY);
-        $pdf->SetFont('arial', 'B', 10);
-        $pdf->Cell($colW * 0.45, $rowH, 'تاريخ الفاتورة:', 0, 0, 'R');
-        $pdf->SetFont('arial', '', 10);
-        $pdf->Cell($colW * 0.55, $rowH, date('Y/m/d', strtotime($sale->sale_date)), 0, 0, 'C');
+        $pdf->SetFont('arial', 'B', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.55, $rowH, date('Y/m/d', strtotime($sale->sale_date)), 0, 0, 'R');
+        $pdf->SetFont('arial', '', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.45, $rowH, 'تاريخ الفاتورة:', 0, 0, 'C');
 
         $pdf->SetXY($leftM, $infoY);
-        $pdf->SetFont('arial', 'B', 10);
-        $pdf->Cell($colW * 0.4, $rowH, 'اسم العميل:', 0, 0, 'R');
-        $pdf->SetFont('arial', '', 10);
-        $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? $sale->client->name : 'عميل نقدي'), 0, 0, 'L');
+        $pdf->SetFont('arial', 'B', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? $sale->client->name : 'عميل نقدي'), 0, 0, 'R');
+        $pdf->SetFont('arial', '', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.4, $rowH, 'اسم العميل:', 0, 0, 'C');
 
         // Row 2 — right column: invoice number | left column: phone
         $pdf->SetXY($leftM + $colW, $infoY + $rowH);
-        $pdf->SetFont('arial', 'B', 10);
-        $pdf->Cell($colW * 0.45, $rowH, 'رقم الفاتورة:', 0, 0, 'R');
-        $pdf->SetFont('arial', '', 10);
-        $pdf->Cell($colW * 0.55, $rowH, (string) $sale->id, 0, 0, 'C');
+        $pdf->SetFont('arial', 'B', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.55, $rowH, (string) $sale->id, 0, 0, 'R');
+        $pdf->SetFont('arial', '', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.45, $rowH, 'رقم الفاتورة:', 0, 0, 'C');
 
         $pdf->SetXY($leftM, $infoY + $rowH);
-        $pdf->SetFont('arial', 'B', 10);
-        $pdf->Cell($colW * 0.4, $rowH, 'رقم الهاتف:', 0, 0, 'R');
-        $pdf->SetFont('arial', '', 10);
-        $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? ($sale->client->phone ?? '') : ''), 0, 0, 'L');
+        $pdf->SetFont('arial', 'B', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.6, $rowH, $settings['tax_number'] ?? null, 0, 0, 'R');
+        $pdf->SetFont('arial', '', 9); // Reduced from 10
+        $pdf->Cell($colW * 0.4, $rowH, 'الرقم التعريفي:', 0, 0, 'C');
 
-        $pdf->SetY($infoY + $rowH * 2 + 5);
+        $pdf->SetY($infoY + $rowH * 2 + 2); // Reduced from 5
     }
 
     private function generateArabicProformaTable(TCPDF $pdf, Sale $sale): void
     {
         $pdf->SetFillColor(240, 240, 240);
-        $pdf->SetFont('arial', 'B', 10);
+        $pdf->SetFont('arial', 'B', 9); // Reduced from 10
 
         // Column widths
         $w = [10, 80, 15, 15, 25, 45]; // م, البيان, الوحده, العدد, السعر, المبلغ
 
-        $pdf->Cell($w[0], 8, 'م', 1, 0, 'C', true);
-        $pdf->Cell($w[1], 8, 'البيان', 1, 0, 'C', true);
-        $pdf->Cell($w[2], 8, 'الوحده', 1, 0, 'C', true);
-        $pdf->Cell($w[3], 8, 'العدد', 1, 0, 'C', true);
-        $pdf->Cell($w[4], 8, 'السعر', 1, 0, 'C', true);
-        $pdf->Cell($w[5], 8, 'المبلغ', 1, 1, 'C', true);
+        $pdf->Cell($w[0], 7, 'م', 1, 0, 'C', true);
+        $pdf->Cell($w[1], 7, 'البيان', 1, 0, 'C', true);
+        $pdf->Cell($w[2], 7, 'الوحده', 1, 0, 'C', true);
+        $pdf->Cell($w[3], 7, 'العدد', 1, 0, 'C', true);
+        $pdf->Cell($w[4], 7, 'السعر', 1, 0, 'C', true);
+        $pdf->Cell($w[5], 7, 'المبلغ', 1, 1, 'C', true);
 
-        $pdf->SetFont('arial', '', 10);
+        $pdf->SetFont('arial', '', 8); // Reduced from 10
         foreach ($sale->items as $idx => $item) {
-            $pdf->Cell($w[0], 8, ($idx + 1), 1, 0, 'C');
-            $pdf->Cell($w[1], 8, ($item->product->name ?? ''), 1, 0, 'R');
-            $pdf->Cell($w[2], 8, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
-            $pdf->Cell($w[3], 8, $item->quantity, 1, 0, 'C');
-            $pdf->Cell($w[4], 8, number_format($item->unit_price, 2), 1, 0, 'C');
-            $pdf->Cell($w[5], 8, number_format($item->total_price, 2), 1, 1, 'C');
+            $pdf->Cell($w[0], 6, ($idx + 1), 1, 0, 'C'); // Reduced height from 8 to 6
+            $pdf->Cell($w[1], 6, ($item->product->name ?? ''), 1, 0, 'R');
+            $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
+            $pdf->Cell($w[3], 6, $item->quantity, 1, 0, 'C');
+            $pdf->Cell($w[4], 6, number_format($item->unit_price, 2), 1, 0, 'C');
+            $pdf->Cell($w[5], 6, number_format($item->total_price, 2), 1, 1, 'C');
         }
     }
 
@@ -341,7 +365,7 @@ class InvoicePdfService
         $discount = $sale->discount_amount ?? 0;
         $net = $total - $discount;
 
-        $pdf->Ln(2);
+        $pdf->Ln(5); // Reduced from 2
 
         // Total row
         $pdf->SetFont('arial', 'B', 11);
@@ -362,8 +386,8 @@ class InvoicePdfService
         // Sum in words
         $pdf->SetFont('arial', '', 11);
         $wordAmount = $this->numberToArabicWords($net);
-        $pdf->Cell(0, 10, 'فقط وقدره: ' . $wordAmount . ' لا غير', 0, 1, 'R');
-        $pdf->Ln(5);
+        $pdf->Cell(0, 10, 'فقط وقدره: ' . $wordAmount . ' جنية   لا غير', 0, 1, 'R');
+        $pdf->Ln(2); // Reduced from 5
     }
 
     private function numberToArabicWords($number): string

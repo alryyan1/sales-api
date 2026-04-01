@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\{
   ReportController,
   RoleController,
   SaleController,
+  SaleReminderController,
   SaleReturnController,
   SettingController,
   StockAdjustmentController,
@@ -257,6 +258,12 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/sales/{sale}/invoice-pdf', [SaleController::class, 'downloadInvoicePDF'])->name('api.sales.invoice.pdf'); // <-- Invoice PDF Route
   Route::get('/sales/{sale}/a4-invoice-pdf', [SaleController::class, 'downloadA4InvoicePdf'])->name('api.sales.a4Invoice.pdf'); // <-- A4 English Invoice (download)
   Route::get('/sales/{sale}/a4-invoice-pdf/view', [SaleController::class, 'viewA4InvoicePdf'])->name('api.sales.a4Invoice.view'); // <-- A4 English Invoice (view)
+  // -- Sale Reminders --
+  Route::get('/sale-reminders/due', [SaleReminderController::class, 'due'])->name('api.sale-reminders.due');
+  Route::patch('/sale-reminders/{reminder}/dismiss', [SaleReminderController::class, 'dismiss'])->name('api.sale-reminders.dismiss');
+  Route::get('/sales/{sale}/reminder', [SaleReminderController::class, 'show'])->name('api.sales.reminder.show');
+  Route::post('/sales/{sale}/reminder', [SaleReminderController::class, 'upsert'])->name('api.sales.reminder.upsert');
+  Route::delete('/sales/{sale}/reminder', [SaleReminderController::class, 'destroy'])->name('api.sales.reminder.destroy');
 
   // ... existing Sale routes ...
 
