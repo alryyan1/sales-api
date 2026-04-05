@@ -85,6 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/clients/{client}/settle-debt', [\App\Http\Controllers\Api\ClientLedgerController::class, 'settleDebt']);
   Route::get('/clients/{client}/payments', [\App\Http\Controllers\Api\ClientLedgerController::class, 'getPayments']);
   Route::get('products/{product}/available-batches', [ProductController::class, 'getAvailableBatches']);
+  Route::get('products/{product}/barcode-label-pdf', [ProductController::class, 'barcodeLabelPdf'])->name('api.products.barcodeLabelPdf');
 
   // -- User Profile Routes --
   Route::prefix('profile')->name('api.profile.')->group(function () {

@@ -688,4 +688,67 @@ class ProductController extends Controller
             'collection_name' => $collectionName,
         ]);
     }
+
+    /**
+     * Generate a barcode label PDF for a product using TCPDF.
+     * Query params: width (mm), height (mm), copies
+     */
+    public function barcodeLabelPdf(Request $request, Product $product)
+    {
+        $width  = max(20, min(200, (float)$request->input('width',  60)));
+        $height = max(10, min(200, (float)$request->input('height', 30)));
+        $copies = max(1, min(100, (int)$request->input('copies',    1)));
+
+        $barcodeValue = $product->sku ?: (string)$product->id;
+
+        $pdf = new \TCPDF('L', 'mm', [$height, $width], true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->SetMargins(2, 2, 2);
+        $pdf->SetAutoPageBreak(false, 0);
+        $pdf->SetFont('helvetica', '', 7);
+
+        $barcodeStyle = [
+            'position'     => 'C',
+            'align'        => 'C',
+            'stretch'      => false,
+            'fitwidth'     => true,
+            'cellfitalign' => '',
+            'border'       => false,
+            'hpadding'     => 1,
+            'vpadding'     => 0.5,
+            'fgcolor'      => [0, 0, 0],
+            'bgcolor'      => false,
+            'text'         => true,
+            'font'         => 'helvetica',
+            'fontsize'     => 7,
+            'stretchtext'  => 4,
+        ];
+
+        for ($i = 0; $i < $copies; $i++) {
+            $pdf->AddPage();
+
+            // Product name (top, centred)
+            $pdf->SetFont('helvetica', 'B', 7);
+            $pdf->Cell(0, 4, $product->name, 0, 1, 'C');
+
+            // Barcode (Code 128)
+            $barcodeH = $height * 0.45;
+            $pdf->write1DBarcode($barcodeValue, 'C128', '', '', 0, $barcodeH, 0.4, $barcodeStyle, 'N');
+
+            // SKU / price line (bottom)
+            $pdf->SetFont('helvetica', '', 6);
+            $price = number_format((float)($product->sale_price ?? 0), 2);
+            $pdf->Cell(0, 3, $barcodeValue . '   ' . $price, 0, 1, 'C');
+        }
+
+        $filename = 'barcode_' . $product->id . '.pdf';
+        $content  = $pdf->Output($filename, 'S');
+
+        return response($content, 200, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="' . $filename . '"',
+            'Cache-Control'       => 'no-cache',
+        ]);
+    }
 }
