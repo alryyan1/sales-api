@@ -571,22 +571,24 @@ class SaleController extends Controller
                     $additionalQuantity = $validatedData['quantity'];
                     $newQuantity = $oldQuantity + $additionalQuantity;
 
-                    // Check stock availability for the additional quantity
-                    $availableInWarehouse = $product->countStock($warehouseId);
-                    $currentInOtherItems = $sale->items()
-                        ->where('product_id', $product->id)
-                        ->where('id', '!=', $existingSaleItem->id)
-                        ->sum('quantity');
-                    $availableForThisItem = $availableInWarehouse - $currentInOtherItems;
+                    if (!$sale->is_quote) {
+                        // Check stock availability for the additional quantity
+                        $availableInWarehouse = $product->countStock($warehouseId);
+                        $currentInOtherItems = $sale->items()
+                            ->where('product_id', $product->id)
+                            ->where('id', '!=', $existingSaleItem->id)
+                            ->sum('quantity');
+                        $availableForThisItem = $availableInWarehouse - $currentInOtherItems;
 
-                    if ($availableForThisItem < $additionalQuantity) {
-                        throw ValidationException::withMessages([
-                            'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested total: {$newQuantity}"
-                        ]);
+                        if ($availableForThisItem < $additionalQuantity) {
+                            throw ValidationException::withMessages([
+                                'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested total: {$newQuantity}"
+                            ]);
+                        }
+
+                        // Decrement warehouse stock by the additional quantity
+                        $product->decrementWarehouseStock($warehouseId, $additionalQuantity);
                     }
-
-                    // Decrement warehouse stock by the additional quantity
-                    $product->decrementWarehouseStock($warehouseId, $additionalQuantity);
 
                     // Update unit price if provided (otherwise keep existing)
                     $resolvedUnitPrice = (float) ($validatedData['unit_price'] ?? 0);
@@ -614,19 +616,21 @@ class SaleController extends Controller
                 }
 
                 $warehouseId = $sale->warehouse_id ?? 1;
-                $availableInWarehouse = $product->countStock($warehouseId);
-                $currentQuantityInThisSale = $sale->items()->where('product_id', $product->id)->sum('quantity');
-                $availableForThisAdd = $availableInWarehouse - $currentQuantityInThisSale;
+                if (!$sale->is_quote) {
+                    $availableInWarehouse = $product->countStock($warehouseId);
+                    $currentQuantityInThisSale = $sale->items()->where('product_id', $product->id)->sum('quantity');
+                    $availableForThisAdd = $availableInWarehouse - $currentQuantityInThisSale;
 
-                if ($availableForThisAdd <= 0) {
-                    throw ValidationException::withMessages([
-                        'product_id' => "Product '{$product->name}' is out of stock in warehouse. Available: 0"
-                    ]);
-                }
-                if ($validatedData['quantity'] > $availableForThisAdd) {
-                    throw ValidationException::withMessages([
-                        'quantity' => "Insufficient stock. Available: {$availableForThisAdd}, Requested: {$validatedData['quantity']}"
-                    ]);
+                    if ($availableForThisAdd <= 0) {
+                        throw ValidationException::withMessages([
+                            'product_id' => "Product '{$product->name}' is out of stock in warehouse. Available: 0"
+                        ]);
+                    }
+                    if ($validatedData['quantity'] > $availableForThisAdd) {
+                        throw ValidationException::withMessages([
+                            'quantity' => "Insufficient stock. Available: {$availableForThisAdd}, Requested: {$validatedData['quantity']}"
+                        ]);
+                    }
                 }
 
                 $resolvedUnitPrice = (float) ($validatedData['unit_price'] ?? 0);
@@ -647,7 +651,9 @@ class SaleController extends Controller
                 ]);
                 $saleItems = [$saleItem];
 
-                $product->decrementWarehouseStock($warehouseId, $validatedData['quantity']);
+                if (!$sale->is_quote) {
+                    $product->decrementWarehouseStock($warehouseId, $validatedData['quantity']);
+                }
 
                 $newTotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');
@@ -723,34 +729,36 @@ class SaleController extends Controller
                 $quantityDifference = $newQuantity - $oldQuantity;
 
                 $warehouseId = $sale->warehouse_id ?? 1;
-                if ($quantityDifference > 0) {
-                    // Business rule: each sale must have at most ONE item per product.
-                    // We only need stock for the INCREASE (quantityDifference), not the whole new quantity.
-                    $availableInWarehouse = $product->countStock($warehouseId);
-                    Log::info('Available in warehouse: ' . $availableInWarehouse);
-                    Log::info('Quantity difference: ' . $quantityDifference);
-
-                    // In a valid state there should be no other items with the same product,
-                    // but we still exclude the current     row defensively in case of legacy data.
-                    $currentInOtherItems = $sale->items()
-                        ->where('product_id', $product->id)
-                        ->where('id', '!=', $saleItem->id)
-                        ->sum('quantity');
-
-                    $availableForIncrease = $availableInWarehouse - $currentInOtherItems;
-
-                    if ($availableForIncrease < $quantityDifference) {
-                        throw ValidationException::withMessages([
-                            'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForIncrease}, additional requested: {$quantityDifference}"
-                        ]);
-                    }
-                }
-
-                if ($quantityDifference !== 0) {
+                if (!$sale->is_quote) {
                     if ($quantityDifference > 0) {
-                        $product->decrementWarehouseStock($warehouseId, $quantityDifference);
-                    } else {
-                        $product->incrementWarehouseStock($warehouseId, abs($quantityDifference));
+                        // Business rule: each sale must have at most ONE item per product.
+                        // We only need stock for the INCREASE (quantityDifference), not the whole new quantity.
+                        $availableInWarehouse = $product->countStock($warehouseId);
+                        Log::info('Available in warehouse: ' . $availableInWarehouse);
+                        Log::info('Quantity difference: ' . $quantityDifference);
+
+                        // In a valid state there should be no other items with the same product,
+                        // but we still exclude the current     row defensively in case of legacy data.
+                        $currentInOtherItems = $sale->items()
+                            ->where('product_id', $product->id)
+                            ->where('id', '!=', $saleItem->id)
+                            ->sum('quantity');
+
+                        $availableForIncrease = $availableInWarehouse - $currentInOtherItems;
+
+                        if ($availableForIncrease < $quantityDifference) {
+                            throw ValidationException::withMessages([
+                                'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForIncrease}, additional requested: {$quantityDifference}"
+                            ]);
+                        }
+                    }
+
+                    if ($quantityDifference !== 0) {
+                        if ($quantityDifference > 0) {
+                            $product->decrementWarehouseStock($warehouseId, $quantityDifference);
+                        } else {
+                            $product->incrementWarehouseStock($warehouseId, abs($quantityDifference));
+                        }
                     }
                 }
 
@@ -840,9 +848,11 @@ class SaleController extends Controller
                 $product = $saleItem->product;
                 $purchaseItem = $saleItem->purchaseItemBatch;
 
-                // Return quantity to warehouse (SSOT)
+                // Return quantity to warehouse (SSOT) — skip for quote mode
                 $warehouseId = $sale->warehouse_id ?? 1;
-                $product->incrementWarehouseStock($warehouseId, $saleItem->quantity);
+                if (!$sale->is_quote) {
+                    $product->incrementWarehouseStock($warehouseId, $saleItem->quantity);
+                }
 
                 // Delete the sale item first
                 $deletedQuantity = $saleItem->quantity;
@@ -1523,5 +1533,69 @@ class SaleController extends Controller
     {
         $invoiceService = app(\App\Services\InvoicePdfService::class);
         return $invoiceService->viewInvoice($sale);
+    }
+
+    /**
+     * Toggle the is_quote flag on a sale.
+     * When switching to quote mode: return all item stock to inventory.
+     * When reverting to normal: check and deduct stock for all items.
+     */
+    public function toggleQuote(Sale $sale)
+    {
+        $newIsQuote = !$sale->is_quote;
+        $sale->load('items.product');
+
+        try {
+            DB::transaction(function () use ($sale, $newIsQuote) {
+                if ($newIsQuote) {
+                    // Switching to quote → return all item stock to inventory
+                    foreach ($sale->items as $item) {
+                        if ($item->product) {
+                            $item->product->incrementWarehouseStock($sale->warehouse_id, $item->quantity);
+                        }
+                    }
+                } else {
+                    // Reverting to normal → check stock first, then deduct
+                    foreach ($sale->items as $item) {
+                        if ($item->product) {
+                            $available = $item->product->countStock($sale->warehouse_id);
+                            if ($available < $item->quantity) {
+                                throw ValidationException::withMessages([
+                                    'stock' => 'مخزون غير كافٍ للمنتج: ' . $item->product->name
+                                ]);
+                            }
+                        }
+                    }
+                    foreach ($sale->items as $item) {
+                        if ($item->product) {
+                            $item->product->decrementWarehouseStock($sale->warehouse_id, $item->quantity);
+                        }
+                    }
+                }
+
+                $sale->update(['is_quote' => $newIsQuote]);
+            });
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors()
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Failed to toggle quote mode.',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $sale->load([
+            'client:id,name',
+            'user:id,name',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
+            'items.product.warehouses',
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
+            'payments.user:id,name'
+        ]);
+
+        return response()->json(new SaleResource($sale));
     }
 }

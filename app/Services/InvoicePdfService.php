@@ -25,9 +25,14 @@ class InvoicePdfService
         // Initialize paid amount
         $paidAmount = (float) ($sale->payments?->sum('amount') ?? 0);
 
-        // Always use the custom Arabic layout. title depends on payment status
-        $isFinal = $paidAmount > 0;
-        $title = $isFinal ? 'فاتورة نهائية' : 'فاتورة مبدئية';
+        // Determine invoice title
+        if ($sale->is_quote) {
+            $title = 'تسعيره';
+            $isFinal = false;
+        } else {
+            $isFinal = $paidAmount > 0;
+            $title = $isFinal ? 'فاتورة نهائية' : 'فاتورة مبدئية';
+        }
 
         return $this->generateArabicProformaPdf($sale, $settings, $title, $isFinal);
     }

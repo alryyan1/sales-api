@@ -67,6 +67,20 @@ class Shift extends Model
     }
 
     /**
+     * Calculate total sales amount for the shift.
+     * Returns sum of sale items minus discounts, excluding quote sales.
+     */
+    public function calculateTotalSales(): float
+    {
+        $sales = $this->sales()->where('is_quote', false)->with('items')->get();
+
+        $subtotal = $sales->sum(fn($sale) => $sale->items->sum('total_price'));
+        $discounts = $sales->sum(fn($sale) => (float) ($sale->discount_amount ?? 0));
+
+        return max(0.0, $subtotal - $discounts);
+    }
+
+    /**
      * Calculate shift financial stats (payments, returns, expenses, net).
      * Assumes payments, saleReturns.items, and expenses are already loaded.
      * Mirrors the breakdown logic in ShiftResource.

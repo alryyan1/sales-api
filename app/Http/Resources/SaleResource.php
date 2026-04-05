@@ -29,6 +29,7 @@ class SaleResource extends JsonResource
 
             'sale_date' => $this->sale_date->format('Y-m-d'),
             'is_returned' => $this->is_returned ?? false,
+            'is_quote' => $this->is_quote ?? false,
 
             // Subtotal from items; discount stored as amount; total = subtotal - discount
             'subtotal' => (float) $this->items->sum('total_price'),

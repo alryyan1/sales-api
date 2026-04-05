@@ -53,6 +53,7 @@ class Sale extends Model
         'sale_date',
         'number',
         'is_returned',
+        'is_quote',
         'total_cost',
         'discount_amount',
     ];
@@ -60,6 +61,7 @@ class Sale extends Model
     protected $casts = [
         'sale_date' => 'date',
         'is_returned' => 'boolean',
+        'is_quote' => 'boolean',
         'discount_amount' => 'decimal:2',
     ];
 

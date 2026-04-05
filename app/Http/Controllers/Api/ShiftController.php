@@ -324,7 +324,7 @@ class ShiftController extends Controller
      */
     public function notify(Request $request, $id, \App\Services\WhatsAppCloudApiService $whatsapp, \App\Services\AirtelSmsService $sms)
     {
-        $shift = Shift::with(['payments', 'saleReturns.items', 'expenses'])->findOrFail($id);
+        $shift = Shift::with(['payments', 'saleReturns.items', 'expenses', 'user'])->findOrFail($id);
 
         // Delegate stats calculation to the model
         $stats        = $shift->calculateStats();
@@ -338,6 +338,9 @@ class ShiftController extends Controller
         $expensesBank = $stats['expensesBank'];
         $netCash      = $stats['netCash'];
         $netBank      = $stats['netBank'];
+
+        // Total sales value from items (excludes quotes)
+        $totalSalesAmount = $shift->calculateTotalSales();
 
         // Send WhatsApp Notification
         $whatsappStatus = 'skipped';
@@ -353,18 +356,21 @@ class ShiftController extends Controller
                 $whatsappStatus = 'skipped';
                 $whatsappMessage = 'No WhatsApp numbers configured for shift closures.';
             } else {
-                $templateName = 'shift_closed';
+                $templateName = 'shift_closed_ar';
                 $languageCode = 'ar';
 
                 $components = [
                     [
                         'type' => 'body',
                         'parameters' => [
-                            ['type' => 'text', 'text' => (string)$shift->id],
-                            ['type' => 'text', 'text' => number_format($totalSales, 2)],
-                            ['type' => 'text', 'text' => number_format($totalReturns, 2)],
-                            ['type' => 'text', 'text' => number_format($netCash, 2)],
-                            ['type' => 'text', 'text' => number_format($netBank, 2)],
+                            ['type' => 'text', 'text' => (string)$shift->id],                          // 1 - shift number
+                            ['type' => 'text', 'text' => $shift->opened_at?->format('Y-m-d') ?? now()->format('Y-m-d')], // 2 - date
+                            ['type' => 'text', 'text' => $shift->user?->name ?? '—'],                  // 3 - user name
+                            ['type' => 'text', 'text' => number_format($totalSalesAmount, 2)],         // 4 - total sales (items value)
+                            ['type' => 'text', 'text' => number_format($totalSales, 2)],               // 5 - total revenues (payments collected)
+                            ['type' => 'text', 'text' => number_format($totalReturns, 2)],             // 6 - total returns
+                            ['type' => 'text', 'text' => number_format($netCash, 2)],                  // 7 - net cash
+                            ['type' => 'text', 'text' => number_format($netBank, 2)],                  // 8 - net bank
                         ]
                     ],
                     // Embed shift_id in each button payload so the webhook can extract it

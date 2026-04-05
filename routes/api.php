@@ -261,6 +261,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/sales/{sale}/items/multiple', [SaleController::class, 'addMultipleSaleItems'])->name('api.sales.addMultipleSaleItems');
   Route::put('/sales/{sale}/items/{saleItem}', [SaleController::class, 'updateSaleItem'])->name('api.sales.updateSaleItem');
   Route::delete('/sales/{sale}/items/{saleItem}', [SaleController::class, 'deleteSaleItem'])->name('api.sales.deleteSaleItem');
+  Route::post('/sales/{sale}/toggle-quote', [SaleController::class, 'toggleQuote'])->name('api.sales.toggleQuote');
   Route::get('/sales/{sale}/thermal-invoice-pdf', [SaleController::class, 'downloadThermalInvoicePDF'])->name('api.sales.thermalInvoice.pdf'); // <-- New Route
   Route::get('/sales/{sale}/invoice-pdf', [SaleController::class, 'downloadInvoicePDF'])->name('api.sales.invoice.pdf'); // <-- Invoice PDF Route
   Route::get('/sales/{sale}/a4-invoice-pdf', [SaleController::class, 'downloadA4InvoicePdf'])->name('api.sales.a4Invoice.pdf'); // <-- A4 English Invoice (download)
