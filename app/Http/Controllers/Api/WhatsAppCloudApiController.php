@@ -536,24 +536,15 @@ class WhatsAppCloudApiController extends Controller
             'timestamp' => $timestamp,
         ]);
 
-        // Handle Image Messages
+        // ── Download media & upload to Firebase Storage ───────────────────
+        $mediaInfo = null;
         if ($type === 'image' && isset($message['image'])) {
-            $this->handleImageMessage($message['image'], $from, $messageId);
+            $mediaInfo = $this->handleImageMessage($message['image'], $from, $messageId);
         }
 
-        if (($type ?? '') === 'text' && isset($message['text']['body'])) {
-            // \App\Events\WhatsAppMessageReceived::dispatch([
-            //     'phone_number_id' => $phoneNumberId,
-            //     'waba_id' => null,
-            //     'from' => $from,
-            //     'to' => $phoneNumberId,
-            //     'type' => 'text',
-            //     'body' => $message['text']['body'],
-            //     'status' => 'received',
-            //     'message_id' => $messageId ?? null,
-            //     'direction' => 'incoming',
-            //     'raw_payload' => $message,
-            // ]);
+        // ── Persist every inbound message to Firestore ────────────────────
+        if ($messageId && $from) {
+            $this->saveMessageToFirestore($messageId, $from, $type ?? 'unknown', $message, $mediaInfo, $phoneNumberId);
         }
 
         $isButtonMessage = false;
@@ -648,63 +639,57 @@ class WhatsAppCloudApiController extends Controller
 
     /**
      * Handle incoming image messages.
+     * Downloads from WhatsApp, uploads to Firebase Storage, returns media info for Firestore.
      */
-    protected function handleImageMessage(array $imageData, string $from, string $messageId): void
+    protected function handleImageMessage(array $imageData, string $from, string $messageId): ?array
     {
-        $mediaId = $imageData['id'] ?? null;
-        $caption = $imageData['caption'] ?? '';
+        $mediaId  = $imageData['id'] ?? null;
+        $caption  = $imageData['caption'] ?? null;
         $mimeType = $imageData['mime_type'] ?? 'image/jpeg';
 
         if (!$mediaId) {
             Log::warning('WhatsApp Cloud API: Image message missing media ID.');
-            return;
+            return null;
         }
 
         Log::info('WhatsApp Cloud API: Processing image message.', [
             'media_id' => $mediaId,
-            'from' => $from,
+            'from'     => $from,
         ]);
 
         $mediaUrl = $this->whatsappService->getMediaUrl($mediaId);
-
         if (!$mediaUrl) {
             Log::error('WhatsApp Cloud API: Could not retrieve media URL for ID ' . $mediaId);
-            return;
+            return null;
         }
 
         $content = $this->whatsappService->downloadMedia($mediaUrl);
-
         if (!$content) {
             Log::error('WhatsApp Cloud API: Could not download media content for URL ' . $mediaUrl);
-            return;
+            return null;
         }
 
-        // Determine extension from mime type
-        $extension = 'jpg';
-        if (str_contains($mimeType, 'png')) {
-            $extension = 'png';
-        } elseif (str_contains($mimeType, 'gif')) {
-            $extension = 'gif';
-        } elseif (str_contains($mimeType, 'webp')) {
-            $extension = 'webp';
-        }
+        $extension   = $this->extensionFromMime($mimeType);
+        $storagePath = "whatsapp/{$from}/images/{$messageId}.{$extension}";
+        $storageUrl  = $this->uploadToFirebaseStorage($content, $storagePath, $mimeType);
 
-        $filename = "whatsapp_image_{$messageId}_{$from}." . $extension;
-        $path = "whatsapp/images/{$filename}";
-
-        try {
-            Storage::disk('public')->put($path, $content);
-            $fullUrl = Storage::disk('public')->url($path);
-
-            Log::info('WhatsApp Cloud API: Image stored successfully.', [
-                'path' => $path,
-                'url' => $fullUrl,
+        if ($storageUrl) {
+            Log::info('WhatsApp Cloud API: Image stored in Firebase Storage.', [
+                'path' => $storagePath,
+                'url'  => $storageUrl,
             ]);
-        } catch (\Exception $e) {
-            Log::error('WhatsApp Cloud API: Failed to store image.', [
-                'error' => $e->getMessage(),
+        } else {
+            Log::warning('WhatsApp Cloud API: Firebase Storage upload failed for image, URL will be null.', [
+                'message_id' => $messageId,
             ]);
         }
+
+        return [
+            'mime_type'    => $mimeType,
+            'storage_path' => $storagePath,
+            'storage_url'  => $storageUrl,
+            'caption'      => $caption,
+        ];
     }
 
     /**
@@ -792,7 +777,7 @@ class WhatsAppCloudApiController extends Controller
 
             // Firestore path: pharmacies/{collection}/client_ledgers/{client_id}
             $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents"
-                 . "/pharmacies/{$collection}/client_ledgers/{$clientId}";
+                . "/pharmacies/{$collection}/client_ledgers/{$clientId}";
 
             $response = Http::withToken($accessToken)->get($url);
 
@@ -910,27 +895,269 @@ class WhatsAppCloudApiController extends Controller
      */
     protected function handleMessageStatus(array $status): void
     {
-        $messageId = $status['id'] ?? null;
+        $messageId     = $status['id'] ?? null;
         $currentStatus = $status['status'] ?? null;
-        $errorInfo = null;
+        $recipientId   = $status['recipient_id'] ?? null; // customer wa_id
+        $errorInfo     = null;
 
         if ($currentStatus === 'failed' && isset($status['errors'])) {
             $errorInfo = $status['errors'][0] ?? null;
             foreach ($status['errors'] as $error) {
                 Log::error("WhatsApp Delivery Failure [ID: {$messageId}]: ", [
-                    'error_code' => $error['code'] ?? 'N/A',
+                    'error_code'    => $error['code'] ?? 'N/A',
                     'error_message' => $error['message'] ?? 'N/A',
-                    'error_data' => $error['error_data'] ?? 'N/A',
+                    'error_data'    => $error['error_data'] ?? 'N/A',
                 ]);
             }
         }
 
         Log::info("WhatsApp Message Status: [ID: {$messageId}] is now {$currentStatus}");
 
+        // ── Update message status in Firestore ────────────────────────────
+        if ($messageId && $recipientId && $currentStatus) {
+            try {
+                $projectId   = config('firebase.project_id');
+                $accessToken = FirebaseService::getAccessToken();
+
+                if ($projectId && $accessToken) {
+                    $fields = ['status' => ['stringValue' => $currentStatus]];
+                    if ($currentStatus === 'failed' && $errorInfo) {
+                        $fields['error_code']    = ['stringValue' => (string)($errorInfo['code'] ?? '')];
+                        $fields['error_message'] = ['stringValue' => $errorInfo['message'] ?? ''];
+                    }
+
+                    $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents"
+                        . "/chats/{$recipientId}/messages/{$messageId}";
+
+                    // Only update the listed fields (partial update)
+                    $maskParams = implode('&', array_map(
+                        fn($k) => 'updateMask.fieldPaths=' . rawurlencode($k),
+                        array_keys($fields)
+                    ));
+
+                    Http::withToken($accessToken)->patch("{$url}?{$maskParams}", ['fields' => $fields]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('WhatsApp: Failed to update message status in Firestore', [
+                    'message_id' => $messageId,
+                    'error'      => $e->getMessage(),
+                ]);
+            }
+        }
+
         try {
             // broadcast(new \App\Events\WhatsAppStatusUpdated($messageId, $currentStatus, $errorInfo));
         } catch (\Throwable $e) {
             Log::warning('Failed to broadcast WhatsApp status update: ' . $e->getMessage());
         }
+    }
+
+    // =========================================================================
+    // Firestore & Firebase Storage helpers
+    // =========================================================================
+
+    /**
+     * Save an inbound message to Firestore at chats/{waId}/messages/{wamid}.
+     * Also updates the parent chats/{waId} document with the last-message snapshot.
+     */
+    protected function saveMessageToFirestore(
+        string  $wamid,
+        string  $waId,
+        string  $type,
+        array   $message,
+        ?array  $mediaInfo,
+        ?string $phoneNumberId
+    ): void {
+        try {
+            $projectId   = config('firebase.project_id');
+            $accessToken = FirebaseService::getAccessToken();
+
+            if (!$projectId || !$accessToken) {
+                return;
+            }
+
+            $doc = [
+                'direction'       => 'inbound',
+                'type'            => $type,
+                'status'          => 'received',
+                'timestamp'       => now()->toIso8601String(),
+                'phone_number_id' => $phoneNumberId,
+            ];
+
+            if ($type === 'text' && isset($message['text']['body'])) {
+                $doc['text'] = $message['text']['body'];
+            }
+
+            if ($mediaInfo !== null) {
+                $doc['media'] = $mediaInfo;
+            }
+
+            if (isset($message['context']['id'])) {
+                $doc['context'] = ['message_id' => $message['context']['id']];
+            }
+
+            $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents"
+                . "/chats/{$waId}/messages/{$wamid}";
+
+            Http::withToken($accessToken)->patch($url, [
+                'fields' => $this->toFirestoreFields($doc),
+            ]);
+
+            // Keep the parent chat document in sync for the chat-list sidebar
+            $lastText = $doc['text'] ?? "[{$type}]";
+            $this->upsertChatDocument($waId, [
+                'last_message_text'      => $lastText,
+                'last_message_time'      => $doc['timestamp'],
+                'last_message_direction' => 'inbound',
+                'phone_number_id'        => $phoneNumberId,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp: Failed to save message to Firestore', [
+                'wamid' => $wamid,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Create or update the chats/{waId} document (partial patch — only listed fields).
+     */
+    protected function upsertChatDocument(string $waId, array $fields): void
+    {
+        try {
+            $projectId   = config('firebase.project_id');
+            $accessToken = FirebaseService::getAccessToken();
+
+            if (!$projectId || !$accessToken) {
+                return;
+            }
+
+            $firestoreFields = $this->toFirestoreFields($fields);
+
+            $maskParams = implode('&', array_map(
+                fn($k) => 'updateMask.fieldPaths=' . rawurlencode($k),
+                array_keys($firestoreFields)
+            ));
+
+            $url = "https://firestore.googleapis.com/v1/projects/{$projectId}/databases/(default)/documents"
+                . "/chats/{$waId}?{$maskParams}";
+
+            Http::withToken($accessToken)->patch($url, ['fields' => $firestoreFields]);
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp: Failed to upsert chat document', [
+                'wa_id' => $waId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Upload binary content to Firebase Storage and return the public download URL.
+     * Storage path example: "whatsapp/249991234567/images/wamid.jpg"
+     */
+    protected function uploadToFirebaseStorage(string $content, string $storagePath, string $mimeType): ?string
+    {
+        try {
+            $bucket      = config('firebase.storage_bucket');
+            $accessToken = FirebaseService::getAccessToken();
+
+            if (!$bucket || !$accessToken) {
+                Log::warning('WhatsApp: Firebase Storage bucket or access token not configured.');
+                return null;
+            }
+
+            $encodedPath = rawurlencode($storagePath);
+            $uploadUrl   = "https://firebasestorage.googleapis.com/v0/b/{$bucket}/o"
+                . "?uploadType=media&name={$encodedPath}";
+
+            $response = Http::withToken($accessToken)
+                ->withHeaders(['Content-Type' => $mimeType])
+                ->withBody($content, $mimeType)
+                ->post($uploadUrl);
+
+            if (!$response->successful()) {
+                Log::error('WhatsApp: Firebase Storage upload failed', [
+                    'path'   => $storagePath,
+                    'status' => $response->status(),
+                    'body'   => $response->body(),
+                ]);
+                return null;
+            }
+
+            // Return a permanent public download URL
+            return "https://firebasestorage.googleapis.com/v0/b/{$bucket}/o/{$encodedPath}?alt=media";
+        } catch (\Throwable $e) {
+            Log::error('WhatsApp: Firebase Storage upload exception', [
+                'path'  => $storagePath,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Recursively convert a PHP array to the Firestore REST API typed-value format.
+     */
+    protected function toFirestoreFields(array $data): array
+    {
+        $fields = [];
+        foreach ($data as $key => $value) {
+            $fields[$key] = $this->toFirestoreValue($value);
+        }
+        return $fields;
+    }
+
+    protected function toFirestoreValue(mixed $value): array
+    {
+        if (is_null($value)) {
+            return ['nullValue' => null];
+        }
+        if (is_bool($value)) {
+            return ['booleanValue' => $value];
+        }
+        if (is_int($value)) {
+            return ['integerValue' => (string) $value];
+        }
+        if (is_float($value)) {
+            return ['doubleValue' => $value];
+        }
+        if (is_array($value)) {
+            if (array_is_list($value)) {
+                return ['arrayValue' => ['values' => array_map([$this, 'toFirestoreValue'], $value)]];
+            }
+            return ['mapValue' => ['fields' => $this->toFirestoreFields($value)]];
+        }
+        return ['stringValue' => (string) $value];
+    }
+
+    /**
+     * Derive a file extension from a MIME type.
+     */
+    protected function extensionFromMime(string $mimeType): string
+    {
+        return match (true) {
+            str_contains($mimeType, 'png')  => 'png',
+            str_contains($mimeType, 'gif')  => 'gif',
+            str_contains($mimeType, 'webp') => 'webp',
+            str_contains($mimeType, 'pdf')  => 'pdf',
+            str_contains($mimeType, 'ogg')  => 'ogg',
+            str_contains($mimeType, 'mp4')  => 'mp4',
+            str_contains($mimeType, 'mp3')  => 'mp3',
+            default                         => 'jpg',
+        };
+    }
+
+    /**
+     * Map a WhatsApp message type to a Firebase Storage folder name.
+     */
+    protected function folderFromType(string $type): string
+    {
+        return match ($type) {
+            'image'    => 'images',
+            'document' => 'documents',
+            'audio'    => 'audio',
+            'video'    => 'video',
+            default    => 'misc',
+        };
     }
 }
