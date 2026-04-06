@@ -196,4 +196,53 @@ class UserController extends Controller
         ]);
     }
 
+    public function getNavigationItems(Request $request)
+    {
+        $this->authorize('viewAny', User::class);
+
+        $navigationItems = [
+            ['category' => 'لوحة التحكم', 'items' => [
+                ['route' => '/dashboard', 'label' => 'لوحة التحكم']
+            ]],
+            ['category' => 'المبيعات', 'items' => [
+                ['route' => '/sales/pos-blank', 'label' => 'المعرض'],
+                ['route' => '/sales/returns', 'label' => 'مردودات المبيعات'],
+                ['route' => '/clients', 'label' => 'العملاء']
+            ]],
+            ['category' => 'المخزون', 'items' => [
+                ['route' => '/products', 'label' => 'المعدات'],
+                ['route' => '/inventory/adjustments', 'label' => 'تعديلات المخزون'],
+                ['route' => '/inventory/transfers', 'label' => 'تحويل المخزون'],
+                ['route' => '/inventory/counts', 'label' => 'جرد المخزون']
+            ]],
+            ['category' => 'الواردات', 'items' => [
+                ['route' => '/suppliers', 'label' => 'الموردون'],
+                ['route' => '/purchases', 'label' => 'قائمة المشتريات']
+            ]],
+            ['category' => 'التقارير', 'items' => [
+                ['route' => '/reports/sales', 'label' => 'تقرير المبيعات'],
+                ['route' => '/reports/sale-returns', 'label' => 'تقرير مردودات المبيعات'],
+                ['route' => '/reports/inventory-log', 'label' => 'سجل المخزون'],
+                ['route' => '/reports/daily-income', 'label' => 'تقرير المبيعات الشهري'],
+                ['route' => '/reports/monthly-expenses', 'label' => 'تقرير المصروفات الشهرية'],
+                ['route' => '/reports/best-selling-products', 'label' => 'المنتجات الأكثر مبيعاً'],
+                ['route' => '/reports/stagnant-products', 'label' => 'المنتجات الراكدة'],
+                ['route' => '/reports/low-stock-products', 'label' => 'المنتجات منخفضة المخزون'],
+                ['route' => '/reports/shortages', 'label' => 'الطلبية (النواقص)'],
+                ['route' => '/reports/monthly-shifts', 'label' => 'تقرير الورديات']
+            ]],
+            ['category' => 'الإدارة', 'items' => [
+                ['route' => '/admin/users', 'label' => 'المستخدمون'],
+                ['route' => '/admin/roles', 'label' => 'الأدوار'],
+                ['route' => '/admin/expenses', 'label' => 'المصروفات'],
+                ['route' => '/admin/settings', 'label' => 'الإعدادات'],
+                ['route' => '/admin/system', 'label' => 'النظام'],
+                ['route' => '/admin/backups', 'label' => 'النسخ الاحتياطي'],
+                ['route' => '/admin/warehouses', 'label' => 'المخازن'],
+            ]]
+        ];
+
+        return response()->json(['data' => $navigationItems]);
+    }
+
 }

@@ -2351,4 +2351,30 @@ class ReportController extends Controller
             return response()->json(['message' => 'Failed to generate PDF report', 'error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * Generate Warehouse Products PDF Report
+     */
+    public function warehouseProductsPdf(Request $request, \App\Services\InventoryAuditPdfService $pdfService)
+    {
+        $filters = $request->only(['warehouse_id', 'search']);
+
+        // Validate warehouse_id is required
+        if (!isset($filters['warehouse_id'])) {
+            return response()->json(['message' => 'Warehouse ID is required'], 400);
+        }
+
+        try {
+            $pdfContent = $pdfService->generateWarehouseProducts($filters);
+
+            $filename = 'Warehouse_Products_' . now()->format('Ymd_His') . '.pdf';
+
+            return response($pdfContent, 200)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+        } catch (\Exception $e) {
+            \Log::error('Warehouse Products PDF generation failed: ' . $e->getMessage());
+            return response()->json(['message' => 'Failed to generate PDF report', 'error' => $e->getMessage()], 500);
+        }
+    }
 }

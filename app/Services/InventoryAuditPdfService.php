@@ -181,4 +181,97 @@ class InventoryAuditPdfService
 
         return $pdf->Output('inventory_audit.pdf', 'S');
     }
+
+    /**
+     * Generate Warehouse Products PDF report for a specific warehouse
+     *
+     * @param array $filters
+     * @return string PDF content
+     */
+    public function generateWarehouseProducts(array $filters = []): string
+    {
+        $warehouseId = $filters['warehouse_id'] ?? null;
+        if (!$warehouseId) {
+            throw new \InvalidArgumentException('Warehouse ID is required');
+        }
+
+        // Fetch the specific warehouse
+        $warehouse = Warehouse::findOrFail($warehouseId);
+
+        // Fetch products for this warehouse that have stock
+        $products = Product::with(['warehouses' => function ($query) use ($warehouseId) {
+            $query->where('warehouse_id', $warehouseId);
+        }, 'sellableUnit', 'category'])
+        ->whereHas('warehouses', function ($query) use ($warehouseId) {
+            $query->where('warehouse_id', $warehouseId)
+                  ->where('quantity', '>', 0);
+        });
+
+        // Apply search filter if provided
+        if (!empty($filters['search'])) {
+            $search = $filters['search'];
+            $products->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('sku', 'like', "%{$search}%");
+            });
+        }
+
+        $products = $products->orderBy('name')->get();
+
+        // Create PDF - A4 Portrait
+        $renderer = new PdfHeaderRenderer('warehouse_products');
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->SetTitle('منتجات المستودع - ' . $warehouse->name);
+        $pdf->SetMargins(10, $renderer->getTopMargin(), 10);
+        $pdf->SetAutoPageBreak(true, 10);
+        $pdf->setRTL(false); // Important for Arabic text
+        $pdf->AddPage();
+
+        // Header
+        $pdf->SetFont('arial', 'B', 16);
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->Cell(0, 15, 'منتجات المستودع', 0, 1, 'C');
+        $pdf->SetFont('arial', 'B', 12);
+        $pdf->Cell(0, 10, $warehouse->name, 0, 1, 'C');
+        $pdf->Ln(5);
+
+        // Table headers
+        $pdf->SetFont('arial', 'B', 10);
+        $pdf->SetFillColor(240, 240, 240);
+
+        $colWidths = [15, 60, 25, 30, 30, 30]; // ID, Name, SKU, Category, Quantity, Unit Price
+
+        $pdf->Cell($colWidths[0], 10, 'الرقم', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[1], 10, 'اسم المنتج', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[2], 10, 'الرمز', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[3], 10, 'الفئة', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[4], 10, 'الكمية', 1, 0, 'C', true);
+        $pdf->Cell($colWidths[5], 10, 'السعر', 1, 1, 'C', true);
+
+        // Table data
+        $pdf->SetFont('arial', '', 9);
+        $pdf->SetFillColor(255, 255, 255);
+
+        $index = 0;
+        foreach ($products as $product) {
+            $warehouseStock = $product->warehouses->first();
+            $quantity = $warehouseStock ? $warehouseStock->pivot->quantity : 0;
+
+            $pdf->Cell($colWidths[0], 8, ++$index, 1, 0, 'C', true);
+            $pdf->Cell($colWidths[1], 8, $product->name, 1, 0, 'L', true);
+            $pdf->Cell($colWidths[2], 8, $product->sku ?: '-', 1, 0, 'C', true);
+            $pdf->Cell($colWidths[3], 8, $product->category?->name ?: '-', 1, 0, 'C', true);
+            $pdf->Cell($colWidths[4], 8, number_format($quantity), 1, 0, 'C', true);
+            $pdf->Cell($colWidths[5], 8, number_format($product->latest_cost_per_sellable_unit ?: 0, 2), 1, 1, 'R', true);
+        }
+
+        // Summary
+        $pdf->Ln(5);
+        $pdf->SetFont('arial', 'B', 10);
+        $pdf->Cell(0, 10, 'إجمالي المنتجات: ' . $products->count(), 0, 1, 'R');
+
+        return $pdf->Output('warehouse_products.pdf', 'S');
+    }
 }

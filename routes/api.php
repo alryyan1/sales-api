@@ -1,11 +1,12 @@
 <?php
 
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\{
   AuthController,
   BackupController,
   ExpenseCategoryController,
+  PackageController,
+  SystemController,
   ExpenseController,
   CategoryController,
   ClientController,
@@ -151,6 +152,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/monthly-expenses', [ReportController::class, 'monthlyExpenses'])->name('monthly-expenses');
     Route::get('/monthly-expenses-excel', [ReportController::class, 'monthlyExpensesExcel'])->name('monthly-expenses-excel');
     Route::get('/inventory-audit-pdf', [ReportController::class, 'inventoryAuditPdf'])->name('inventory-audit-pdf');
+    Route::get('/warehouse-products-pdf', [ReportController::class, 'warehouseProductsPdf'])->name('warehouse-products-pdf');
   });
 
   // -- Admin Only Routes --
@@ -209,6 +211,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/products/bulk-update-units', [ProductController::class, 'bulkUpdateUnits']);
   Route::post('/products/bulk-update-sale-price', [ProductController::class, 'bulkUpdateSalePrice']);
   Route::apiResource('products', ProductController::class);
+  Route::apiResource('packages', PackageController::class);
 
   // -- Warehouses Management --
   Route::apiResource('warehouses', WarehouseController::class);
@@ -267,6 +270,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::get('/sales/{sale}/invoice-pdf', [SaleController::class, 'downloadInvoicePDF'])->name('api.sales.invoice.pdf'); // <-- Invoice PDF Route
   Route::get('/sales/{sale}/a4-invoice-pdf', [SaleController::class, 'downloadA4InvoicePdf'])->name('api.sales.a4Invoice.pdf'); // <-- A4 English Invoice (download)
   Route::get('/sales/{sale}/a4-invoice-pdf/view', [SaleController::class, 'viewA4InvoicePdf'])->name('api.sales.a4Invoice.view'); // <-- A4 English Invoice (view)
+  Route::get('/sales-print/last-completed-id', [SaleController::class, 'getLastCompletedSaleId'])->name('api.sales.lastCompletedId');
   // -- Sale Reminders --
   Route::get('/sale-reminders/due', [SaleReminderController::class, 'due'])->name('api.sale-reminders.due');
   Route::patch('/sale-reminders/{reminder}/dismiss', [SaleReminderController::class, 'dismiss'])->name('api.sale-reminders.dismiss');
@@ -285,4 +289,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Public Users Route for Filters --
   Route::get('/users/list', [UserController::class, 'listForFilters'])->name('api.users.list');
+  Route::get('/users/navigation-items', [UserController::class, 'getNavigationItems'])->name('api.users.navigation-items');
+
+  // -- System Management Routes --
+  Route::prefix('system')->name('system.')->group(function () {
+    Route::get('/version', [SystemController::class, 'getVersion'])->name('version');
+    Route::get('/check-updates', [SystemController::class, 'checkForUpdates'])->name('check-updates');
+    Route::post('/update-backend', [SystemController::class, 'updateBackend'])->name('update-backend');
+    Route::post('/update-frontend', [SystemController::class, 'updateFrontend'])->name('update-frontend');
+    Route::post('/update-both', [SystemController::class, 'updateBoth'])->name('update-both');
+    Route::get('/frontend-instructions', [SystemController::class, 'getFrontendUpdateInstructions'])->name('frontend-instructions');
+  });
 });

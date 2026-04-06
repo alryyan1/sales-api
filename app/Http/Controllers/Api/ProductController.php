@@ -110,6 +110,23 @@ class ProductController extends Controller
                     ->whereColumn('product_id', 'products.id'),
                 $sortDirection
             );
+        } elseif ($sortBy === 'latest_cost_per_sellable_unit') {
+            $query->orderBy(
+                PurchaseItem::select('unit_cost')
+                    ->whereColumn('product_id', 'products.id')
+                    ->latest('created_at')
+                    ->limit(1),
+                $sortDirection
+            );
+        } elseif ($sortBy === 'suggested_sale_price_per_sellable_unit') {
+            $query->orderBy(
+                PurchaseItem::select('sale_price')
+                    ->whereColumn('product_id', 'products.id')
+                    ->whereNotNull('sale_price')
+                    ->latest('created_at')
+                    ->limit(1),
+                $sortDirection
+            );
         } elseif (in_array($sortBy, $sortableFields)) {
             $query->orderBy($sortBy, $sortDirection);
         } else {
@@ -537,14 +554,34 @@ class ProductController extends Controller
             // Store relative path in database
             $imageUrl = '/storage/' . $path;
 
+            Log::info('Image uploaded', [
+                'product_id' => $product->id,
+                'path' => $path,
+                'image_url' => $imageUrl
+            ]);
+
             // Update product
-            $product->update(['image_url' => $imageUrl]);
+            $updated = $product->update(['image_url' => $imageUrl]);
+            
+            Log::info('Product update result', [
+                'product_id' => $product->id,
+                'updated' => $updated,
+                'image_url_set' => $imageUrl
+            ]);
+
+            // Verify the update
+            $product->refresh();
+            Log::info('Product after refresh', [
+                'product_id' => $product->id,
+                'image_url' => $product->image_url
+            ]);
 
             $product->load(['category', 'stockingUnit', 'sellableUnit']);
 
             return response()->json([
                 'message' => 'Image uploaded successfully',
-                'product' => new ProductResource($product)
+                'product' => new ProductResource($product),
+                'image_url' => $product->image_url ? (str_starts_with($product->image_url, 'http') ? $product->image_url : asset($product->image_url)) : null,
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
             Log::error('Failed to upload product image: ' . $e->getMessage());
