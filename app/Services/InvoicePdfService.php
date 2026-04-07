@@ -251,6 +251,7 @@ class InvoicePdfService
         $this->generateArabicProformaTable($pdf, $sale);
         $this->generateArabicProformaSummary($pdf, $sale, $isFinal);
         $this->generateArabicProformaTerms($pdf, $sale);
+        $this->generateStampAndSignature($pdf, $settings);
 
         // ── FOOTER: address ───────────────────────────────────────────────────
         if ($companyAddress) {
@@ -497,6 +498,74 @@ class InvoicePdfService
         }
 
         return $result;
+    }
+
+    private function generateStampAndSignature(TCPDF $pdf, array $settings): void
+    {
+        $reportSettings = \App\Models\PdfReportSetting::where('report_key', 'invoice')->first();
+
+        $showStamp     = $reportSettings?->show_stamp     ?? false;
+        $showSignature = $reportSettings?->show_signature ?? false;
+
+        if (!$showStamp && !$showSignature) {
+            return;
+        }
+
+        $stampPath     = $this->resolveImagePath($settings['company_stamp_url']     ?? null);
+        $signaturePath = $this->resolveImagePath($settings['company_signature_url'] ?? null);
+
+        $pageW  = $pdf->getPageWidth();
+        $leftM  = 10;
+        $rightM = 10;
+        $imgH   = 25; // mm height for stamp/signature images
+        $imgW   = 35; // mm width
+        $y      = $pdf->GetY() + 6;
+
+        // Draw labels + images side by side (stamp right, signature left)
+        $pdf->SetFont('arial', '', 8);
+        $pdf->SetTextColor(120, 120, 120);
+
+        if ($showStamp && $stampPath) {
+            // Right side
+            $x = $pageW - $rightM - $imgW;
+            $pdf->SetXY($x, $y);
+            $pdf->Cell($imgW, 5, 'الختم', 0, 0, 'C');
+            try {
+                @$pdf->Image($stampPath, $x, $y + 5, $imgW, $imgH, '', '', '', false, 150, '', false, false, 0);
+            } catch (\Throwable $e) {}
+        }
+
+        if ($showSignature && $signaturePath) {
+            // Left side
+            $x = $leftM;
+            $pdf->SetXY($x, $y);
+            $pdf->Cell($imgW, 5, 'التوقيع', 0, 0, 'C');
+            try {
+                @$pdf->Image($signaturePath, $x, $y + 5, $imgW, $imgH, '', '', '', false, 150, '', false, false, 0);
+            } catch (\Throwable $e) {}
+        }
+
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetY($y + $imgH + 8);
+    }
+
+    private function resolveImagePath(?string $url): ?string
+    {
+        if (!$url) return null;
+
+        $path = parse_url($url, PHP_URL_PATH) ?: '';
+        if (!$path) return null;
+
+        $storagePos = strpos($path, '/storage/');
+        if ($storagePos !== false) {
+            $relative  = substr($path, $storagePos + strlen('/storage/'));
+            $candidate = public_path('storage/' . ltrim($relative, '/'));
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     private function generateArabicProformaTerms(TCPDF $pdf, Sale $sale): void
