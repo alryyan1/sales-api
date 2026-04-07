@@ -47,7 +47,13 @@ class ProductController extends Controller
                 ->whereColumn('product_id', 'products.id')
                 ->whereNotNull('sale_price')
                 ->latest('created_at')
-                ->limit(1)
+                ->limit(1),
+
+            'last_purchase_currency' => PurchaseItem::select('purchases.currency')
+                ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
+                ->whereColumn('purchase_items.product_id', 'products.id')
+                ->latest('purchase_items.created_at')
+                ->limit(1),
         ]);
 
         if ($warehouseId = $request->input('warehouse_id')) {
@@ -261,7 +267,7 @@ class ProductController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $query = Product::select('*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem']); // Include relations for names
+        $query = Product::select('*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem.purchase:id,currency']);
 
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
@@ -301,7 +307,7 @@ class ProductController extends Controller
         ]);
 
         $products = Product::whereIn('id', $validated['ids'])
-            ->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem', 'warehouses'])
+            ->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem.purchase:id,currency', 'warehouses'])
             ->withSum('purchaseItems', 'quantity')
             ->withSum('saleItems', 'quantity')
             ->get();

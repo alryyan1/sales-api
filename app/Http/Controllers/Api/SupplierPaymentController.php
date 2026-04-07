@@ -35,13 +35,17 @@ class SupplierPaymentController extends Controller
                 ->get();
 
             $totalPurchases = $purchases->sum('total_amount');
-            
+
+            $totalPurchasesSDG = $purchases->where('currency', 'SDG')->sum('total_amount')
+                + $purchases->whereNotIn('currency', ['USD'])->whereNull('currency')->sum('total_amount');
+            $totalPurchasesUSD = $purchases->where('currency', 'USD')->sum('total_amount');
+
             // Total payments = payments linked to purchases + direct payments
             $totalPaymentsAcrossPurchases = $purchases->sum(function($p) {
                 return $p->payments->sum('amount');
             });
             $totalDirectPayments = $directPayments->sum('amount');
-            
+
             $totalPayments = $totalPaymentsAcrossPurchases + $totalDirectPayments;
             $balance = $totalPurchases - $totalPayments;
 
@@ -55,6 +59,7 @@ class SupplierPaymentController extends Controller
                 $ledgerEntries->push([
                     'id' => 'purchase_' . $purchase->id,
                     'purchase_id' => $purchase->id,
+                    'currency' => $purchase->currency ?? 'SDG',
                     'date' => $purchase->purchase_date->format('Y-m-d'),
                     'type' => 'purchase',
                     'description' => 'Purchase #' . $purchase->id . ($purchase->reference_number ? ' (' . $purchase->reference_number . ')' : ''),
@@ -111,6 +116,8 @@ class SupplierPaymentController extends Controller
                 ],
                 'summary' => [
                     'total_purchases' => $totalPurchases,
+                    'total_purchases_sdg' => $totalPurchasesSDG,
+                    'total_purchases_usd' => $totalPurchasesUSD,
                     'total_payments' => $totalPayments,
                     'balance' => $balance,
                 ],

@@ -28,7 +28,10 @@ class PurchaseItemResource extends JsonResource
             'sale_price' => $this->sale_price, // Intended sale price per sellable unit for this batch
             'sale_price_stocking_unit' => $this->sale_price_stocking_unit,
             'expiry_date' => $this->expiry_date ? $this->expiry_date->format('Y-m-d') : null,
-            // 'purchase' => new PurchaseResource($this->whenLoaded('purchase')), // Avoid circular dependency
+            'purchase_id' => $this->purchase_id,
+            'purchase_date' => $this->whenLoaded('purchase', fn() => $this->purchase?->purchase_date),
+            'supplier_name' => $this->whenLoaded('purchase', fn() => $this->purchase?->supplier?->name),
+            'created_at' => $this->created_at?->toISOString(),
         ];
     }
 }

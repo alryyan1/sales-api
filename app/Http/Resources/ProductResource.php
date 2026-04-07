@@ -40,6 +40,9 @@ class ProductResource extends JsonResource
             'expire_date' => $this->expire_date ? (\Carbon\Carbon::parse($this->expire_date)->format('Y-m-d')) : null,
 
             'latest_cost_per_sellable_unit' => $this->latest_cost_per_sellable_unit ?? null,
+            'last_purchase_currency' => $this->attributes['last_purchase_currency']
+                ?? optional($this->latestPurchaseItem?->purchase)->currency
+                ?? 'SDG',
             'suggested_sale_price_per_sellable_unit' => $this->suggested_sale_price_per_sellable_unit ?? null,
             'last_sale_price_per_sellable_unit' => $this->last_sale_price_per_sellable_unit ?? null,
             'suggested_sale_price_per_stocking_unit' => $this->suggested_sale_price_per_stocking_unit ?? null,
