@@ -527,21 +527,21 @@ class InvoicePdfService
 
         if ($showStamp && $stampPath) {
             // Right side
-            $x = $pageW - $rightM - $imgW;
-            $pdf->SetXY($x, $y);
+            $x = $pageW - $rightM - $imgW - 20; // 20mm total padding for label + image
+            $pdf->SetXY($x, $y +50);
             $pdf->Cell($imgW, 5, 'الختم', 0, 0, 'C');
             try {
-                @$pdf->Image($stampPath, $x, $y + 5, $imgW, $imgH, '', '', '', false, 150, '', false, false, 0);
+                @$pdf->Image($stampPath, $x, $y + 64, $imgW+20, $imgH+20, '', '', '', false, 300, '', false, false, 0);
             } catch (\Throwable $e) {}
         }
 
         if ($showSignature && $signaturePath) {
             // Left side
             $x = $leftM;
-            $pdf->SetXY($x, $y);
+            $pdf->SetXY($x, $y +60);
             $pdf->Cell($imgW, 5, 'التوقيع', 0, 0, 'C');
             try {
-                @$pdf->Image($signaturePath, $x, $y + 5, $imgW, $imgH, '', '', '', false, 150, '', false, false, 0);
+                @$pdf->Image($signaturePath, $x, $y + 65, $imgW, $imgH, '', '', '', false, 300, '', false, false, 0);
             } catch (\Throwable $e) {}
         }
 
