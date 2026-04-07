@@ -108,6 +108,52 @@ class SettingController extends Controller
     }
 
     /**
+     * Upload and set company stamp image.
+     */
+    public function uploadStamp(Request $request)
+    {
+        $request->validate([
+            'stamp' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:2048'],
+        ]);
+
+        $file = $request->file('stamp');
+        $path = $file->store('stamps', 'public');
+        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
+
+        $service = new SettingsService();
+        $newSettings = $service->update(['company_stamp_url' => $publicUrl]);
+
+        return response()->json([
+            'message' => 'Stamp uploaded successfully.',
+            'url' => $publicUrl,
+            'data' => $newSettings,
+        ]);
+    }
+
+    /**
+     * Upload and set company signature image.
+     */
+    public function uploadSignature(Request $request)
+    {
+        $request->validate([
+            'signature' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:2048'],
+        ]);
+
+        $file = $request->file('signature');
+        $path = $file->store('signatures', 'public');
+        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
+
+        $service = new SettingsService();
+        $newSettings = $service->update(['company_signature_url' => $publicUrl]);
+
+        return response()->json([
+            'message' => 'Signature uploaded successfully.',
+            'url' => $publicUrl,
+            'data' => $newSettings,
+        ]);
+    }
+
+    /**
      * Helper to authorize based on permission string
      */
     private function checkAuthorization(string $permission): void

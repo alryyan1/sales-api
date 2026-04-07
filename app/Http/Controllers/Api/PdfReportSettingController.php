@@ -18,11 +18,13 @@ class PdfReportSettingController extends Controller
     public function update(Request $request, string $reportKey): JsonResponse
     {
         $validated = $request->validate([
-            'branding_type' => ['nullable', 'in:logo,header,none'],
-            'logo_position' => ['nullable', 'in:left,right,center'],
-            'logo_height'   => ['nullable', 'integer', 'min:10', 'max:500'],
-            'logo_width'    => ['nullable', 'integer', 'min:10', 'max:500'],
+            'branding_type'  => ['nullable', 'in:logo,header,none'],
+            'logo_position'  => ['nullable', 'in:left,right,center'],
+            'logo_height'    => ['nullable', 'integer', 'min:10', 'max:500'],
+            'logo_width'     => ['nullable', 'integer', 'min:10', 'max:500'],
             'show_watermark' => ['boolean'],
+            'show_stamp'     => ['boolean'],
+            'show_signature' => ['boolean'],
         ]);
 
         $setting = PdfReportSetting::where('report_key', $reportKey)->firstOrFail();

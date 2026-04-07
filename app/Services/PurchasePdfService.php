@@ -284,32 +284,32 @@ class PurchasePdfService
 
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
 
-        // Row 1: Supplier | Warehouse
+        // Row 1: Warehouse | Supplier
         $this->addInfoGridRow(
-            'المورد',
-            $purchase->supplier?->name ?? 'غير محدد',
             'المستودع',
             $purchase->warehouse?->name ?? 'المستودع الرئيسي',
+            'المورد',
+            $purchase->supplier?->name ?? 'غير محدد',
             $colWidth,
             $rowHeight
         );
 
-        // Row 2: Purchase Date | Reference
+        // Row 2: Reference | Purchase Date
         $this->addInfoGridRow(
-            'تاريخ الشراء',
-            $purchase->purchase_date ?? 'غير محدد',
             'رقم المرجع',
             $purchase->reference_number ?: '---',
+            'تاريخ الشراء',
+            $purchase->purchase_date ?? 'غير محدد',
             $colWidth,
             $rowHeight
         );
 
-        // Row 3: Created By | Created At
+        // Row 3: Created At | Created By
         $this->addInfoGridRow(
-            'تم الإنشاء بواسطة',
-            $purchase->user?->name ?? 'النظام',
             'تاريخ الإنشاء',
             $purchase->created_at?->format('Y-m-d H:i') ?? 'غير متوفر',
+            'تم الإنشاء بواسطة',
+            $purchase->user?->name ?? 'النظام',
             $colWidth,
             $rowHeight
         );
@@ -366,23 +366,21 @@ class PurchasePdfService
         $labelWidth = $colWidth * 0.4;
         $valueWidth = $colWidth * 0.6;
 
-        // Column 1 - Label
+        // Column 1 - Value (left), Label (right)
+        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
+        $this->pdf->Cell($valueWidth, $height, $value1, 1, 0, 'C');
+
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL + 1);
         $this->pdf->SetFillColor(self::COLOR_LIGHT_GRAY[0], self::COLOR_LIGHT_GRAY[1], self::COLOR_LIGHT_GRAY[2]);
-        $this->pdf->Cell($labelWidth, $height, $label1 . ':', 1, 0, 'C', true);
+        $this->pdf->Cell($labelWidth, $height, ':' . $label1, 1, 0, 'R', true);
 
-        // Column 1 - Value
+        // Column 2 - Value (left), Label (right)
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($valueWidth, $height, $value1, 1, 0, 'R');
+        $this->pdf->Cell($valueWidth, $height, $value2, 1, 0, 'C');
 
-        // Column 2 - Label
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL + 1);
         $this->pdf->SetFillColor(self::COLOR_LIGHT_GRAY[0], self::COLOR_LIGHT_GRAY[1], self::COLOR_LIGHT_GRAY[2]);
-        $this->pdf->Cell($labelWidth, $height, $label2 . ':', 1, 0, 'C', true);
-
-        // Column 2 - Value
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($valueWidth, $height, $value2, 1, 1, 'R');
+        $this->pdf->Cell($labelWidth, $height, ':' . $label2, 1, 1, 'R', true);
     }
 
     /**

@@ -26,6 +26,11 @@ class SaleResource extends JsonResource
              // User (Salesperson) Info
              'user_id' => $this->user_id,
              'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
+             'user' => $this->whenLoaded('user', fn() => $this->user ? ['id' => $this->user->id, 'name' => $this->user->name] : null),
+
+             // Warehouse Info
+             'warehouse_id' => $this->warehouse_id,
+             'warehouse' => $this->whenLoaded('warehouse', fn() => $this->warehouse ? ['id' => $this->warehouse->id, 'name' => $this->warehouse->name] : null),
 
             'sale_date' => $this->sale_date->format('Y-m-d'),
             'is_returned' => $this->is_returned ?? false,

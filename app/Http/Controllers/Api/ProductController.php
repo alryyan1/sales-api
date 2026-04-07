@@ -617,6 +617,12 @@ class ProductController extends Controller
         ]);
     }
 
+    public function clearSalePrice(Product $product)
+    {
+        $product->update(['sale_price' => null]);
+        return response()->json(['message' => 'تم مسح سعر البيع', 'sale_price' => null]);
+    }
+
     public function bulkUpdateSalePrice(Request $request)
     {
         $validatedData = $request->validate([

@@ -16,10 +16,14 @@ class PdfReportSetting extends Model
         'logo_height',
         'logo_width',
         'show_watermark',
+        'show_stamp',
+        'show_signature',
     ];
 
     protected $casts = [
         'show_watermark' => 'boolean',
+        'show_stamp'     => 'boolean',
+        'show_signature' => 'boolean',
         'logo_height'    => 'integer',
         'logo_width'     => 'integer',
     ];

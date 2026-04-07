@@ -5,20 +5,72 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\PurchaseItem;
 use App\Services\Pdf\PdfHeaderRenderer;
-use Illuminate\Support\Facades\DB;
-use TCPDF;
 
 class ProductPdfService
 {
-    /**
-     * Generate a PDF report of products
-     *
-     * @param array $filters
-     * @return string PDF content
-     */
+    private TCPDF $pdf;
+    private PdfHeaderRenderer $renderer;
+
+    // ── Colors ────────────────────────────────────────────────────────────────
+    private const COLOR_HEADER_BG   = [45,  55,  72];
+    private const COLOR_HEADER_TEXT = [255, 255, 255];
+    private const COLOR_ROW_ALT     = [247, 248, 250];
+    private const COLOR_ROW_NORMAL  = [255, 255, 255];
+    private const COLOR_LOW_STOCK   = [255, 249, 219];
+    private const COLOR_OUT_STOCK   = [255, 240, 240];
+    private const COLOR_BORDER      = [210, 215, 220];
+    private const COLOR_TOTAL_BG    = [45,  55,  72];
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    private const MARGIN   = 12;
+    private const ROW_H    = 6;
+    private const HEADER_H = 7;
+
+    // ── Typography ────────────────────────────────────────────────────────────
+    private const F_TITLE   = 14;
+    private const F_SECTION = 9;
+    private const F_HEADER  = 7;
+    private const F_BODY    = 7;
+    private const F_SMALL   = 6;
+
+    // ── Column widths (sum = 273 = 297 - 2×12) ───────────────────────────────
+    //    #    Name  Sci   SKU   Cat   Qty   Unit  Cost  Sale  Alert Status
+    private const COLS = [7, 48, 30, 24, 28, 16, 22, 24, 24, 16, 24];
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     public function generateProductsPdf(array $filters = []): string
     {
-        // Build query with filters
+        $products = $this->buildQuery($filters)->get();
+
+        $this->renderer = new PdfHeaderRenderer('product');
+        $this->initPdf();
+        $this->pdf->AddPage();
+        $this->renderer->render($this->pdf);
+
+        $this->drawTitle($filters);
+        $this->drawSummaryBar($products);
+        $this->drawTableHeader();
+        $this->drawRows($products);
+        $this->drawTotalsFooter($products);
+
+        return $this->pdf->Output('products_report.pdf', 'S');
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+
+    private function initPdf(): void
+    {
+        $this->pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
+        $this->pdf->setPrintHeader(false);
+        $this->pdf->setPrintFooter(false);
+        $this->pdf->SetTitle('تقرير المنتجات');
+        $this->pdf->SetMargins(self::MARGIN, $this->renderer->getTopMargin(), self::MARGIN);
+        $this->pdf->SetAutoPageBreak(true, self::MARGIN);
+    }
+
+    private function buildQuery(array $filters)
+    {
         $query = Product::query()
             ->select('products.*')
             ->addSelect([
@@ -30,221 +82,238 @@ class ProductPdfService
                     ->whereColumn('product_id', 'products.id')
                     ->whereNotNull('sale_price')
                     ->latest('created_at')
-                    ->limit(1)
+                    ->limit(1),
             ])
             ->with(['category', 'stockingUnit', 'sellableUnit']);
 
-        // Apply filters
         if (!empty($filters['search'])) {
-            $search = $filters['search'];
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('sku', 'like', "%{$search}%")
-                    ->orWhere('scientific_name', 'like', "%{$search}%")
-                    ->orWhere('description', 'like', "%{$search}%");
-            });
+            $s = $filters['search'];
+            $query->where(fn($q) => $q
+                ->where('name', 'like', "%$s%")
+                ->orWhere('sku', 'like', "%$s%")
+                ->orWhere('scientific_name', 'like', "%$s%"));
         }
+        if (!empty($filters['category_id']))   $query->where('category_id', $filters['category_id']);
+        if (!empty($filters['in_stock_only']))  $query->hasStock();
+        if (!empty($filters['low_stock_only'])) $query->lowStock();
 
-        if (!empty($filters['category_id'])) {
-            $query->where('category_id', $filters['category_id']);
-        }
-
-        if (!empty($filters['in_stock_only'])) {
-            $query->hasStock();
-        }
-
-        if (!empty($filters['low_stock_only'])) {
-            $query->lowStock();
-        }
-
-        // Get all products (no pagination for PDF)
-        $products = $query->orderBy('name')->get();
-
-        // Create PDF using TCPDF with PdfHeaderRenderer
-        $renderer = new PdfHeaderRenderer('product');
-        $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false); // Landscape for better table fit
-        $pdf->setPrintHeader(false);
-        $pdf->setPrintFooter(false);
-
-        // Set document information
-        $pdf->SetTitle('Products Report');
-        $pdf->SetSubject('Products Report');
-        $pdf->SetMargins(15, $renderer->getTopMargin(), 15);
-        $pdf->SetAutoPageBreak(true, 15);
-
-        // Add a page
-        $pdf->AddPage();
-        $renderer->render($pdf);
-
-        // Generate PDF content using cells
-        $this->generatePdfContent($pdf, $products, $filters);
-
-        // Return PDF content
-        return $pdf->Output('products_report.pdf', 'S');
+        return $query->orderBy('name');
     }
 
-    /**
-     * Generate PDF content using TCPDF cells
-     *
-     * @param TCPDF $pdf
-     * @param \Illuminate\Database\Eloquent\Collection $products
-     * @param array $filters
-     * @return void
-     */
-    private function generatePdfContent(TCPDF $pdf, $products, array $filters): void
+    // ── Title block ──────────────────────────────────────────────────────────
+
+    private function drawTitle(array $filters): void
     {
-        $totalProducts = $products->count();
-        $totalInStock = $products->where('stock_quantity', '>', 0)->count();
-        $totalOutOfStock = $totalProducts - $totalInStock;
+        $pdf   = $this->pdf;
+        $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
 
-        // Title
-        $pdf->SetFont('arial', 'B', 16);
-        $pdf->Cell(0, 10, 'تقرير المنتجات', 0, 1, 'C');
-        $pdf->Ln(5);
+        $pdf->SetFont('arial', 'B', self::F_TITLE);
+        $pdf->SetTextColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
+        $pdf->Cell(0, 8, 'تقرير المنتجات', 0, 1, 'C');
 
-        // Summary section
-        $pdf->SetFont('arial', '', 10);
-        $pdf->Cell(50, 6, 'إجمالي المنتجات:', 0, 0, 'R');
-        $pdf->Cell(30, 6, $totalProducts, 0, 1, 'L');
+        $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+        $pdf->SetLineWidth(0.3);
+        $pdf->Line(self::MARGIN, $pdf->GetY(), self::MARGIN + $pageW, $pdf->GetY());
+        $pdf->Ln(2.5);
 
-        $pdf->Cell(50, 6, 'متوفر:', 0, 0, 'R');
-        $pdf->Cell(30, 6, $totalInStock, 0, 1, 'L');
-
-        $pdf->Cell(50, 6, 'غير متوفر:', 0, 0, 'R');
-        $pdf->Cell(30, 6, $totalOutOfStock, 0, 1, 'L');
-
-        if (!empty($filters['search'])) {
-            $pdf->Cell(50, 6, 'مصطلح البحث:', 0, 0, 'R');
-            $pdf->Cell(100, 6, $filters['search'], 0, 1, 'L');
+        // Filters / date line
+        $notes = [];
+        if (!empty($filters['search']))        $notes[] = 'بحث: ' . $filters['search'];
+        if (!empty($filters['in_stock_only']))  $notes[] = 'المتوفر فقط';
+        if (!empty($filters['low_stock_only'])) $notes[] = 'المخزون المنخفض';
+        if (!empty($filters['category_id'])) {
+            $cat = \App\Models\Category::find($filters['category_id']);
+            if ($cat) $notes[] = 'الفئة: ' . $cat->name;
         }
 
-        if (!empty($filters['category_id'])) {
-            $category = \App\Models\Category::find($filters['category_id']);
-            if ($category) {
-                $pdf->Cell(50, 6, 'الفئة:', 0, 0, 'R');
-                $pdf->Cell(100, 6, $category->name, 0, 1, 'L');
+        $pdf->SetFont('arial', '', self::F_SMALL);
+        $pdf->SetTextColor(100, 110, 120);
+        $pdf->Cell(0, 4, 'تاريخ الطباعة: ' . now()->format('Y-m-d  H:i'), 0, 0, 'R');
+        if ($notes) {
+            $pdf->SetXY(self::MARGIN, $pdf->GetY());
+            $pdf->Cell(0, 4, implode('  |  ', $notes), 0, 0, 'L');
+        }
+        $pdf->Ln(6);
+        $pdf->SetTextColor(0, 0, 0);
+    }
+
+    // ── Summary bar ──────────────────────────────────────────────────────────
+
+    private function drawSummaryBar($products): void
+    {
+        $pdf   = $this->pdf;
+        $total      = $products->count();
+        $inStock    = $products->where('stock_quantity', '>', 0)->count();
+        $outOfStock = $total - $inStock;
+        $lowStock   = $products->filter(fn($p) =>
+            $p->stock_alert_level && $p->stock_quantity > 0 && $p->stock_quantity <= $p->stock_alert_level
+        )->count();
+
+        $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
+        $boxW  = $pageW / 4;
+        $boxH  = 13;
+        $y     = $pdf->GetY();
+
+        $stats = [
+            ['إجمالي المنتجات', $total,      [240, 244, 255], [45,  55,  72]],
+            ['متوفر',           $inStock,     [237, 252, 244], [22,  163,  74]],
+            ['غير متوفر',       $outOfStock,  [255, 240, 240], [220,  38,  38]],
+            ['مخزون منخفض',     $lowStock,    [255, 249, 219], [160, 100,   0]],
+        ];
+
+        foreach ($stats as $i => [$label, $val, $bg, $fg]) {
+            $x = self::MARGIN + $i * $boxW;
+            $pdf->SetFillColor($bg[0], $bg[1], $bg[2]);
+            $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+            $pdf->SetLineWidth(0.2);
+            $pdf->Rect($x, $y, $boxW - 1, $boxH, 'FD');
+
+            $pdf->SetFont('arial', 'B', 11);
+            $pdf->SetTextColor($fg[0], $fg[1], $fg[2]);
+            $pdf->SetXY($x, $y + 1.5);
+            $pdf->Cell($boxW - 1, 6, (string) $val, 0, 0, 'C');
+
+            $pdf->SetFont('arial', '', self::F_SMALL);
+            $pdf->SetTextColor(80, 90, 100);
+            $pdf->SetXY($x, $y + 7.5);
+            $pdf->Cell($boxW - 1, 4, $label, 0, 0, 'C');
+        }
+
+        $pdf->SetXY(self::MARGIN, $y + $boxH + 3);
+        $pdf->SetTextColor(0, 0, 0);
+    }
+
+    // ── Table header ─────────────────────────────────────────────────────────
+
+    private function drawTableHeader(): void
+    {
+        $pdf = $this->pdf;
+        [$r, $g, $b] = self::COLOR_HEADER_BG;
+        $pdf->SetFillColor($r, $g, $b);
+        $pdf->SetTextColor(self::COLOR_HEADER_TEXT[0], self::COLOR_HEADER_TEXT[1], self::COLOR_HEADER_TEXT[2]);
+        $pdf->SetFont('arial', 'B', self::F_HEADER);
+        $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+        $pdf->SetLineWidth(0.1);
+
+        $labels = ['#', 'الاسم', 'الاسم العلمي', 'الكود', 'الفئة', 'المخزون', 'الوحدة', 'آخر تكلفة', 'سعر البيع', 'حد التنبيه', 'الحالة'];
+        $last   = count($labels) - 1;
+        foreach ($labels as $i => $lbl) {
+            $pdf->Cell(self::COLS[$i], self::HEADER_H, $lbl, 1, ($i === $last ? 1 : 0), 'C', true);
+        }
+        $pdf->SetTextColor(0, 0, 0);
+    }
+
+    // ── Table rows ───────────────────────────────────────────────────────────
+
+    private function drawRows($products): void
+    {
+        $pdf = $this->pdf;
+        $pdf->SetFont('arial', '', self::F_BODY);
+        $pdf->SetLineWidth(0.1);
+        $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+
+        foreach ($products as $i => $product) {
+            if ($pdf->GetY() + self::ROW_H > $pdf->getPageHeight() - self::MARGIN) {
+                $pdf->AddPage();
+                $this->renderer->render($pdf);
+                $this->drawTableHeader();
+                $pdf->SetFont('arial', '', self::F_BODY);
+                $pdf->SetLineWidth(0.1);
+                $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+            }
+
+            [$r, $g, $b] = $this->rowColor($product, $i);
+            $pdf->SetFillColor($r, $g, $b);
+
+            $cost  = $product->latest_cost_per_sellable_unit
+                ? number_format((float) $product->latest_cost_per_sellable_unit, 2) : '-';
+            $sale  = $product->last_sale_price_per_sellable_unit
+                ? number_format((float) $product->last_sale_price_per_sellable_unit, 2) : '-';
+            $alert = $product->stock_alert_level
+                ? number_format((int) $product->stock_alert_level) : '-';
+
+            $cells = [
+                $i + 1,
+                $this->cut($product->name, 30),
+                $this->cut($product->scientific_name ?: '-', 20),
+                $this->cut($product->sku ?: '-', 14),
+                $this->cut($product->category?->name ?: '-', 17),
+                number_format((int) $product->stock_quantity),
+                $this->cut($product->sellableUnit?->name ?: '-', 11),
+                $cost,
+                $sale,
+                $alert,
+                $this->statusLabel($product),
+            ];
+
+            $last = count($cells) - 1;
+            foreach ($cells as $j => $val) {
+                $pdf->Cell(self::COLS[$j], self::ROW_H, (string) $val, 1, ($j === $last ? 1 : 0), 'C', true);
             }
         }
-
-        if (!empty($filters['in_stock_only'])) {
-            $pdf->Cell(50, 6, 'الفلتر:', 0, 0, 'R');
-            $pdf->Cell(100, 6, 'المتوفر فقط', 0, 1, 'L');
-        }
-
-        $pdf->Cell(50, 6, 'تاريخ التقرير:', 0, 0, 'R');
-        $pdf->Cell(100, 6, now()->format('Y-m-d H:i:s'), 0, 1, 'L');
-
-        $pdf->Ln(5);
-
-        // Table header
-        $pdf->SetFont('arial', 'B', 8);
-        $pdf->SetFillColor(242, 242, 242);
-
-        // Column widths (total should be ~277mm for A4 landscape)
-        $colWidths = [10, 35, 30, 20, 25, 18, 20, 22, 22, 20, 25];
-
-        $pdf->Cell($colWidths[0], 7, '#', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[1], 7, 'الاسم', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[2], 7, 'الاسم العلمي', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[3], 7, 'رمز المنتج', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[4], 7, 'الفئة', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[5], 7, 'المخزون', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[6], 7, 'الوحدة', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[7], 7, 'احدث تكلفة', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[8], 7, 'اخر سعر بيع', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[9], 7, 'مستوى التنبيه', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[10], 7, 'الحالة', 1, 1, 'C', true);
-
-        // Table rows
-        $pdf->SetFont('arial', '', 7);
-
-        // Calculate total inventory cost
-        $totalInventoryCost = 0;
-
-        foreach ($products as $index => $product) {
-            $stockStatus = $this->getStockStatus($product);
-            $fillColor = $this->getFillColor($product);
-
-            $pdf->SetFillColor($fillColor[0], $fillColor[1], $fillColor[2]);
-
-            $pdf->Cell($colWidths[0], 6, ($index + 1), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[1], 6, $this->truncate($product->name, 25), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[2], 6, $this->truncate($product->scientific_name ?: '-', 20), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[3], 6, $product->sku ?: '-', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[4], 6, $this->truncate($product->category?->name ?: '-', 18), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[5], 6, number_format($product->stock_quantity), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[6], 6, $this->truncate($product->sellableUnit?->name ?: '-', 15), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[7], 6, $product->latest_cost_per_sellable_unit ? number_format($product->latest_cost_per_sellable_unit, 2) : '-', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[8], 6, $product->last_sale_price_per_sellable_unit ? number_format($product->last_sale_price_per_sellable_unit, 2) : '-', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[9], 6, $product->stock_alert_level ? number_format($product->stock_alert_level) : '-', 1, 0, 'C', true);
-            $pdf->Cell($colWidths[10], 6, $stockStatus, 1, 1, 'C', true);
-
-            // Add to inventory cost total
-            if ($product->latest_cost_per_sellable_unit) {
-                $totalInventoryCost += $product->latest_cost_per_sellable_unit * $product->stock_quantity;
-            }
-        }
-
-        // Add spacing after table
-        $pdf->Ln(5);
-
-        // Display total inventory cost
-        $pdf->SetFont('arial', 'B', 12);
-        $pdf->SetFillColor(220, 220, 220);
-        $pdf->Cell(80, 8, 'إجمالي تكلفة المخزون:', 1, 0, 'R', true);
-        $pdf->Cell(50, 8, number_format($totalInventoryCost, 2), 1, 1, 'C', true);
     }
 
-    /**
-     * Truncate text to fit in cell
-     *
-     * @param string $text
-     * @param int $maxLength
-     * @return string
-     */
-    private function truncate(string $text, int $maxLength): string
+    // ── Totals footer ────────────────────────────────────────────────────────
+
+    private function drawTotalsFooter($products): void
     {
-        if (mb_strlen($text) > $maxLength) {
-            return mb_substr($text, 0, $maxLength - 2) . '..';
-        }
-        return $text;
+        $pdf   = $this->pdf;
+        $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
+
+        $totalCost = $products->sum(fn($p) =>
+            ((float) ($p->latest_cost_per_sellable_unit ?? 0)) * ((int) $p->stock_quantity)
+        );
+
+        $pdf->Ln(2);
+
+        // Total cost row
+        [$r, $g, $b] = self::COLOR_TOTAL_BG;
+        $pdf->SetFillColor($r, $g, $b);
+        $pdf->SetTextColor(255, 255, 255);
+        $pdf->SetFont('arial', 'B', self::F_SECTION);
+
+        $labelW = 55;
+        $valueW = 40;
+        $spacer = $pageW - $labelW - $valueW;
+
+        $pdf->Cell($spacer, self::ROW_H, '', 0, 0);
+        $pdf->Cell($labelW, self::ROW_H, 'إجمالي تكلفة المخزون:', 1, 0, 'R', true);
+        $pdf->Cell($valueW, self::ROW_H, number_format($totalCost, 2), 1, 1, 'C', true);
+
+        // Footer rule + page info
+        $pdf->Ln(3);
+        $pdf->SetFont('arial', '', self::F_SMALL);
+        $pdf->SetTextColor(140, 150, 160);
+        $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+        $pdf->SetLineWidth(0.2);
+        $pdf->Line(self::MARGIN, $pdf->GetY(), self::MARGIN + $pageW, $pdf->GetY());
+        $pdf->Ln(1.5);
+        $pdf->Cell(0, 4, 'صفحة ' . $pdf->getAliasNumPage() . ' من ' . $pdf->getAliasNbPages(), 0, 0, 'L');
+        $pdf->Cell(0, 4, 'تم إنشاؤه بواسطة النظام  —  ' . now()->format('Y-m-d H:i'), 0, 1, 'R');
+        $pdf->SetTextColor(0, 0, 0);
     }
 
-    /**
-     * Get stock status for a product
-     *
-     * @param Product $product
-     * @return string
-     */
-    private function getStockStatus(Product $product): string
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private function rowColor(Product $product, int $index): array
     {
-        if ($product->stock_quantity <= 0) {
-            return 'غير متوفر';
-        }
+        if ($product->stock_quantity <= 0)
+            return self::COLOR_OUT_STOCK;
+        if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level)
+            return self::COLOR_LOW_STOCK;
+        return $index % 2 === 0 ? self::COLOR_ROW_NORMAL : self::COLOR_ROW_ALT;
+    }
 
-        if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
-            return 'مخزون منخفض';
-        }
-
+    private function statusLabel(Product $product): string
+    {
+        if ($product->stock_quantity <= 0) return 'غير متوفر';
+        if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level)
+            return 'منخفض';
         return 'متوفر';
     }
 
-    /**
-     * Get fill color for table row based on stock status
-     *
-     * @param Product $product
-     * @return array RGB color array
-     */
-    private function getFillColor(Product $product): array
+    private function cut(string $text, int $max): string
     {
-        if ($product->stock_quantity <= 0) {
-            return [248, 215, 218]; // Light red (out-of-stock)
-        }
-
-        if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level) {
-            return [255, 243, 205]; // Light yellow (low-stock)
-        }
-
-        return [209, 237, 255]; // Light blue (in-stock)
+        return mb_strlen($text) > $max ? mb_substr($text, 0, $max - 1) . '…' : $text;
     }
 }

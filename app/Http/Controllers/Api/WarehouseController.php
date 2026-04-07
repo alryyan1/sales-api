@@ -9,9 +9,10 @@ use Illuminate\Http\Request;
 
 class WarehouseController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return WarehouseResource::collection(Warehouse::all());
+        $query = $request->boolean('all') ? Warehouse::query() : Warehouse::where('is_active', true);
+        return WarehouseResource::collection($query->get());
     }
 
     public function store(Request $request)

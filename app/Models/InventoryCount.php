@@ -19,11 +19,15 @@ class InventoryCount extends Model
         'notes',
         'approved_by',
         'approved_at',
+        'started_at',
+        'completed_at',
     ];
 
     protected $casts = [
-        'count_date' => 'date',
-        'approved_at' => 'datetime',
+        'count_date'   => 'date',
+        'approved_at'  => 'datetime',
+        'started_at'   => 'datetime',
+        'completed_at' => 'datetime',
     ];
 
     /**

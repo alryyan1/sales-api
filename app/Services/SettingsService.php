@@ -37,6 +37,8 @@ class SettingsService
             'whatsapp_instance_id' => 'string',
             'whatsapp_default_phone' => 'string',
             'company_header_url' => 'string',
+            'company_stamp_url' => 'string',
+            'company_signature_url' => 'string',
             'invoice_branding_type' => 'string', // 'logo' or 'header'
             'logo_position' => 'string', // 'right', 'left', 'both'
             'logo_height' => 'int',
@@ -90,6 +92,8 @@ class SettingsService
             'whatsapp_instance_id' => '68968AFE5FF3D',
             'whatsapp_default_phone' => $c['whatsapp_default_phone'] ?? '',
             'company_header_url' => $c['company_header_url'] ?? null,
+            'company_stamp_url' => $c['company_stamp_url'] ?? null,
+            'company_signature_url' => $c['company_signature_url'] ?? null,
             'invoice_branding_type' => $c['invoice_branding_type'] ?? 'logo',
             'logo_position' => $c['logo_position'] ?? 'right',
             'logo_height' => $c['logo_height'] ?? 60,

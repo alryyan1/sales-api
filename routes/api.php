@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\{
   InventoryCountController,
   PermissionController,
   PdfReportSettingController,
+  ReportTemplateController,
   ProductController,
   ProfileController,
   PurchaseController,
@@ -105,6 +106,8 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::put('admin/settings', [SettingController::class, 'update'])->name('settings.update');
   Route::post('admin/settings/logo', [SettingController::class, 'uploadLogo'])->name('settings.uploadLogo');
   Route::post('admin/settings/header', [SettingController::class, 'uploadHeader'])->name('settings.uploadHeader');
+  Route::post('admin/settings/stamp', [SettingController::class, 'uploadStamp'])->name('settings.uploadStamp');
+  Route::post('admin/settings/signature', [SettingController::class, 'uploadSignature'])->name('settings.uploadSignature');
 
   // -- PDF Report Branding Settings --
   Route::get('admin/pdf-report-settings', [PdfReportSettingController::class, 'index'])->name('pdf-report-settings.index');
@@ -142,6 +145,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
     Route::get('/sales-pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('sales-pdf');
     Route::get('/shift-cost-pdf', [ReportController::class, 'shiftCostPdf'])->name('shift-cost-pdf');
+    Route::apiResource('templates', ReportTemplateController::class)->except(['create', 'edit']);
+    Route::get('/templates/{template}/pdf', [ReportTemplateController::class, 'pdf'])->name('templates.pdf');
     Route::get('/shift-returns-pdf', [ReportController::class, 'shiftReturnsPdf'])->name('shift-returns-pdf');
     Route::get('/shift-sold-items-pdf', [ReportController::class, 'shiftSoldItemsPdf'])->name('shift-sold-items-pdf');
     Route::get('/shift-inventory-effects-pdf', [ReportController::class, 'shiftInventoryEffectsPdf'])->name('shift-inventory-effects-pdf');
@@ -210,6 +215,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/products/{product}/image', [ProductController::class, 'uploadImage'])->name('api.products.upload-image');
   Route::post('/products/bulk-update-units', [ProductController::class, 'bulkUpdateUnits']);
   Route::post('/products/bulk-update-sale-price', [ProductController::class, 'bulkUpdateSalePrice']);
+  Route::post('/products/{product}/clear-sale-price', [ProductController::class, 'clearSalePrice']);
   Route::apiResource('products', ProductController::class);
   Route::apiResource('packages', PackageController::class);
 

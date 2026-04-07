@@ -116,6 +116,15 @@ class InventoryCountController extends Controller
         ]);
 
         try {
+            // Auto-stamp started_at / completed_at on status transitions
+            $newStatus = $validatedData['status'] ?? null;
+            if ($newStatus === 'in_progress' && !$inventoryCount->started_at) {
+                $validatedData['started_at'] = now();
+            }
+            if ($newStatus === 'completed' && !$inventoryCount->completed_at) {
+                $validatedData['completed_at'] = now();
+            }
+
             $inventoryCount->update($validatedData);
             $inventoryCount->load(['warehouse:id,name', 'user:id,name', 'items.product:id,name,sku']);
 
@@ -298,10 +307,8 @@ class InventoryCountController extends Controller
         }
 
         try {
-            // Get all products that have stock in this warehouse
-            $products = Product::whereHas('warehouses', function ($query) use ($inventoryCount) {
-                $query->where('warehouse_id', $inventoryCount->warehouse_id);
-            })->get();
+            // Get ALL products in the system
+            $products = Product::all();
 
             // Get existing product IDs in the count
             $existingProductIds = $inventoryCount->items()->pluck('product_id')->toArray();
@@ -310,22 +317,17 @@ class InventoryCountController extends Controller
             $skippedCount = 0;
 
             foreach ($products as $product) {
-                // Skip if product already exists in count
                 if (in_array($product->id, $existingProductIds)) {
                     $skippedCount++;
                     continue;
                 }
 
-                // Get expected quantity from warehouse
-                $pivot = $product->warehouses()->where('warehouse_id', $inventoryCount->warehouse_id)->first();
-                $expectedQuantity = $pivot ? $pivot->pivot->quantity : 0;
-
-                // Create count item
+                // Use global stock_quantity as expected
                 $inventoryCount->items()->create([
-                    'product_id' => $product->id,
-                    'expected_quantity' => $expectedQuantity,
-                    'actual_quantity' => null,
-                    'notes' => null,
+                    'product_id'        => $product->id,
+                    'expected_quantity' => $product->stock_quantity ?? 0,
+                    'actual_quantity'   => null,
+                    'notes'             => null,
                 ]);
 
                 $importedCount++;
