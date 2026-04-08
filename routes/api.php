@@ -53,6 +53,9 @@ Route::get('/health', function () {
 Route::get('/whatsapp-cloud/webhook', [WhatsAppCloudApiController::class, 'verifyWebhook']);
 Route::post('/whatsapp-cloud/webhook', [WhatsAppCloudApiController::class, 'webhook']);
 
+// --- Public Settings (read-only, no auth required) ---
+Route::get('admin/settings', [SettingController::class, 'index'])->name('settings.index.public');
+
 // --- Public PDF Routes (token validated in controller) ---
 Route::get('/reports/moved-expired-pdf', [ReportController::class, 'movedExpiredPdf'])->name('api.reports.moved-expired-pdf');
 
@@ -102,7 +105,6 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/stock-adjustments', [StockAdjustmentController::class, 'store'])->name('api.stock-adjustments.store');
   // -- Settings Management --
 
-  Route::get('admin/settings', [SettingController::class, 'index'])->name('settings.index');
   Route::put('admin/settings', [SettingController::class, 'update'])->name('settings.update');
   Route::post('admin/settings/logo', [SettingController::class, 'uploadLogo'])->name('settings.uploadLogo');
   Route::post('admin/settings/header', [SettingController::class, 'uploadHeader'])->name('settings.uploadHeader');
