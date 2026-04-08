@@ -267,7 +267,9 @@ class ProductController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $query = Product::select('*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem.purchase:id,currency']);
+        $warehouseId = $request->input('warehouse_id');
+
+        $query = Product::select('products.*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem.purchase:id,currency']);
 
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
@@ -276,21 +278,19 @@ class ProductController extends Controller
                     ->orWhere('scientific_name', 'like', "%{$search}%");
             });
         }
-        // Optionally, always filter by stock > 0 for sale/purchase forms
-        // if ($request->boolean('in_stock_only')) {
-        //    $query->where('stock_quantity', '>', 0);
-        // }
 
+        if ($warehouseId) {
+            // Only return products that have stock > 0 in the user's warehouse
+            $query->inStockAt((int) $warehouseId);
+        }
 
         $products = $query->orderBy('name')->limit($limit)->get();
-
-        $warehouseId = $request->input('warehouse_id'); // Get warehouse_id
 
         $products->each(function ($product) use ($warehouseId) {
             $product->append(['suggested_sale_price_per_sellable_unit', 'latest_cost_per_sellable_unit']);
 
             if ($warehouseId) {
-                // Override total stock with warehouse specific stock
+                // Override total stock with warehouse-specific stock
                 $product->current_stock_quantity = $product->countStock($warehouseId);
             }
         });

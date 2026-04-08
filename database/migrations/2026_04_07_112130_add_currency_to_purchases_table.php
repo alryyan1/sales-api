@@ -11,9 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('purchases', function (Blueprint $table) {
-            $table->enum('currency', ['SDG', 'USD'])->default('SDG')->after('notes');
-        });
+        if (!Schema::hasColumn('purchases', 'currency')) {
+            Schema::table('purchases', function (Blueprint $table) {
+                $table->enum('currency', ['SDG', 'USD'])->default('SDG')->after('notes');
+            });
+        }
     }
 
     /**
