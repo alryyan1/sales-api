@@ -105,6 +105,7 @@ class Product extends Model
         'sale_price',
         'cost_price',
         'expire_date',
+        'preferred_currency',
     ];
 
     /**

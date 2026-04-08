@@ -199,6 +199,7 @@ class ProductController extends Controller
             'sale_price' => 'sometimes|nullable|numeric|min:0',
             'cost_price' => 'sometimes|nullable|numeric|min:0',
             'expire_date' => 'sometimes|nullable|date',
+            'preferred_currency' => 'sometimes|nullable|in:SDG,USD',
         ]);
 
         // Important Note on stock_quantity:
