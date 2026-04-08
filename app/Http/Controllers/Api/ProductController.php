@@ -280,6 +280,7 @@ class ProductController extends Controller
         }
 
         if ($warehouseId) {
+            
             // Only return products that have stock > 0 in the user's warehouse
             $query->inStockAt((int) $warehouseId);
         }

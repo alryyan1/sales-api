@@ -12,8 +12,6 @@ class StockTransfer extends Model
     protected $fillable = [
         'from_warehouse_id',
         'to_warehouse_id',
-        'product_id',
-        'quantity',
         'transfer_date',
         'notes',
         'user_id',
@@ -21,8 +19,12 @@ class StockTransfer extends Model
 
     protected $casts = [
         'transfer_date' => 'date',
-        'quantity' => 'decimal:2',
     ];
+
+    public function items(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(StockTransferItem::class);
+    }
 
     public function fromWarehouse(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
