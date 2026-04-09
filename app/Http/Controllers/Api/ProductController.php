@@ -108,7 +108,7 @@ class ProductController extends Controller
         $sortDirection = $request->input('sort_direction', 'desc'); // Default sort direction
 
         // Validate sortable fields to prevent SQL injection or errors
-        $sortableFields = ['name', 'sku', 'created_at', 'updated_at'];
+        $sortableFields = ['id', 'name', 'sku', 'created_at', 'updated_at'];
         if ($sortBy === 'stock_quantity') {
             $query->orderBy(
                 \DB::table('product_warehouse')
