@@ -93,7 +93,7 @@ class InventoryCountController extends Controller
             'warehouse:id,name',
             'user:id,name',
             'approvedBy:id,name',
-            'items.product:id,name,sku'
+            'items.product:id,name,sku,image_url'
         ]);
 
         return response()->json(['count' => $inventoryCount]);
@@ -126,7 +126,7 @@ class InventoryCountController extends Controller
             }
 
             $inventoryCount->update($validatedData);
-            $inventoryCount->load(['warehouse:id,name', 'user:id,name', 'items.product:id,name,sku']);
+            $inventoryCount->load(['warehouse:id,name', 'user:id,name', 'items.product:id,name,sku,image_url']);
 
             return response()->json(['count' => $inventoryCount]);
         } catch (\Throwable $e) {
@@ -183,7 +183,7 @@ class InventoryCountController extends Controller
                 'notes' => $validatedData['notes'] ?? null,
             ]);
 
-            $item->load('product:id,name,sku');
+            $item->load('product:id,name,sku,image_url');
 
             return response()->json(['item' => $item], Response::HTTP_CREATED);
         } catch (\Illuminate\Database\QueryException $e) {
@@ -220,7 +220,7 @@ class InventoryCountController extends Controller
 
         try {
             $item->update($validatedData);
-            $item->load('product:id,name,sku');
+            $item->load('product:id,name,sku,image_url');
 
             return response()->json(['item' => $item]);
         } catch (\Throwable $e) {
@@ -267,7 +267,7 @@ class InventoryCountController extends Controller
                 $inventoryCount->approve($request->user()->id);
             });
 
-            $inventoryCount->load(['warehouse:id,name', 'user:id,name', 'approvedBy:id,name', 'items.product:id,name,sku']);
+            $inventoryCount->load(['warehouse:id,name', 'user:id,name', 'approvedBy:id,name', 'items.product:id,name,sku,image_url']);
 
             return response()->json(['count' => $inventoryCount, 'message' => 'Inventory count approved and inventory adjusted.']);
         } catch (\Throwable $e) {

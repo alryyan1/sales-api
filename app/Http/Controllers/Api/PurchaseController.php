@@ -146,7 +146,7 @@ class PurchaseController extends Controller
 
         // Check if items should be included
         if ($request->boolean('include_items')) {
-            $query->with(['items', 'items.product:id,name,sku,stocking_unit_name,sellable_unit_name']);
+            $query->with(['items', 'items.product:id,name,sku,image_url,stocking_unit_name,sellable_unit_name']);
         }
 
         // Always include payment sums and items count on the list view
@@ -300,7 +300,7 @@ class PurchaseController extends Controller
             }); // End DB::transaction
 
             // Eager load relations for the response
-            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku,image_url']);
 
             return response()->json(['purchase' => new PurchaseResource($purchase)], Response::HTTP_CREATED);
         } catch (ValidationException $e) {
@@ -483,7 +483,7 @@ class PurchaseController extends Controller
             }
         });
 
-        $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+        $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku,image_url']);
         return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
     }
 
@@ -621,7 +621,7 @@ class PurchaseController extends Controller
                 $this->updatePurchaseTotal($purchase);
             });
 
-            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku,image_url']);
             return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
         } catch (\Illuminate\Database\QueryException $e) {
             // Check for unique constraint violation error code (MySQL: 1062)
@@ -699,7 +699,7 @@ class PurchaseController extends Controller
                 $this->updatePurchaseTotal($purchase);
             });
 
-            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku,image_url']);
             return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
         } catch (\Illuminate\Database\QueryException $e) {
             // Check for unique constraint violation error code (MySQL: 1062)
@@ -755,7 +755,7 @@ class PurchaseController extends Controller
                 $this->updatePurchaseTotal($purchase);
             });
 
-            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku,image_url']);
             return response()->json(['purchase' => new PurchaseResource($purchase->fresh())]);
         } catch (\Illuminate\Database\QueryException $e) {
             // Check for foreign key constraint violation error code (varies by DB)
@@ -813,7 +813,7 @@ class PurchaseController extends Controller
                 return $deletedCount;
             });
 
-            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku,image_url']);
             return response()->json([
                 'message' => "Successfully deleted {$count} zero-quantity items.",
                 'deleted_count' => $count,
@@ -862,7 +862,7 @@ class PurchaseController extends Controller
                 return $addedCount;
             });
 
-            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku']);
+            $purchase->load(['supplier:id,name', 'user:id,name', 'items', 'items.product:id,name,sku,image_url']);
             return response()->json([
                 'message' => "Successfully added {$count} products.",
                 'added_count' => $count,
@@ -880,7 +880,7 @@ class PurchaseController extends Controller
     public function getItems(Request $request, Purchase $purchase)
     {
         $query = $purchase->items()->getQuery()
-            ->with(['product:id,name,sku,units_per_stocking_unit']);
+            ->with(['product:id,name,sku,image_url,units_per_stocking_unit']);
 
         // Search functionality
         if ($search = $request->input('search')) {
@@ -1058,7 +1058,7 @@ class PurchaseController extends Controller
         ]);
 
         // Build query with filters
-        $query = Purchase::with(['supplier:id,name', 'user:id,name', 'items.product:id,name,sku']);
+        $query = Purchase::with(['supplier:id,name', 'user:id,name', 'items.product:id,name,sku,image_url']);
 
         if (isset($validated['supplier_id'])) {
             $query->where('supplier_id', $validated['supplier_id']);

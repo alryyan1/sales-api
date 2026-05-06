@@ -404,31 +404,36 @@ class PurchasePdfService
         // Calculate column widths
         $pageWidth = $this->pdf->getPageWidth() - (self::MARGIN * 2);
         $widths = [
-            'no' => $pageWidth * 0.05,      // #
-            'product' => $pageWidth * 0.26, // Product
-            'batch' => $pageWidth * 0.11,   // Batch
-            'qty' => $pageWidth * 0.11,     // Quantity
-            'cost' => $pageWidth * 0.12,    // Unit Cost
-            'sale' => $pageWidth * 0.12,    // Sale Price
-            'expiry' => $pageWidth * 0.10,  // Expiry
-            'total' => $pageWidth * 0.13,   // Total
+            'no'      => $pageWidth * 0.05,  // #
+            'img'     => $pageWidth * 0.07,  // Image
+            'product' => $pageWidth * 0.21,  // Product
+            'batch'   => $pageWidth * 0.10,  // Batch
+            'qty'     => $pageWidth * 0.10,  // Quantity
+            'cost'    => $pageWidth * 0.12,  // Unit Cost
+            'sale'    => $pageWidth * 0.12,  // Sale Price
+            'expiry'  => $pageWidth * 0.10,  // Expiry
+            'total'   => $pageWidth * 0.13,  // Total
         ];
 
         // Table headers
-        $this->pdf->Cell($widths['no'], 8, '#', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['product'], 8, 'المنتج', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['batch'], 8, 'رقم الدفعة', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['qty'], 8, 'الكمية', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['cost'], 8, 'سعر الوحدة', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['sale'], 8, 'سعر البيع', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['expiry'], 8, 'الصلاحية', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['total'], 8, 'الإجمالي', 1, 1, 'C', true);
+        $this->pdf->Cell($widths['no'],      8, '#',          1, 0, 'C', true);
+        $this->pdf->Cell($widths['img'],     8, 'صورة',       1, 0, 'C', true);
+        $this->pdf->Cell($widths['product'], 8, 'المنتج',     1, 0, 'C', true);
+        $this->pdf->Cell($widths['batch'],   8, 'رقم الدفعة', 1, 0, 'C', true);
+        $this->pdf->Cell($widths['qty'],     8, 'الكمية',     1, 0, 'C', true);
+        $this->pdf->Cell($widths['cost'],    8, 'سعر الوحدة', 1, 0, 'C', true);
+        $this->pdf->Cell($widths['sale'],    8, 'سعر البيع',  1, 0, 'C', true);
+        $this->pdf->Cell($widths['expiry'],  8, 'الصلاحية',   1, 0, 'C', true);
+        $this->pdf->Cell($widths['total'],   8, 'الإجمالي',   1, 1, 'C', true);
 
         // Reset colors for body
         $this->pdf->SetTextColor(0, 0, 0);
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_SMALL);
         $this->pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
         $this->pdf->SetLineWidth(0.2);
+
+        // Row height for image rows
+        $rowH = 14;
 
         // Table rows with alternating colors
         $fill = false;
@@ -437,29 +442,55 @@ class PurchasePdfService
             $fillColor = $fill ? [252, 252, 252] : [255, 255, 255];
             $this->pdf->SetFillColor($fillColor[0], $fillColor[1], $fillColor[2]);
 
-            $itemTotal = $item->quantity * $item->unit_cost;
+            $itemTotal   = $item->quantity * $item->unit_cost;
             $productName = $item->product?->name ?? 'منتج محذوف';
-            $unit = $item->product?->stockingUnit?->name ?? '';
+            $unit        = $item->product?->stockingUnit?->name ?? '';
 
-            // Row data
-            $this->pdf->Cell($widths['no'], 7, ($index + 1), 1, 0, 'C', true);
-            $this->pdf->Cell($widths['product'], 7, $productName, 1, 0, 'R', true);
-            $this->pdf->Cell($widths['batch'], 7, $item->batch_number ?: '---', 1, 0, 'C', true);
-            $this->pdf->Cell($widths['qty'], 7, number_format($item->quantity) . ($unit ? " $unit" : ''), 1, 0, 'C', true);
-            $this->pdf->Cell($widths['cost'], 7, number_format($item->unit_cost, 2), 1, 0, 'C', true);
-            $this->pdf->Cell($widths['sale'], 7, $item->sale_price ? number_format($item->sale_price, 2) : '---', 1, 0, 'C', true);
-            $this->pdf->Cell($widths['expiry'], 7, $item->expiry_date ? date('Y-m-d', strtotime($item->expiry_date)) : '---', 1, 0, 'C', true);
+            // Save Y position before drawing row cells
+            $rowY = $this->pdf->GetY();
+            $rowX = $this->pdf->GetX();
+
+            // Draw all cells except image first
+            $this->pdf->Cell($widths['no'],      $rowH, ($index + 1),                                                              1, 0, 'C', true);
+
+            // Image cell placeholder (drawn below)
+            $imgCellX = $this->pdf->GetX();
+            $this->pdf->Cell($widths['img'],     $rowH, '',                                                                        1, 0, 'C', true);
+
+            $this->pdf->Cell($widths['product'], $rowH, $productName,                                                              1, 0, 'R', true);
+            $this->pdf->Cell($widths['batch'],   $rowH, $item->batch_number ?: '---',                                             1, 0, 'C', true);
+            $this->pdf->Cell($widths['qty'],     $rowH, number_format($item->quantity) . ($unit ? " $unit" : ''),                  1, 0, 'C', true);
+            $this->pdf->Cell($widths['cost'],    $rowH, number_format($item->unit_cost, 2),                                        1, 0, 'C', true);
+            $this->pdf->Cell($widths['sale'],    $rowH, $item->sale_price ? number_format($item->sale_price, 2) : '---',           1, 0, 'C', true);
+            $this->pdf->Cell($widths['expiry'],  $rowH, $item->expiry_date ? date('Y-m-d', strtotime($item->expiry_date)) : '---', 1, 0, 'C', true);
 
             // Total with bold font
             $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL);
-            $this->pdf->Cell($widths['total'], 7, number_format($itemTotal, 2), 1, 1, 'C', true);
+            $this->pdf->Cell($widths['total'],   $rowH, number_format($itemTotal, 2),                                              1, 1, 'C', true);
             $this->pdf->SetFont('arial', '', self::FONT_SIZE_SMALL);
+
+            // Now render the product image inside the image cell
+            $imageUrl = $item->product?->image_url ?? null;
+            if ($imageUrl) {
+                $imgPath = $this->resolveProductImagePath($imageUrl);
+                if ($imgPath) {
+                    try {
+                        $imgSize  = $rowH - 2; // mm, with 1mm padding on each side
+                        $imgXPos  = $imgCellX + ($widths['img'] - $imgSize) / 2;
+                        $imgYPos  = $rowY + ($rowH - $imgSize) / 2;
+                        @$this->pdf->Image($imgPath, $imgXPos, $imgYPos, $imgSize, $imgSize, '', '', '', true, 150, '', false, false, 0, 'CM');
+                    } catch (\Throwable $e) {
+                        // Silently skip if image rendering fails
+                    }
+                }
+            }
 
             $fill = !$fill;
         }
 
         $this->pdf->Ln(5);
     }
+
 
     /**
      * Add financial summary with professional card-like layout
@@ -601,5 +632,37 @@ class PurchasePdfService
                 'text' => [0, 0, 0],
             ],
         };
+    }
+
+    /**
+     * Resolve a product image URL to a local filesystem path for TCPDF rendering.
+     *
+     * @param string|null $imageUrl
+     * @return string|null Local file path, or null if not resolvable
+     */
+    private function resolveProductImagePath(?string $imageUrl): ?string
+    {
+        if (!$imageUrl) return null;
+
+        $path = parse_url($imageUrl, PHP_URL_PATH) ?: '';
+        if (!$path) return null;
+
+        // Resolve /storage/ URLs
+        $storagePos = strpos($path, '/storage/');
+        if ($storagePos !== false) {
+            $relative  = substr($path, $storagePos + strlen('/storage/'));
+            $candidate = public_path('storage/' . ltrim($relative, '/'));
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        // Try resolving relative to public_path
+        $candidate = public_path(ltrim($path, '/'));
+        if (file_exists($candidate)) {
+            return $candidate;
+        }
+
+        return null;
     }
 }

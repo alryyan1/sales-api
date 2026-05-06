@@ -122,7 +122,7 @@ class StockAdjustmentController extends Controller
         // Authorization check
 
 
-        $query = StockAdjustment::with(['user:id,name', 'product:id,name,sku', 'purchaseItemBatch:id,batch_number', 'warehouse:id,name']); // Eager load
+        $query = StockAdjustment::with(['user:id,name', 'product:id,name,sku,image_url', 'purchaseItemBatch:id,batch_number', 'warehouse:id,name']); // Eager load
 
         // Add Filtering
         if ($warehouseId = $request->input('warehouse_id')) {

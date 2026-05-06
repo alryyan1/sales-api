@@ -20,6 +20,11 @@ class PurchaseItemResource extends JsonResource
             'product_id' => $this->product_id,
             'product_name' => $this->whenLoaded('product', fn() => $this->product->name),
             'product_sku' => $this->whenLoaded('product', fn() => $this->product->sku),
+            'product_image_url' => $this->whenLoaded('product', function () {
+                $url = $this->product->image_url;
+                if (!$url) return null;
+                return str_starts_with($url, 'http') ? $url : asset($url);
+            }),
             'batch_number' => $this->batch_number,
             'quantity' => $this->quantity, // e.g., number of boxes purchased
             'unit_cost' => $this->unit_cost, // e.g., cost per box
