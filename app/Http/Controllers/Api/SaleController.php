@@ -1194,6 +1194,9 @@ class SaleController extends Controller
             if ($sale->user) {
                 $pdf->Cell(0, 4, 'البائع: ' . $sale->user->name, 0, 1, 'R');
             }
+            if ($sale->warehouse) {
+                $pdf->Cell(0, 4, 'الفرع: ' . $sale->warehouse->name, 0, 1, 'R');
+            }
             $pdf->Ln(1);
             $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
             $pdf->Ln(1);

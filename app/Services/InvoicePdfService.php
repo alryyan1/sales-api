@@ -19,8 +19,8 @@ class InvoicePdfService
         // Get settings
         $settings = app(\App\Services\SettingsService::class)->getAll();
 
-        // Load sale items and payments
-        $sale->load(['items.product', 'client', 'user', 'payments']);
+        // Load sale items, payments, and warehouse
+        $sale->load(['items.product', 'client', 'user', 'payments', 'warehouse']);
 
         // Initialize paid amount
         $paidAmount = (float) ($sale->payments?->sum('amount') ?? 0);
@@ -308,7 +308,7 @@ class InvoicePdfService
 
         // Light background box
         $pdf->SetFillColor(248, 248, 248);
-        $pdf->Rect($leftM, $infoY, $usableW, $rowH * 2, 'DF');
+        $pdf->Rect($leftM, $infoY, $usableW, $rowH * 3, 'DF');
 
         // Row 1 — right column: invoice date | left column: client name
         $pdf->SetXY($leftM + $colW, $infoY);
@@ -336,7 +336,16 @@ class InvoicePdfService
         $pdf->SetFont('arial', '', 9); // Reduced from 10
         $pdf->Cell($colW * 0.4, $rowH, 'الرقم التعريفي:', 0, 0, 'C');
 
-        $pdf->SetY($infoY + $rowH * 2 + 2); // Reduced from 5
+        // Row 3 — Branch Name
+        if ($sale->warehouse) {
+            $pdf->SetXY($leftM + $colW, $infoY + $rowH * 2);
+            $pdf->SetFont('arial', 'B', 9);
+            $pdf->Cell($colW * 0.55, $rowH, $sale->warehouse->name, 0, 0, 'R');
+            $pdf->SetFont('arial', '', 9);
+            $pdf->Cell($colW * 0.45, $rowH, 'الفرع:', 0, 0, 'C');
+        }
+
+        $pdf->SetY($infoY + $rowH * 3 + 2); // Reduced from 5
     }
 
     private function generateArabicProformaTable(TCPDF $pdf, Sale $sale): void
@@ -356,8 +365,17 @@ class InvoicePdfService
 
         $pdf->SetFont('arial', '', 8); // Reduced from 10
         foreach ($sale->items as $idx => $item) {
+            $productName = $item->product->name ?? '';
+            $maxW = $w[1] - 2; // Subtract some padding
+            if ($pdf->GetStringWidth($productName) > $maxW) {
+                while ($pdf->GetStringWidth($productName . '...') > $maxW && mb_strlen($productName) > 0) {
+                    $productName = mb_substr($productName, 0, -1);
+                }
+                $productName .= '...';
+            }
+
             $pdf->Cell($w[0], 6, ($idx + 1), 1, 0, 'C'); // Reduced height from 8 to 6
-            $pdf->Cell($w[1], 6, ($item->product->name ?? ''), 1, 0, 'C');
+            $pdf->Cell($w[1], 6, $productName, 1, 0, 'C');
             $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
             $pdf->Cell($w[3], 6, $item->quantity, 1, 0, 'C');
             $pdf->Cell($w[4], 6, number_format($item->unit_price, 2), 1, 0, 'C');

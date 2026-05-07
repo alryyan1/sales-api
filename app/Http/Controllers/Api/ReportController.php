@@ -2336,7 +2336,7 @@ class ReportController extends Controller
      */
     public function inventoryAuditPdf(Request $request, \App\Services\InventoryAuditPdfService $pdfService)
     {
-        $filters = $request->only(['search', 'category_id']);
+        $filters = $request->only(['search', 'category_id', 'warehouse_id']);
         
         try {
             $pdfContent = $pdfService->generate($filters);

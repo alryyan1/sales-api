@@ -19,8 +19,12 @@ class InventoryAuditPdfService
      */
     public function generate(array $filters = []): string
     {
-        // Fetch all warehouses
-        $warehouses = Warehouse::orderBy('id')->get();
+        // Fetch warehouses
+        $warehousesQuery = Warehouse::query();
+        if (!empty($filters['warehouse_id'])) {
+            $warehousesQuery->where('id', $filters['warehouse_id']);
+        }
+        $warehouses = $warehousesQuery->orderBy('id')->get();
         $whCount = $warehouses->count();
 
         // Fetch products grouped by category
@@ -30,6 +34,14 @@ class InventoryAuditPdfService
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
                       ->orWhere('sku', 'like', "%{$search}%");
+                });
+            }
+
+            if (!empty($filters['warehouse_id'])) {
+                $warehouseId = $filters['warehouse_id'];
+                $query->whereHas('warehouses', function ($q) use ($warehouseId) {
+                    $q->where('warehouse_id', $warehouseId)
+                      ->where('quantity', '>', 0);
                 });
             }
 
@@ -44,7 +56,7 @@ class InventoryAuditPdfService
         $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
-        $pdf->SetTitle('محضر حصر كميات');
+        $pdf->SetTitle('تقرير بكميات المعدات');
         $pdf->SetMargins(5, $renderer->getTopMargin(), 5);
         $pdf->SetAutoPageBreak(true, 10);
         $pdf->AddPage();
@@ -53,8 +65,11 @@ class InventoryAuditPdfService
 
         // Header Section
         $pdf->SetFont('arial', 'B', 10);
-        $whNames = $warehouses->pluck('name')->implode(' + ');
-        $reportTitle = 'محضر حصر بكميات بضائع الطاقة الشمسية الموجود بمخازن الشركة ( ' . $whNames . ' ) بتاريخ ' . now()->format('d/m/Y') . 'م';
+        if ($warehouses->count() === 1) {
+            $reportTitle = 'تقرير بكميات المعدات لمخزن ( ' . $warehouses->first()->name . ' ) بتاريخ ' . now()->format('d/m/Y') . 'م';
+        } else {
+            $reportTitle = 'تقرير بكميات المعدات لكل مخازن الشركة بتاريخ ' . now()->format('d/m/Y') . 'م';
+        }
         $pdf->MultiCell(0, 6, $reportTitle, 0, 'C');
         $pdf->Ln(3);
 

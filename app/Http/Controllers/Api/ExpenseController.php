@@ -72,7 +72,7 @@ class ExpenseController extends Controller
             'description' => ['nullable', 'string'],
             'amount' => ['required', 'numeric', 'min:0'],
             'expense_date' => ['required', 'date'],
-            'payment_method' => ['nullable', 'string', 'in:cash,bank'],
+            'payment_method' => ['nullable', 'string', 'in:cash,bank,bankak,fawry,ocash'],
             'reference' => ['nullable', 'string', 'max:100'],
         ]);
 
@@ -98,7 +98,7 @@ class ExpenseController extends Controller
             'description' => ['sometimes', 'nullable', 'string'],
             'amount' => ['sometimes', 'required', 'numeric', 'min:0'],
             'expense_date' => ['sometimes', 'required', 'date'],
-            'payment_method' => ['sometimes', 'nullable', 'string', 'in:cash,bank'],
+            'payment_method' => ['sometimes', 'nullable', 'string', 'in:cash,bank,bankak,fawry,ocash'],
             'reference' => ['sometimes', 'nullable', 'string', 'max:100'],
         ]);
 
