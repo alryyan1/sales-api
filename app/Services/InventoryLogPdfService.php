@@ -309,26 +309,33 @@ class InventoryLogPdfService
             ->where('sri.status', 'issued')
             ->whereNotNull('sr.issue_date');
 
-        // Apply filters
-        foreach ([$purchasesQuery, $salesQuery, $adjustmentsQuery, $requisitionIssuesQuery] as $query) {
+        // Actual column names per query (aliases cannot be used in WHERE in MySQL)
+        $dateColumns   = ['p.purchase_date', 's.sale_date', 'sa.created_at', 'sr.issue_date'];
+        $batchColumns  = ['pi.batch_number', 'si.batch_number_sold', 'pi_batch.batch_number', 'sri.issued_batch_number'];
+        $docRefColumns = ['p.reference_number', null, 'sa.reason', null];
+
+        $queryList = [$purchasesQuery, $salesQuery, $adjustmentsQuery, $requisitionIssuesQuery];
+
+        foreach ($queryList as $i => $query) {
             if ($startDate) {
-                $query->whereDate(DB::raw($query->grammar->wrap('transaction_date')), '>=', $startDate);
+                $query->whereDate($dateColumns[$i], '>=', $startDate);
             }
             if ($endDate) {
-                $query->whereDate(DB::raw($query->grammar->wrap('transaction_date')), '<=', $endDate);
+                $query->whereDate($dateColumns[$i], '<=', $endDate);
             }
             if ($productId) {
                 $query->where('prod.id', $productId);
             }
-            if ($warehouseId) {
-                $query->where('w.id', $warehouseId);
-            }
             if ($search) {
-                $query->where(function($q) use ($search) {
+                $batchCol  = $batchColumns[$i];
+                $docRefCol = $docRefColumns[$i];
+                $query->where(function ($q) use ($search, $batchCol, $docRefCol) {
                     $q->where('prod.name', 'like', "%{$search}%")
                       ->orWhere('prod.sku', 'like', "%{$search}%")
-                      ->orWhere(DB::raw($q->grammar->wrap('batch_number')), 'like', "%{$search}%")
-                      ->orWhere(DB::raw($q->grammar->wrap('document_reference')), 'like', "%{$search}%");
+                      ->orWhere($batchCol, 'like', "%{$search}%");
+                    if ($docRefCol) {
+                        $q->orWhere($docRefCol, 'like', "%{$search}%");
+                    }
                 });
             }
         }
