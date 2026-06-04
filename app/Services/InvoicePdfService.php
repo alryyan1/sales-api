@@ -373,6 +373,11 @@ class InvoicePdfService
                 }
                 $productName .= '...';
             }
+            // Wrap with Unicode RLE/PDF markers so TCPDF's bidi algorithm
+            // treats mixed Arabic+English product names as RTL (fixes reversed Arabic).
+            if (preg_match('/[\x{0600}-\x{06FF}]/u', $productName)) {
+                $productName = "\xE2\x80\xAB" . $productName . "\xE2\x80\xAC";
+            }
 
             $pdf->Cell($w[0], 6, ($idx + 1), 1, 0, 'C'); // Reduced height from 8 to 6
             $pdf->Cell($w[1], 6, $productName, 1, 0, 'C');
