@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use TCPDF;
+use Illuminate\Support\Facades\Log;
 use App\Models\Sale;
 use Illuminate\Support\Facades\Storage;
 
@@ -536,7 +537,7 @@ class InvoicePdfService
 
         $stampPath     = $this->resolveImagePath($settings['company_stamp_url']     ?? null);
         $signaturePath = $this->resolveImagePath($settings['company_signature_url'] ?? null);
-
+        log::info('Resolved stamp path: ' . ($stampPath ?? 'none') . ', signature path: ' . ($signaturePath ?? 'none'));
         $pageW  = $pdf->getPageWidth();
         $leftM  = 10;
         $rightM = 10;
