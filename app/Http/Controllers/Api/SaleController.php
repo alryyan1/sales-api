@@ -654,7 +654,7 @@ class SaleController extends Controller
                     'quantity' => $validatedData['quantity'],
                     'unit_price' => $resolvedUnitPrice,
                     'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
-                    'cost_price_at_sale' => 0,
+                    'cost_price_at_sale' => $this->resolveCostPrice($product),
                 ]);
                 $saleItems = [$saleItem];
 
@@ -786,7 +786,7 @@ class SaleController extends Controller
                     } else {
                         $saleItem->purchase_item_id = null;
                         $saleItem->batch_number_sold = null;
-                        $saleItem->cost_price_at_sale = 0;
+                        $saleItem->cost_price_at_sale = $this->resolveCostPrice($product);
                     }
                 }
 
@@ -1448,23 +1448,14 @@ class SaleController extends Controller
                                 : 0;
                         }
 
-                        $refBatch = PurchaseItem::where('product_id', $product->id)
-                            ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
-                            ->orderBy('expiry_date', 'asc')
-                            ->orderBy('created_at', 'asc')
-                            ->first();
-                        $costPriceAtSale = $refBatch ? (float) ($refBatch->cost_per_sellable_unit ?? $refBatch->unit_cost ?? 0) : 0;
-                        $batchNumberSold = $refBatch ? $refBatch->batch_number : null;
-                        $purchaseItemId = $refBatch ? $refBatch->id : null;
-
                         $saleItem = $sale->items()->create([
                             'product_id' => $product->id,
-                            'purchase_item_id' => $purchaseItemId,
-                            'batch_number_sold' => $batchNumberSold,
+                            'purchase_item_id' => null,
+                            'batch_number_sold' => null,
                             'quantity' => $itemData['quantity'],
                             'unit_price' => $resolvedUnitPrice,
                             'total_price' => $itemData['quantity'] * $resolvedUnitPrice,
-                            'cost_price_at_sale' => $costPriceAtSale,
+                            'cost_price_at_sale' => $this->resolveCostPrice($product),
                         ]);
                         $addedItems[] = $saleItem;
                         $totalAdded++;
@@ -1613,5 +1604,27 @@ class SaleController extends Controller
         ]);
 
         return response()->json(new SaleResource($sale));
+    }
+
+    /**
+     * Resolve cost price for a product from the latest purchase invoice.
+     * Falls back to product->cost_price if no purchase item exists.
+     */
+    private function resolveCostPrice(\App\Models\Product $product): float
+    {
+        $lastItem = PurchaseItem::where('purchase_items.product_id', $product->id)
+            ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
+            ->orderBy('purchases.purchase_date', 'desc')
+            ->orderBy('purchase_items.created_at', 'desc')
+            ->select('purchase_items.*')
+            ->first();
+
+        if ($lastItem) {
+            return (float) ($lastItem->cost_per_sellable_unit > 0
+                ? $lastItem->cost_per_sellable_unit
+                : ($lastItem->unit_cost ?? 0));
+        }
+
+        return (float) ($product->cost_price ?? 0);
     }
 }

@@ -293,6 +293,11 @@ Route::middleware('auth:sanctum')->group(function () {
   //reports/sales/pdf
   // -- Dashboard Data --
   Route::get('/dashboard/summary', [DashboardController::class, 'summary'])->name('api.dashboard.summary');
+  Route::get('/dashboard/branches-comparison', [DashboardController::class, 'branchesComparison'])->name('api.dashboard.branchesComparison');
+  Route::get('/dashboard/sales-timeseries', [DashboardController::class, 'salesTimeseries'])->name('api.dashboard.salesTimeseries');
+  Route::get('/dashboard/top-products', [DashboardController::class, 'topProducts'])->name('api.dashboard.topProducts');
+  Route::get('/dashboard/alerts', [DashboardController::class, 'alerts'])->name('api.dashboard.alerts');
+  Route::get('/dashboard/branch-details/{warehouseId}', [DashboardController::class, 'branchDetails'])->name('api.dashboard.branchDetails');
   Route::get('/dashboard/sales-terminal-summary', [DashboardController::class, 'salesTerminalSummary'])->name('api.dashboard.salesTerminalSummary'); //
 
   // -- Public Users Route for Filters --

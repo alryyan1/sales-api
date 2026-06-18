@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\Client;
 use App\Models\Payment;
 use App\Models\Supplier;
+use App\Models\Warehouse;
 use Carbon\Carbon; // For date manipulation
 
 class DashboardController extends Controller
@@ -134,9 +135,73 @@ class DashboardController extends Controller
             ->toArray(); // Convert collection to array
 
 
+        // --- Profit = Net Revenue - Expenses - Returns ---
+        $revenueQuery = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.is_returned', false)
+            ->where('sales.is_quote', false);
+
+        $expensesQuery = DB::table('expenses');
+
+        $returnsQuery = DB::table('sale_return_items')
+            ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id');
+
+        if ($startDate && $endDate) {
+            $revenueQuery->whereDate('sales.sale_date', '>=', $startDate)
+                ->whereDate('sales.sale_date', '<=', $endDate);
+            $expensesQuery->whereDate('expense_date', '>=', $startDate)
+                ->whereDate('expense_date', '<=', $endDate);
+            $returnsQuery->whereDate('sale_returns.created_at', '>=', $startDate)
+                ->whereDate('sale_returns.created_at', '<=', $endDate);
+        } else {
+            $revenueQuery->whereDate('sales.sale_date', '>=', $startOfMonth);
+            $expensesQuery->whereDate('expense_date', '>=', $startOfMonth);
+            $returnsQuery->whereDate('sale_returns.created_at', '>=', $startOfMonth);
+        }
+
+        $filteredNetRevenue = (float) $revenueQuery->sum('sale_items.total_price');
+        $filteredExpenses   = (float) $expensesQuery->sum('amount');
+        $filteredReturns    = (float) $returnsQuery->selectRaw('SUM(sale_return_items.quantity * sale_return_items.price) as total')->value('total');
+        $filteredProfit     = $filteredNetRevenue - $filteredExpenses - $filteredReturns;
+
         // --- Customer/Supplier Stats ---
         $totalClients = Client::count();
         $totalSuppliers = Supplier::count();
+        $totalWarehouses = Warehouse::where('is_active', true)->count();
+
+        // --- Inventory Value ---
+        $inventoryValue = (float) DB::table('product_warehouse')
+            ->join('products', 'products.id', '=', 'product_warehouse.product_id')
+            ->selectRaw('SUM(product_warehouse.quantity * COALESCE(products.cost_price, 0)) as total_value')
+            ->value('total_value');
+
+        // --- Purchases Summary by Payment Method (filtered period) ---
+        $bankMethods = ['bank_transfer', 'bankak', 'mada', 'visa', 'mastercard', 'fawry', 'ocash'];
+
+        $purchPaymentsQ = DB::table('purchase_payments')
+            ->join('purchases', 'purchases.id', '=', 'purchase_payments.purchase_id')
+            ->whereNull('purchase_payments.deleted_at');
+
+        if ($startDate && $endDate) {
+            $purchPaymentsQ->whereDate('purchases.purchase_date', '>=', $startDate)
+                           ->whereDate('purchases.purchase_date', '<=', $endDate);
+        } else {
+            $purchPaymentsQ->whereDate('purchases.purchase_date', '>=', $startOfMonth);
+        }
+
+        $purchCash = (float) (clone $purchPaymentsQ)->where('purchase_payments.method', 'cash')->sum('purchase_payments.amount');
+        $purchBank = (float) (clone $purchPaymentsQ)->whereIn('purchase_payments.method', $bankMethods)->sum('purchase_payments.amount');
+
+        // Deferred = total purchases amount − all payments made on those purchases
+        $purchTotalQ = DB::table('purchases');
+        if ($startDate && $endDate) {
+            $purchTotalQ->whereDate('purchase_date', '>=', $startDate)->whereDate('purchase_date', '<=', $endDate);
+        } else {
+            $purchTotalQ->whereDate('purchase_date', '>=', $startOfMonth);
+        }
+        $purchTotal    = (float) $purchTotalQ->sum('total_amount');
+        $purchAllPaid  = (float) (clone $purchPaymentsQ)->sum('purchase_payments.amount');
+        $purchDeferred = max(0, $purchTotal - $purchAllPaid);
 
 
         // --- Combine data into response array ---
@@ -163,14 +228,28 @@ class DashboardController extends Controller
                 'filtered_count' => $filteredPurchasesCount,
             ],
             'inventory' => [
-                'total_products' => $totalProducts,
-                'low_stock_count' => $lowStockProductsCount,
-                'out_of_stock_count' => $outOfStockProductsCount,
-                'low_stock_sample' => $lowStockProductsSample, // Array of [quantity => name]
+                'total_products'    => $totalProducts,
+                'low_stock_count'   => $lowStockProductsCount,
+                'out_of_stock_count'=> $outOfStockProductsCount,
+                'inventory_value'   => $inventoryValue,
+                'low_stock_sample'  => $lowStockProductsSample,
+            ],
+            'purchases_summary' => [
+                'cash'     => $purchCash,
+                'bank'     => $purchBank,
+                'deferred' => $purchDeferred,
+                'total'    => $purchTotal,
             ],
             'entities' => [
                 'total_clients' => $totalClients,
                 'total_suppliers' => $totalSuppliers,
+                'total_warehouses' => $totalWarehouses,
+            ],
+            'profit' => [
+                'filtered_profit'      => $filteredProfit,
+                'filtered_net_revenue' => $filteredNetRevenue,
+                'filtered_expenses'    => $filteredExpenses,
+                'filtered_returns'     => $filteredReturns,
             ],
             // Add recent activities later if needed
             // 'recent_sales' => SaleResource::collection(Sale::with('client:id,name')->latest()->limit(5)->get()),
@@ -228,14 +307,496 @@ class DashboardController extends Controller
         ]);
     }
 
-    // --- Potential Future Methods ---
-    /*
-    public function salesChartData(Request $request) {
-        // Logic to get sales data grouped by day/week/month
+    public function branchesComparison(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+        ]);
+
+        $startDate = $validated['start_date'] ?? null;
+        $endDate   = $validated['end_date'] ?? null;
+
+        $warehouses = Warehouse::where('is_active', true)->get();
+
+        $branches = $warehouses->map(function ($warehouse) use ($startDate, $endDate) {
+            // Net revenue per branch
+            $salesQ = DB::table('sale_items')
+                ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+                ->where('sales.warehouse_id', $warehouse->id)
+                ->where('sales.is_returned', false)
+                ->where('sales.is_quote', false);
+
+            // Invoices count
+            $invQ = DB::table('sales')
+                ->where('warehouse_id', $warehouse->id)
+                ->where('is_returned', false)
+                ->where('is_quote', false);
+
+            // Returns per branch (via sale_id -> sales.warehouse_id)
+            $returnsQ = DB::table('sale_return_items')
+                ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
+                ->join('sales', 'sales.id', '=', 'sale_returns.sale_id')
+                ->where('sales.warehouse_id', $warehouse->id);
+
+            if ($startDate && $endDate) {
+                $salesQ->whereBetween(DB::raw('DATE(sales.sale_date)'), [$startDate, $endDate]);
+                $invQ->whereBetween(DB::raw('DATE(sale_date)'), [$startDate, $endDate]);
+                $returnsQ->whereBetween(DB::raw('DATE(sale_returns.created_at)'), [$startDate, $endDate]);
+            }
+
+            $totalSales   = (float) $salesQ->sum('sale_items.total_price');
+            $invoicesCount = (int) $invQ->count();
+            $totalReturns = (float) ($returnsQ->selectRaw('SUM(sale_return_items.quantity * sale_return_items.price) as total')->value('total') ?? 0);
+            $totalProfit  = $totalSales - $totalReturns;
+
+            return [
+                'id'             => $warehouse->id,
+                'name'           => $warehouse->name,
+                'total_sales'    => $totalSales,
+                'total_returns'  => $totalReturns,
+                'total_profit'   => $totalProfit,
+                'invoices_count' => $invoicesCount,
+                'contribution_percentage' => 0,
+            ];
+        });
+
+        $grandTotalSales = $branches->sum('total_sales');
+
+        $branches = $branches->map(function ($b) use ($grandTotalSales) {
+            $b['contribution_percentage'] = $grandTotalSales > 0
+                ? round(($b['total_sales'] / $grandTotalSales) * 100, 1)
+                : 0;
+            return $b;
+        })->sortByDesc('total_sales')->values();
+
+        return response()->json([
+            'data' => [
+                'branches'     => $branches,
+                'best_branch'  => $branches->first(),
+                'worst_branch' => $branches->count() > 1 ? $branches->last() : null,
+                'total_sales'  => $grandTotalSales,
+            ]
+        ]);
     }
 
-    public function lowStockList(Request $request) {
-        // Logic to get a paginated list of all low stock products
+    public function salesTimeseries(Request $request)
+    {
+        $period = $request->input('period', 'monthly');
+
+        $baseQuery = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.is_returned', false)
+            ->where('sales.is_quote', false);
+
+        if ($period === 'daily') {
+            $start = now()->subDays(29)->toDateString();
+            $rows = (clone $baseQuery)
+                ->whereDate('sales.sale_date', '>=', $start)
+                ->selectRaw("DATE(sales.sale_date) as period_key, SUM(sale_items.total_price) as total_sales, COUNT(DISTINCT sales.id) as invoices_count")
+                ->groupByRaw("DATE(sales.sale_date)")
+                ->orderByRaw("DATE(sales.sale_date)")
+                ->get();
+
+            $data = $rows->map(fn($r) => [
+                'label'          => Carbon::parse($r->period_key)->format('d/m'),
+                'total_sales'    => (float) $r->total_sales,
+                'invoices_count' => (int)   $r->invoices_count,
+            ]);
+
+        } elseif ($period === 'weekly') {
+            $start = now()->subWeeks(11)->startOfWeek()->toDateString();
+            $rows = (clone $baseQuery)
+                ->whereDate('sales.sale_date', '>=', $start)
+                ->selectRaw("YEARWEEK(sales.sale_date, 1) as yw, MIN(DATE(sales.sale_date)) as week_start, SUM(sale_items.total_price) as total_sales, COUNT(DISTINCT sales.id) as invoices_count")
+                ->groupByRaw("YEARWEEK(sales.sale_date, 1)")
+                ->orderByRaw("YEARWEEK(sales.sale_date, 1)")
+                ->get();
+
+            $data = $rows->map(fn($r) => [
+                'label'          => Carbon::parse($r->week_start)->format('d/m'),
+                'total_sales'    => (float) $r->total_sales,
+                'invoices_count' => (int)   $r->invoices_count,
+            ]);
+
+        } else {
+            $start = now()->subMonths(11)->startOfMonth()->toDateString();
+            $rows = (clone $baseQuery)
+                ->whereDate('sales.sale_date', '>=', $start)
+                ->selectRaw("DATE_FORMAT(sales.sale_date, '%Y-%m') as period_key, SUM(sale_items.total_price) as total_sales, COUNT(DISTINCT sales.id) as invoices_count")
+                ->groupByRaw("DATE_FORMAT(sales.sale_date, '%Y-%m')")
+                ->orderByRaw("DATE_FORMAT(sales.sale_date, '%Y-%m')")
+                ->get();
+
+            $data = $rows->map(fn($r) => [
+                'label'          => $r->period_key,
+                'total_sales'    => (float) $r->total_sales,
+                'invoices_count' => (int)   $r->invoices_count,
+            ]);
+        }
+
+        return response()->json(['data' => $data]);
     }
-    */
+
+    public function topProducts(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date'   => 'nullable|date_format:Y-m-d',
+            'limit'      => 'nullable|integer|min:1|max:20',
+        ]);
+
+        $startDate = $validated['start_date'] ?? now()->subDays(29)->toDateString();
+        $endDate   = $validated['end_date']   ?? now()->toDateString();
+        $limit     = (int) ($validated['limit'] ?? 8);
+
+        $data = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->join('products', 'products.id', '=', 'sale_items.product_id')
+            ->where('sales.is_returned', false)
+            ->where('sales.is_quote', false)
+            ->whereDate('sales.sale_date', '>=', $startDate)
+            ->whereDate('sales.sale_date', '<=', $endDate)
+            ->selectRaw("products.name as product_name, SUM(sale_items.quantity) as total_qty, SUM(sale_items.total_price) as total_revenue")
+            ->groupBy('products.id', 'products.name')
+            ->orderByDesc('total_revenue')
+            ->limit($limit)
+            ->get()
+            ->map(fn($r) => [
+                'name'          => $r->product_name,
+                'total_qty'     => (float) $r->total_qty,
+                'total_revenue' => (float) $r->total_revenue,
+            ]);
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function alerts(Request $request)
+    {
+        $since30 = now()->subDays(29)->toDateString();
+        $since7  = now()->subDays(7)->toDateString();
+
+        // 1. Low stock products
+        $totalStockSub = function ($q) {
+            $q->selectRaw('COALESCE(SUM(quantity),0)')
+              ->from('product_warehouse')
+              ->whereColumn('product_id', 'products.id');
+        };
+
+        $lowStock = Product::whereNotNull('stock_alert_level')
+            ->select('products.id', 'products.name', 'products.stock_alert_level')
+            ->selectSub($totalStockSub, 'total_stock')
+            ->where($totalStockSub, '<=', DB::raw('products.stock_alert_level'))
+            ->where($totalStockSub, '>=', 0)
+            ->orderBy('total_stock', 'asc')
+            ->limit(5)
+            ->get()
+            ->map(fn($p) => [
+                'id'          => $p->id,
+                'name'        => $p->name,
+                'stock'       => (float) $p->total_stock,
+                'alert_level' => (float) $p->stock_alert_level,
+            ]);
+
+        // 2. Overdue invoices (unpaid balance, older than 7 days)
+        $itemSub = DB::table('sale_items')
+            ->select('sale_id', DB::raw('SUM(total_price) as total'))
+            ->groupBy('sale_id');
+
+        $paymentSub = DB::table('payments')
+            ->select('sale_id', DB::raw('SUM(amount) as total'))
+            ->groupBy('sale_id');
+
+        $overdueInvoices = DB::table('sales')
+            ->leftJoin('clients', 'clients.id', '=', 'sales.client_id')
+            ->leftJoinSub($itemSub,     'it', 'it.sale_id',  '=', 'sales.id')
+            ->leftJoinSub($paymentSub,  'pt', 'pt.sale_id',  '=', 'sales.id')
+            ->where('sales.is_returned', false)
+            ->where('sales.is_quote', false)
+            ->whereDate('sales.sale_date', '<', $since7)
+            ->selectRaw("
+                sales.id, sales.number, sales.sale_date,
+                COALESCE(clients.name,'—') as client_name,
+                COALESCE(it.total,0) - COALESCE(sales.discount_amount,0) - COALESCE(pt.total,0) as due_amount
+            ")
+            ->havingRaw('due_amount > 0')
+            ->orderByDesc('due_amount')
+            ->limit(5)
+            ->get()
+            ->map(fn($r) => [
+                'id'          => $r->id,
+                'number'      => $r->number,
+                'sale_date'   => $r->sale_date,
+                'client_name' => $r->client_name,
+                'due_amount'  => (float) $r->due_amount,
+            ]);
+
+        // 3. High returns branches (return rate > 10% in last 30 days)
+        $branchSalesRaw = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.is_returned', false)->where('sales.is_quote', false)
+            ->whereDate('sales.sale_date', '>=', $since30)
+            ->select('sales.warehouse_id', DB::raw('SUM(sale_items.total_price) as total_sales'))
+            ->groupBy('sales.warehouse_id');
+
+        $branchReturnsRaw = DB::table('sale_return_items')
+            ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
+            ->join('sales', 'sales.id', '=', 'sale_returns.sale_id')
+            ->whereDate('sale_returns.created_at', '>=', $since30)
+            ->select('sales.warehouse_id', DB::raw('SUM(sale_return_items.quantity * sale_return_items.price) as total_returns'))
+            ->groupBy('sales.warehouse_id');
+
+        $highReturns = DB::table('warehouses')
+            ->where('warehouses.is_active', true)
+            ->leftJoinSub($branchSalesRaw,    'bs', 'bs.warehouse_id',  '=', 'warehouses.id')
+            ->leftJoinSub($branchReturnsRaw,  'br', 'br.warehouse_id',  '=', 'warehouses.id')
+            ->selectRaw("warehouses.id, warehouses.name, COALESCE(bs.total_sales,0) as total_sales, COALESCE(br.total_returns,0) as total_returns")
+            ->get()
+            ->filter(fn($r) => $r->total_sales > 0 && ($r->total_returns / $r->total_sales) > 0.10)
+            ->map(fn($r) => [
+                'id'           => $r->id,
+                'name'         => $r->name,
+                'total_sales'  => (float) $r->total_sales,
+                'total_returns'=> (float) $r->total_returns,
+                'return_rate'  => round(($r->total_returns / $r->total_sales) * 100, 1),
+            ])
+            ->values();
+
+        // 4. Low performing branches (below 70% of average in last 30 days)
+        $allSales = DB::table('warehouses')
+            ->where('warehouses.is_active', true)
+            ->leftJoinSub($branchSalesRaw, 'bs', 'bs.warehouse_id', '=', 'warehouses.id')
+            ->selectRaw("warehouses.id, warehouses.name, COALESCE(bs.total_sales,0) as total_sales")
+            ->get();
+
+        $avgSales = $allSales->avg('total_sales');
+
+        $lowPerforming = $allSales
+            ->filter(fn($b) => $avgSales > 0 && $b->total_sales < $avgSales * 0.7)
+            ->map(fn($b) => [
+                'id'              => $b->id,
+                'name'            => $b->name,
+                'total_sales'     => (float) $b->total_sales,
+                'performance_pct' => round(($b->total_sales / $avgSales) * 100, 1),
+            ])
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'low_stock'              => $lowStock,
+                'overdue_invoices'       => $overdueInvoices,
+                'high_returns_branches'  => $highReturns,
+                'low_performing_branches'=> $lowPerforming,
+            ]
+        ]);
+    }
+
+    public function branchDetails(Request $request, $warehouseId)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date'   => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+        ]);
+
+        $startDate = $validated['start_date'] ?? null;
+        $endDate   = $validated['end_date'] ?? null;
+
+        $warehouse = Warehouse::findOrFail($warehouseId);
+
+        // ── Base sale queries ──────────────────────────────────────────────────
+        $salesQ = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.warehouse_id', $warehouseId)
+            ->where('sales.is_returned', false)
+            ->where('sales.is_quote', false);
+
+        $invQ = DB::table('sales')
+            ->where('warehouse_id', $warehouseId)
+            ->where('is_returned', false)
+            ->where('is_quote', false);
+
+        $returnsQ = DB::table('sale_return_items')
+            ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
+            ->join('sales', 'sales.id', '=', 'sale_returns.sale_id')
+            ->where('sales.warehouse_id', $warehouseId);
+
+        if ($startDate && $endDate) {
+            $salesQ->whereBetween(DB::raw('DATE(sales.sale_date)'), [$startDate, $endDate]);
+            $invQ->whereBetween(DB::raw('DATE(sale_date)'), [$startDate, $endDate]);
+            $returnsQ->whereBetween(DB::raw('DATE(sale_returns.created_at)'), [$startDate, $endDate]);
+        }
+
+        $totalSales    = (float) $salesQ->sum('sale_items.total_price');
+        $invoicesCount = (int)   $invQ->count();
+        $totalReturns  = (float) ((clone $returnsQ)
+            ->selectRaw('SUM(sale_return_items.quantity * sale_return_items.price) as total')
+            ->value('total') ?? 0);
+        $totalProfit   = $totalSales - $totalReturns;
+        $avgInvoice    = $invoicesCount > 0 ? round($totalSales / $invoicesCount, 2) : 0;
+
+        // ── Employees performance ──────────────────────────────────────────────
+        $empInvQ = DB::table('sales')
+            ->where('warehouse_id', $warehouseId)
+            ->where('is_returned', false)
+            ->where('is_quote', false);
+
+        $empSalesQ = DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.warehouse_id', $warehouseId)
+            ->where('sales.is_returned', false)
+            ->where('sales.is_quote', false);
+
+        if ($startDate && $endDate) {
+            $empInvQ->whereBetween(DB::raw('DATE(sale_date)'), [$startDate, $endDate]);
+            $empSalesQ->whereBetween(DB::raw('DATE(sales.sale_date)'), [$startDate, $endDate]);
+        }
+
+        $empInvSub   = (clone $empInvQ)->select('user_id', DB::raw('COUNT(id) as inv_count'))->groupBy('user_id');
+        $empSalesSub = (clone $empSalesQ)->select('sales.user_id', DB::raw('SUM(sale_items.total_price) as emp_sales'))->groupBy('sales.user_id');
+
+        $employees = DB::table('users')
+            ->where('users.warehouse_id', $warehouseId)
+            ->leftJoinSub($empInvSub,   'ei', 'ei.user_id', '=', 'users.id')
+            ->leftJoinSub($empSalesSub, 'es', 'es.user_id', '=', 'users.id')
+            ->select(
+                'users.id', 'users.name',
+                DB::raw('COALESCE(es.emp_sales, 0) as total_sales'),
+                DB::raw('COALESCE(ei.inv_count, 0) as invoices_count')
+            )
+            ->orderByDesc('total_sales')
+            ->get()
+            ->map(fn($e) => [
+                'id'             => $e->id,
+                'name'           => $e->name,
+                'total_sales'    => (float) $e->total_sales,
+                'invoices_count' => (int)   $e->invoices_count,
+            ]);
+
+        $employeesCount = $employees->count();
+
+        // ── Customers ─────────────────────────────────────────────────────────
+        $branchClientIds = DB::table('sales')
+            ->where('warehouse_id', $warehouseId)
+            ->where('is_returned', false)
+            ->where('is_quote', false)
+            ->when($startDate && $endDate, fn($q) => $q->whereBetween(DB::raw('DATE(sale_date)'), [$startDate, $endDate]))
+            ->whereNotNull('client_id')
+            ->distinct()
+            ->pluck('client_id');
+
+        $totalClientsCount = $branchClientIds->count();
+
+        // New clients: whose first EVER sale was within the date range
+        $newClientsCount = 0;
+        if ($startDate && $endDate && $branchClientIds->isNotEmpty()) {
+            $firstSaleQ = DB::table('sales')
+                ->whereIn('client_id', $branchClientIds)
+                ->where('is_returned', false)
+                ->where('is_quote', false)
+                ->whereNotNull('client_id')
+                ->select('client_id', DB::raw('MIN(DATE(sale_date)) as first_sale'))
+                ->groupBy('client_id');
+
+            $newClientsCount = (int) DB::table(DB::raw("({$firstSaleQ->toSql()}) as fsd"))
+                ->mergeBindings($firstSaleQ)
+                ->whereBetween('fsd.first_sale', [$startDate, $endDate])
+                ->count();
+        }
+
+        // Outstanding debt for this branch (all time)
+        $debtItemQ = DB::table('sale_items')->select('sale_id', DB::raw('SUM(total_price) as items_total'))->groupBy('sale_id');
+        $debtPaidQ = DB::table('payments')->select('sale_id', DB::raw('SUM(amount) as paid_total'))->groupBy('sale_id');
+
+        $outstandingDebt = (float) (DB::table('sales')
+            ->where('warehouse_id', $warehouseId)
+            ->where('is_returned', false)
+            ->where('is_quote', false)
+            ->leftJoinSub($debtItemQ, 'it', 'it.sale_id', '=', 'sales.id')
+            ->leftJoinSub($debtPaidQ, 'pt', 'pt.sale_id', '=', 'sales.id')
+            ->selectRaw('SUM(GREATEST(0, COALESCE(it.items_total,0) - COALESCE(sales.discount_amount,0) - COALESCE(pt.paid_total,0))) as debt')
+            ->value('debt') ?? 0);
+
+        // ── Purchases for this branch ─────────────────────────────────────────
+        $bankMethods = ['bank_transfer', 'bankak', 'mada', 'visa', 'mastercard', 'fawry', 'ocash'];
+
+        $purchTotalQ = DB::table('purchases')->where('warehouse_id', $warehouseId);
+        $purchPaymentsQ = DB::table('purchase_payments')
+            ->join('purchases', 'purchases.id', '=', 'purchase_payments.purchase_id')
+            ->where('purchases.warehouse_id', $warehouseId)
+            ->whereNull('purchase_payments.deleted_at');
+
+        if ($startDate && $endDate) {
+            $purchTotalQ->whereBetween(DB::raw('DATE(purchase_date)'), [$startDate, $endDate]);
+            $purchPaymentsQ->whereBetween(DB::raw('DATE(purchases.purchase_date)'), [$startDate, $endDate]);
+        }
+
+        $purchTotal    = (float) $purchTotalQ->sum('total_amount');
+        $purchCash     = (float) (clone $purchPaymentsQ)->where('purchase_payments.method', 'cash')->sum('purchase_payments.amount');
+        $purchBank     = (float) (clone $purchPaymentsQ)->whereIn('purchase_payments.method', $bankMethods)->sum('purchase_payments.amount');
+        $purchAllPaid  = (float) (clone $purchPaymentsQ)->sum('purchase_payments.amount');
+        $purchDeferred = max(0, $purchTotal - $purchAllPaid);
+
+        // ── Recent invoices ────────────────────────────────────────────────────
+        $recItemQ = DB::table('sale_items')->select('sale_id', DB::raw('SUM(total_price) as items_total'))->groupBy('sale_id');
+        $recPaidQ = DB::table('payments')->select('sale_id', DB::raw('SUM(amount) as paid_total'))->groupBy('sale_id');
+
+        $recentInvoices = DB::table('sales')
+            ->where('sales.warehouse_id', $warehouseId)
+            ->where('sales.is_returned', false)
+            ->where('sales.is_quote', false)
+            ->leftJoin('clients', 'clients.id', '=', 'sales.client_id')
+            ->leftJoinSub($recItemQ, 'it', 'it.sale_id', '=', 'sales.id')
+            ->leftJoinSub($recPaidQ, 'pt', 'pt.sale_id', '=', 'sales.id')
+            ->select(
+                'sales.id', 'sales.number', 'sales.sale_date',
+                DB::raw("COALESCE(clients.name,'—') as client_name"),
+                DB::raw('COALESCE(it.items_total,0) - COALESCE(sales.discount_amount,0) as total_amount'),
+                DB::raw('COALESCE(pt.paid_total,0) as paid_amount')
+            )
+            ->orderByDesc('sales.sale_date')
+            ->orderByDesc('sales.id')
+            ->limit(10)
+            ->get()
+            ->map(fn($r) => [
+                'id'           => $r->id,
+                'number'       => $r->number,
+                'sale_date'    => $r->sale_date,
+                'client_name'  => $r->client_name,
+                'total_amount' => (float) $r->total_amount,
+                'paid_amount'  => (float) $r->paid_amount,
+            ]);
+
+        return response()->json([
+            'data' => [
+                'branch' => [
+                    'id'              => $warehouse->id,
+                    'name'            => $warehouse->name,
+                    'address'         => $warehouse->address,
+                    'contact_info'    => $warehouse->contact_info,
+                    'is_active'       => $warehouse->is_active,
+                    'employees_count' => $employeesCount,
+                ],
+                'summary' => [
+                    'total_sales'    => $totalSales,
+                    'total_returns'  => $totalReturns,
+                    'total_profit'   => $totalProfit,
+                    'invoices_count' => $invoicesCount,
+                    'avg_invoice'    => $avgInvoice,
+                ],
+                'customers' => [
+                    'total_clients'     => $totalClientsCount,
+                    'new_clients_count' => $newClientsCount,
+                    'outstanding_debt'  => $outstandingDebt,
+                ],
+                'purchases' => [
+                    'total'    => $purchTotal,
+                    'cash'     => $purchCash,
+                    'bank'     => $purchBank,
+                    'deferred' => $purchDeferred,
+                ],
+                'employees'       => $employees,
+                'recent_invoices' => $recentInvoices,
+            ]
+        ]);
+    }
 }
