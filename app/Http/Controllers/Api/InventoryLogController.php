@@ -108,28 +108,27 @@ class InventoryLogController extends Controller
         $requisitionIssuesQuery = DB::table('stock_requisition_items as sri')
             ->join('stock_requisitions as sr', 'sri.stock_requisition_id', '=', 'sr.id')
             ->join('products as prod', 'sri.product_id', '=', 'prod.id')
-            ->join('users as u_req', 'sr.requester_user_id', '=', 'u_req.id') // Requester
-            ->leftJoin('users as u_app', 'sr.approved_by_user_id', '=', 'u_app.id') // Approver/Issuer
-            ->leftJoin('purchase_items as pi_batch', 'sri.issued_from_purchase_item_id', '=', 'pi_batch.id')
+            ->join('users as u_req', 'sr.requester_user_id', '=', 'u_req.id')
+            ->leftJoin('users as u_app', 'sr.approved_by_user_id', '=', 'u_app.id')
+            ->leftJoin('warehouses as w', 'w.id', '=', 'sri.warehouse_id')
             ->select(
                 'sr.issue_date as transaction_date',
                 DB::raw("'requisition_issue' as type"),
                 'prod.id as product_id',
                 'prod.name as product_name',
                 'prod.sku as product_sku',
-                'sri.issued_batch_number as batch_number', // Or pi_batch.batch_number
-                DB::raw('sri.issued_quantity * -1 as quantity_change'), // Negative for issues
-                DB::raw("CONCAT('REQ-', sr.id) as document_reference"),
+                'sri.issued_batch_number as batch_number',
+                DB::raw('sri.issued_quantity * -1 as quantity_change'),
+                DB::raw("CONCAT('SR-', sr.id) as document_reference"),
                 'sr.id as document_id',
-                'u_app.name as user_name', // User who issued
-                DB::raw("CONCAT(sr.department_or_reason, ' (Requested by: ', u_req.name, ')') as reason_notes"),
-                'w.name as warehouse_name',
-                'w.id as warehouse_id'
+                'u_app.name as user_name',
+                DB::raw("CONCAT(IFNULL(sr.department_or_reason,''), ' (طالب: ', u_req.name, ')') as reason_notes"),
+                DB::raw("IFNULL(w.name, '—') as warehouse_name"),
+                'sri.warehouse_id as warehouse_id'
             )
-            ->leftJoin('purchases as p_origin', 'pi_batch.purchase_id', '=', 'p_origin.id')
-            ->leftJoin('warehouses as w', 'p_origin.warehouse_id', '=', 'w.id')
-            ->where('sri.status', 'issued') // Only issued items
-            ->whereNotNull('sr.issue_date');
+            ->whereIn('sri.status', ['issued', 'partial'])
+            ->whereNotNull('sr.issue_date')
+            ->where('sri.issued_quantity', '>', 0);
 
 
         // Apply common filters to each query before union

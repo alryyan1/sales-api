@@ -48,6 +48,7 @@ class StockRequisitionItem extends Model
         'issued_quantity',
         'issued_from_purchase_item_id',
         'issued_batch_number',
+        'warehouse_id',
         'status',
         'item_notes',
     ];

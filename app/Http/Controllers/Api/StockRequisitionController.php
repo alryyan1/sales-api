@@ -76,7 +76,15 @@ class StockRequisitionController extends Controller
 
         $requisitions = $query->latest('request_date')->latest('id')->paginate($request->input('per_page', 15));
 
-        return StockRequisitionResource::collection($requisitions);
+        return response()->json([
+            'data'         => StockRequisitionResource::collection($requisitions->items()),
+            'current_page' => $requisitions->currentPage(),
+            'last_page'    => $requisitions->lastPage(),
+            'per_page'     => $requisitions->perPage(),
+            'total'        => $requisitions->total(),
+            'from'         => $requisitions->firstItem(),
+            'to'           => $requisitions->lastItem(),
+        ]);
     }
 
     /**
@@ -148,10 +156,10 @@ class StockRequisitionController extends Controller
 
 
         $stockRequisition->load([
-            'requesterUser:id,name,email',
-            'approvedByUser:id,name,email',
-            'items.product:id,name,sku,stock_quantity', // Include current total stock for reference
-            'items.issuedFromPurchaseItemBatch:id,batch_number,expiry_date', // Batch it was issued from
+            'requesterUser:id,name',
+            'approvedByUser:id,name',
+            'items.product:id,name,sku',
+            'items.issuedFromPurchaseItemBatch:id,batch_number,expiry_date',
         ]);
         return new StockRequisitionResource($stockRequisition);
     }
@@ -263,7 +271,6 @@ class StockRequisitionController extends Controller
                 }
 
                 // Update Requisition Header
-                $oldStatus = $stockRequisition->status;
                 $stockRequisition->status = $validatedData['status'];
                 $stockRequisition->approved_by_user_id = $request->user()->id;
                 if (in_array($validatedData['status'], ['issued', 'partially_issued'])) {
@@ -288,11 +295,153 @@ class StockRequisitionController extends Controller
 
             return response()->json(['message' => 'Stock requisition processed successfully.', 'stock_requisition' => new StockRequisitionResource($processedRequisition)]);
 
-        } catch (ValidationException $e) { /* ... return 422 ... */
-        } catch (\Throwable $e) { /* ... return 500 ... */
+        } catch (ValidationException $e) {
+            return response()->json(['message' => 'Validation failed.', 'errors' => $e->errors()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            Log::error("Stock Requisition processing failed: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return response()->json(['message' => 'Failed to process requisition. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
-    // update() method is not typical for requisitions, use processRequisition.
-    // destroy() can be implemented to cancel a 'pending_approval' requisition.
+    /**
+     * Issue stock: supports full or partial issuance per item.
+     * Pass optional `items` array with {item_id, issued_quantity} to override per-item quantities.
+     * If omitted, issues each item at its full requested_quantity.
+     */
+    public function issueAll(Request $request, StockRequisition $stockRequisition)
+    {
+        if ($request->user()->cannot('process-stock-requisitions')) {
+            abort(403, 'You do not have permission to process stock requisitions.');
+        }
+
+        if (!in_array($stockRequisition->status, ['pending_approval', 'approved', 'partially_issued'])) {
+            return response()->json(['message' => "لا يمكن صرف هذا الطلب لأن حالته '{$stockRequisition->status}'."], Response::HTTP_BAD_REQUEST);
+        }
+
+        $validated = $request->validate([
+            'notes'                   => 'nullable|string|max:65535',
+            'items'                   => 'nullable|array',
+            'items.*.item_id'         => 'required_with:items|integer|exists:stock_requisition_items,id',
+            'items.*.issued_quantity' => 'required_with:items|integer|min:0',
+        ]);
+
+        $stockRequisition->load(['items.product.warehouses']);
+
+        // Build quantity map: item_id => issued_quantity
+        $qtyMap = [];
+        foreach ($validated['items'] ?? [] as $itemData) {
+            $qtyMap[$itemData['item_id']] = $itemData['issued_quantity'];
+        }
+
+        // Validate stock availability before any changes
+        foreach ($stockRequisition->items as $item) {
+            $qtyToIssue = $qtyMap[$item->id] ?? $item->requested_quantity;
+            if ($qtyToIssue <= 0) continue;
+
+            $product = $item->product;
+            $totalAvailable = $product ? $product->countStock() : 0;
+            if ($totalAvailable < $qtyToIssue) {
+                return response()->json([
+                    'message' => "المخزون غير كافٍ للمنتج: {$product->name}. المتاح: {$totalAvailable}, المطلوب للصرف: {$qtyToIssue}."
+                ], Response::HTTP_UNPROCESSABLE_ENTITY);
+            }
+        }
+
+        try {
+            DB::transaction(function () use ($stockRequisition, $request, $validated, $qtyMap) {
+                $allFullyIssued = true;
+
+                foreach ($stockRequisition->items as $item) {
+                    $qtyToIssue = $qtyMap[$item->id] ?? $item->requested_quantity;
+
+                    if ($qtyToIssue < $item->requested_quantity) {
+                        $allFullyIssued = false;
+                    }
+
+                    if ($qtyToIssue > 0) {
+                        $bestWarehouse = $item->product->warehouses()
+                            ->orderByPivot('quantity', 'desc')
+                            ->first();
+
+                        if ($bestWarehouse) {
+                            $item->product->decrementWarehouseStock($bestWarehouse->id, $qtyToIssue);
+                        }
+
+                        $item->update([
+                            'issued_quantity' => $qtyToIssue,
+                            'warehouse_id'    => $bestWarehouse?->id,
+                            'status'          => $qtyToIssue >= $item->requested_quantity ? 'issued' : 'partial',
+                        ]);
+                    }
+                }
+
+                $stockRequisition->update([
+                    'status'              => $allFullyIssued ? 'issued' : 'partially_issued',
+                    'approved_by_user_id' => $request->user()->id,
+                    'issue_date'          => Carbon::today()->toDateString(),
+                    'notes'               => $validated['notes'] ?? $stockRequisition->notes,
+                ]);
+            });
+
+            $stockRequisition->load(['requesterUser:id,name', 'approvedByUser:id,name', 'items.product:id,name,sku']);
+
+            return response()->json([
+                'message'           => 'تم صرف الطلب بنجاح.',
+                'stock_requisition' => new StockRequisitionResource($stockRequisition),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error("Stock Requisition issue-all failed: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return response()->json(['message' => 'فشل صرف الطلب. ' . $e->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Cancel a pending stock requisition (by the requester themselves).
+     */
+    public function cancelRequisition(Request $request, StockRequisition $stockRequisition)
+    {
+        // Only the requester (or admin) can cancel their own request
+        if ($stockRequisition->requester_user_id !== $request->user()->id && !$request->user()->hasRole(['admin', 'ادمن'])) {
+            abort(403, 'لا يمكنك إلغاء طلب لم تقم بإنشائه.');
+        }
+
+        if ($stockRequisition->status !== 'pending_approval') {
+            return response()->json(['message' => "لا يمكن إلغاء هذا الطلب لأن حالته '{$stockRequisition->status}'."], Response::HTTP_BAD_REQUEST);
+        }
+
+        $stockRequisition->update(['status' => 'cancelled']);
+
+        return response()->json(['message' => 'تم إلغاء الطلب.']);
+    }
+
+    /**
+     * Reject a pending stock requisition.
+     */
+    public function rejectRequisition(Request $request, StockRequisition $stockRequisition)
+    {
+        if ($request->user()->cannot('process-stock-requisitions')) {
+            abort(403, 'You do not have permission to process stock requisitions.');
+        }
+
+        if (!in_array($stockRequisition->status, ['pending_approval', 'approved'])) {
+            return response()->json(['message' => "لا يمكن رفض هذا الطلب لأن حالته '{$stockRequisition->status}'."], Response::HTTP_BAD_REQUEST);
+        }
+
+        $validatedData = $request->validate([
+            'notes' => 'nullable|string|max:65535',
+        ]);
+
+        $stockRequisition->update([
+            'status' => 'rejected',
+            'approved_by_user_id' => $request->user()->id,
+            'notes' => $validatedData['notes'] ?? $stockRequisition->notes,
+        ]);
+
+        $stockRequisition->load(['requesterUser:id,name', 'approvedByUser:id,name', 'items.product:id,name,sku']);
+
+        return response()->json([
+            'message' => 'تم رفض الطلب.',
+            'stock_requisition' => new StockRequisitionResource($stockRequisition),
+        ]);
+    }
 }

@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\{
   ShiftController,
   WarehouseController,
   StockTransferController,
+  StockRequisitionController,
   WhatsAppCloudApiController,
 };
 use App\Http\Controllers\UpdateController;
@@ -285,4 +286,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
   // -- Public Users Route for Filters --
   Route::get('/users/list', [UserController::class, 'listForFilters'])->name('api.users.list');
+
+  // -- Stock Requisitions (Warehouse Dispatch) --
+  Route::get('/stock-requisitions', [StockRequisitionController::class, 'index']);
+  Route::post('/stock-requisitions', [StockRequisitionController::class, 'store']);
+  Route::get('/stock-requisitions/{stockRequisition}', [StockRequisitionController::class, 'show']);
+  Route::post('/stock-requisitions/{stockRequisition}/process', [StockRequisitionController::class, 'processRequisition']);
+  Route::post('/stock-requisitions/{stockRequisition}/issue', [StockRequisitionController::class, 'issueAll']);
+  Route::post('/stock-requisitions/{stockRequisition}/reject', [StockRequisitionController::class, 'rejectRequisition']);
+  Route::post('/stock-requisitions/{stockRequisition}/cancel', [StockRequisitionController::class, 'cancelRequisition']);
 });

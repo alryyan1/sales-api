@@ -2,7 +2,7 @@
 
 namespace App\Providers;
 
-// use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Gate;
 
 use App\Models\Client;
 use App\Models\User;
@@ -31,6 +31,11 @@ class AuthServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Super-admin bypass: role 'ادمن' or 'admin' passes all permission checks
+        Gate::before(function (User $user, string $ability) {
+            if ($user->hasRole(['admin', 'ادمن'])) {
+                return true;
+            }
+        });
     }
 }
