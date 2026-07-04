@@ -5,14 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Auth;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Config; // To access config values
-use Illuminate\Support\Facades\File;    // To write to .env file (use with caution)
-use Illuminate\Support\Facades\Artisan; // To clear config cache
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-use Illuminate\Validation\Rule;
-use Log;
 use App\Services\SettingsService;
-use Illuminate\Support\Facades\Storage;
 
 class SettingController extends Controller
 {
@@ -37,7 +31,7 @@ class SettingController extends Controller
     {
         $service = new SettingsService();
         $rules = $service->validationRules();
-        Log::info('Settings update request data:', $request->all());
+       // Log::info('Settings update request data:', $request->all());
         $validated = $request->validate($rules);
 
         // Authorization logic:
@@ -61,23 +55,17 @@ class SettingController extends Controller
      */
     public function uploadLogo(Request $request)
     {
-
         $request->validate([
             'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:2048'],
         ]);
 
-        $file = $request->file('logo');
-        $path = $file->store('logos', 'public');
-        // Build absolute URL dynamically to handle XAMPP/Subdirectory structures correctly
-        // and avoid reliance on potentially misconfigured APP_URL in .env
-        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
+        $path = $request->file('logo')->store('logos', 'public');
 
         $service = new SettingsService();
-        $newSettings = $service->update(['company_logo_url' => $publicUrl]);
+        $newSettings = $service->update(['company_logo_url' => $path]);
 
         return response()->json([
             'message' => 'Logo uploaded successfully.',
-            'url' => $publicUrl,
             'data' => $newSettings,
         ]);
     }
@@ -87,22 +75,17 @@ class SettingController extends Controller
      */
     public function uploadHeader(Request $request)
     {
-
         $request->validate([
-            'header' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:5120'], // Allow larger size for header
+            'header' => ['required', 'image', 'mimes:png,jpg,jpeg,webp,svg', 'max:5120'],
         ]);
 
-        $file = $request->file('header');
-        $path = $file->store('headers', 'public');
-        // Build absolute URL dynamically
-        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
+        $path = $request->file('header')->store('headers', 'public');
 
         $service = new SettingsService();
-        $newSettings = $service->update(['company_header_url' => $publicUrl]);
+        $newSettings = $service->update(['company_header_url' => $path]);
 
         return response()->json([
             'message' => 'Header image uploaded successfully.',
-            'url' => $publicUrl,
             'data' => $newSettings,
         ]);
     }
@@ -116,16 +99,13 @@ class SettingController extends Controller
             'stamp' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:2048'],
         ]);
 
-        $file = $request->file('stamp');
-        $path = $file->store('stamps', 'public');
-        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
+        $path = $request->file('stamp')->store('stamps', 'public');
 
         $service = new SettingsService();
-        $newSettings = $service->update(['company_stamp_url' => $publicUrl]);
+        $newSettings = $service->update(['company_stamp_url' => $path]);
 
         return response()->json([
             'message' => 'Stamp uploaded successfully.',
-            'url' => $publicUrl,
             'data' => $newSettings,
         ]);
     }
@@ -139,16 +119,13 @@ class SettingController extends Controller
             'signature' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:2048'],
         ]);
 
-        $file = $request->file('signature');
-        $path = $file->store('signatures', 'public');
-        $publicUrl = $request->getSchemeAndHttpHost() . $request->getBaseUrl() . '/storage/' . $path;
+        $path = $request->file('signature')->store('signatures', 'public');
 
         $service = new SettingsService();
-        $newSettings = $service->update(['company_signature_url' => $publicUrl]);
+        $newSettings = $service->update(['company_signature_url' => $path]);
 
         return response()->json([
             'message' => 'Signature uploaded successfully.',
-            'url' => $publicUrl,
             'data' => $newSettings,
         ]);
     }

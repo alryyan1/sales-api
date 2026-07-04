@@ -4,6 +4,7 @@ namespace App\Services\Pdf;
 
 use App\Models\PdfReportSetting;
 use App\Services\SettingsService;
+use Illuminate\Support\Facades\Storage;
 use TCPDF;
 
 class PdfHeaderRenderer
@@ -165,16 +166,21 @@ class PdfHeaderRenderer
         $pdf->Ln(3);
     }
 
-    private function resolveImagePath(?string $url): ?string
+    private function resolveImagePath(?string $urlOrPath): ?string
     {
-        if (!$url) return null;
+        if (!$urlOrPath) return null;
 
-        $path = parse_url($url, PHP_URL_PATH) ?: '';
-        if (!$path) return null;
+        // Relative storage path (new format: e.g. "logos/abc.jpg")
+        if (!str_starts_with($urlOrPath, 'http')) {
+            $candidate = Storage::disk('public')->path($urlOrPath);
+            return file_exists($candidate) ? $candidate : null;
+        }
 
+        // Full URL (legacy format or constructed by SettingsService::getAll())
+        $path = parse_url($urlOrPath, PHP_URL_PATH) ?: '';
         $storagePos = strpos($path, '/storage/');
         if ($storagePos !== false) {
-            $relative  = substr($path, $storagePos + strlen('/storage/'));
+            $relative  = substr($path, $storagePos + 9); // 9 = strlen('/storage/')
             $candidate = public_path('storage/' . ltrim($relative, '/'));
             if (file_exists($candidate)) {
                 return $candidate;

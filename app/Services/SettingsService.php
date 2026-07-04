@@ -4,12 +4,20 @@ namespace App\Services;
 
 use App\Models\AppSetting;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class SettingsService
 {
     private const CACHE_KEY = 'app_settings_cache_v1';
-    private const CACHE_TTL_SECONDS = 60; // adjust as needed
+    private const CACHE_TTL_SECONDS = 60;
+
+    private const IMAGE_KEYS = [
+        'company_logo_url',
+        'company_header_url',
+        'company_stamp_url',
+        'company_signature_url',
+    ];
 
     /**
      * Keys we manage in DB and their expected types.
@@ -134,6 +142,16 @@ class SettingsService
                 }
                 $result[$key] = $this->castFromStorage($raw, $types[$key]);
             }
+
+            // Expand relative image paths to full public URLs.
+            // Values that are already full URLs (legacy) are left as-is.
+            foreach (self::IMAGE_KEYS as $key) {
+                $value = $result[$key] ?? null;
+                if ($value && !str_starts_with($value, 'http')) {
+                    $result[$key] = Storage::disk('public')->url($value);
+                }
+            }
+
             return $result;
         });
     }
