@@ -5,38 +5,49 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProductResource;
 use App\Http\Resources\PurchaseItemResource;
-use Illuminate\Http\Request;
-use App\Models\Sale; // Import the Sale model
-use App\Models\Shift;
-use App\Http\Resources\SaleResource; // Reuse SaleResource for formatting
-use App\Models\Payment;
+use App\Http\Resources\SaleResource;
+use App\Models\Client; // Import the Sale model
+use App\Models\Expense;
+use App\Models\Payment; // Reuse SaleResource for formatting
 use App\Models\Product;
+use App\Models\Purchase;
 use App\Models\PurchaseItem;
+use App\Models\Sale;
 use App\Models\SaleItem;
+use App\Models\SaleReturn;
+use App\Models\Shift;
+use App\Models\User;
 use App\Services\DailySalesPdfService;
+use App\Services\InventoryAuditPdfService;
 use App\Services\InventoryPdfService;
-use App\Services\SalesReportPdfService;
-use App\Services\ShiftCostPdfService;
-use App\Services\ShiftSalesReturnPdfService;
 use App\Services\MovedExpiredProductsPdfService;
+use App\Services\SaleDetailPdfService; // Ensure correct Carbon namespace is used
+use App\Services\SalesReportPdfService; // For status validation
+use App\Services\SettingsService;
+use App\Services\ShiftCostPdfService;
+use App\Services\ShiftInventoryEffectsPdfService;
+use App\Services\ShiftSalesReturnPdfService;
+use App\Services\ShiftSoldItemsPdfService;
 use Arr;
+use Carbon\Carbon;
 use DB;
-use Carbon\Carbon; // Ensure correct Carbon namespace is used
-use Illuminate\Validation\Rule; // For status validation
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Style\Font;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ReportController extends Controller
 {
     /**
      * Fetch Sales data based on filtering criteria for reporting.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     * @return AnonymousResourceCollection
      */
     public function salesReport(Request $request)
     {
@@ -67,7 +78,7 @@ class ReportController extends Controller
             ->with([
                 'client:id,name', // Load only id and name from client
                 'user:id,name',   // Load only id and name from user (salesperson)
-                'payments.user:id,name,username' // Load payments with user relationship when filtering by shift
+                'payments.user:id,name,username', // Load payments with user relationship when filtering by shift
                 // Only load items if report needs item-level detail (adds overhead)
                 // 'items',
                 // 'items.product:id,name,sku'
@@ -77,36 +88,36 @@ class ReportController extends Controller
         // Date Range Filter - only apply if shift_id is NOT provided, or handle accordingly
         // Usually if a shift is selected, we want sales FOR THAT SHIFT regardless of the calendar date range
         if (empty($validated['shift_id'])) {
-            if (!empty($validated['start_date'])) {
+            if (! empty($validated['start_date'])) {
                 $query->whereDate('sale_date', '>=', $validated['start_date']);
             }
-            if (!empty($validated['end_date'])) {
+            if (! empty($validated['end_date'])) {
                 $query->whereDate('sale_date', '<=', $validated['end_date']);
             }
         }
 
         // Client Filter
-        if (!empty($validated['client_id'])) {
+        if (! empty($validated['client_id'])) {
             $query->where('client_id', $validated['client_id']);
         }
 
         // User (Salesperson) Filter
-        if (!empty($validated['user_id'])) {
+        if (! empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
         }
 
         // Shift Filter
-        if (!empty($validated['shift_id'])) {
+        if (! empty($validated['shift_id'])) {
             $query->where('shift_id', $validated['shift_id']);
         }
 
         // Status Filter
-        if (!empty($validated['status'])) {
+        if (! empty($validated['status'])) {
             $query->where('status', $validated['status']);
         }
 
         // Product Filter
-        if (!empty($validated['product_id'])) {
+        if (! empty($validated['product_id'])) {
             $query->whereHas('items', function ($q) use ($validated) {
                 $q->where('product_id', $validated['product_id']);
             });
@@ -125,7 +136,6 @@ class ReportController extends Controller
         return SaleResource::collection($sales);
     }
 
-
     /**
      * Get a summary of expenses and refunds for a given period.
      */
@@ -142,13 +152,16 @@ class ReportController extends Controller
         $userId = $validated['user_id'] ?? null;
 
         // 1. Calculate Total Expenses from expenses table
-        $expensesQuery = \App\Models\Expense::query();
-        if ($startDate)
+        $expensesQuery = Expense::query();
+        if ($startDate) {
             $expensesQuery->whereDate('expense_date', '>=', $startDate);
-        if ($endDate)
+        }
+        if ($endDate) {
             $expensesQuery->whereDate('expense_date', '<=', $endDate);
-        if ($userId)
+        }
+        if ($userId) {
             $expensesQuery->where('user_id', $userId);
+        }
 
         $totalExpenses = (float) $expensesQuery->sum('amount');
 
@@ -161,12 +174,10 @@ class ReportController extends Controller
         ]);
     }
 
-
     /**
      * Fetch Inventory data for reporting.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     * @return AnonymousResourceCollection
      */
     public function inventoryReport(Request $request)
     {
@@ -203,11 +214,11 @@ class ReportController extends Controller
                     $query->select(['id', 'product_id', 'batch_number', 'expiry_date', 'unit_cost', 'sale_price'])
                         ->orderBy('expiry_date', 'asc')
                         ->orderBy('created_at', 'asc');
-                }
+                },
             ]);
         }
         // --- Apply Filters ---
-        if (!empty($validated['search'])) {
+        if (! empty($validated['search'])) {
             $searchTerm = $validated['search'];
             $query->where(function ($q) use ($searchTerm) {
                 $q->where('name', 'like', "%{$searchTerm}%")
@@ -228,7 +239,6 @@ class ReportController extends Controller
             $query->where('stock_quantity', '<=', 0);
         }
 
-
         // --- Sorting ---
         $sortBy = $validated['sort_by'] ?? 'name'; // Default sort by name
         $sortDirection = $validated['sort_direction'] ?? 'asc';
@@ -238,17 +248,16 @@ class ReportController extends Controller
         $perPage = $validated['per_page'] ?? 25;
         $products = $query->with('purchaseItemsWithStock')->paginate($perPage);
 
-
         // --- Return Paginated Resource Collection ---
         // We can reuse ProductResource. It should include stock_quantity and stock_alert_level.
         // If you added accessors like latest_purchase_cost to Product model and resource, they'll be included.
         return ProductResource::collection($products);
     }
+
     /**
      * Fetch products/batches nearing their expiry date.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     * @return AnonymousResourceCollection
      */
     public function nearExpiryReport(Request $request)
     {
@@ -276,11 +285,11 @@ class ReportController extends Controller
             ->with(['product:id,name,sku'])
             ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->whereHas('product', fn ($q) => $q->whereHas('warehouses', fn ($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->whereBetween('expiry_date', [$today, $expiryCutoffDate]);
 
         // --- Apply Filters ---
-        if (!empty($validated['product_id'])) {
+        if (! empty($validated['product_id'])) {
             $query->where('product_id', $validated['product_id']);
         }
         // if (!empty($validated['category_id'])) {
@@ -306,7 +315,6 @@ class ReportController extends Controller
             $query->orderBy('purchase_items.created_at', 'asc')->orderBy('purchase_items.id', 'asc');
         }
 
-
         // --- Pagination ---
         $perPage = $validated['per_page'] ?? 25;
         $nearExpiryItems = $query->paginate($perPage);
@@ -319,8 +327,7 @@ class ReportController extends Controller
     /**
      * Fetch products/batches that are already expired.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     * @return AnonymousResourceCollection
      */
     public function expiredProductsReport(Request $request)
     {
@@ -339,11 +346,11 @@ class ReportController extends Controller
             ->with(['product:id,name,sku'])
             ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->whereHas('product', fn ($q) => $q->whereHas('warehouses', fn ($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->where('expiry_date', '<', $today);
 
         // --- Apply Filters ---
-        if (!empty($validated['product_id'])) {
+        if (! empty($validated['product_id'])) {
             $query->where('product_id', $validated['product_id']);
         }
 
@@ -374,8 +381,7 @@ class ReportController extends Controller
     /**
      * Get counts of near-expiring and expired products for badge display.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function expiryCountsSummary(Request $request)
     {
@@ -392,7 +398,7 @@ class ReportController extends Controller
         $nearExpiringCount = PurchaseItem::query()
             ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->whereHas('product', fn ($q) => $q->whereHas('warehouses', fn ($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->whereBetween('expiry_date', [$today, $expiryCutoffDate])
             ->distinct('product_id')
             ->count('product_id');
@@ -401,7 +407,7 @@ class ReportController extends Controller
         $expiredCount = PurchaseItem::query()
             ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
+            ->whereHas('product', fn ($q) => $q->whereHas('warehouses', fn ($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->where('expiry_date', '<', $today)
             ->distinct('product_id')
             ->count('product_id');
@@ -429,7 +435,7 @@ class ReportController extends Controller
             ->with(['product:id,name,sku'])
             ->where('is_moved_to_expired', true);
 
-        if (!empty($validated['product_id'])) {
+        if (! empty($validated['product_id'])) {
             $query->where('product_id', $validated['product_id']);
         }
 
@@ -459,7 +465,7 @@ class ReportController extends Controller
 
         // Handle token from query string (used when opening PDF in a new window)
         if ($request->has('token')) {
-            $request->headers->set('Authorization', 'Bearer ' . $request->query('token'));
+            $request->headers->set('Authorization', 'Bearer '.$request->query('token'));
             // Authenticate the user for this request using the token
             if (auth('sanctum')->check()) {
                 auth()->setUser(auth('sanctum')->user());
@@ -477,7 +483,8 @@ class ReportController extends Controller
                 ->header('Content-Type', 'application/pdf')
                 ->header('Content-Disposition', 'inline; filename="moved_expired_products_report.pdf"');
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Failed to generate moved expired products PDF: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error('Failed to generate moved expired products PDF: '.$e->getMessage());
+
             return response()->json(['message' => 'Failed to generate PDF report'], 500);
         }
     }
@@ -505,9 +512,9 @@ class ReportController extends Controller
             // Assuming we take it evenly out of wherever the stock currently resides up to the remaining items in batch.
             $product = clone $purchaseItem->product;
 
-            // For simplicity and since we don't know EXACTLY which warehouse the batch is in, 
+            // For simplicity and since we don't know EXACTLY which warehouse the batch is in,
             // we will deduct product_warehouse quantity, starting from the first warehouse that has stock,
-            // up to the total amount of this batch, or simply creating an adjustment 
+            // up to the total amount of this batch, or simply creating an adjustment
             // based on what's available globally if we can't map batches to specific warehouses perfectly.
             // Since we don't have remaining_quantity on purchase_item anymore, we assume the whole batch's equivalent amount
             // needs to be removed from global stock.
@@ -522,7 +529,9 @@ class ReportController extends Controller
 
                 $remainingToRemove = $quantityToRemove;
                 foreach ($warehouses as $wh) {
-                    if ($remainingToRemove <= 0) break;
+                    if ($remainingToRemove <= 0) {
+                        break;
+                    }
 
                     $deduct = min($wh->quantity, $remainingToRemove);
                     DB::table('product_warehouse')
@@ -552,10 +561,11 @@ class ReportController extends Controller
 
             return response()->json([
                 'message' => 'Product batch successfully moved to expired.',
-                'data' => new PurchaseItemResource($purchaseItem)
+                'data' => new PurchaseItemResource($purchaseItem),
             ], 200);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return response()->json(['message' => 'Failed to move product.', 'error' => $e->getMessage()], 500);
         }
     }
@@ -563,15 +573,14 @@ class ReportController extends Controller
     /**
      * Generate a Monthly Revenue Report with daily breakdown and payment method summary.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function monthlyRevenueReport(Request $request)
     {
         // --- Input Validation ---
         $validated = $request->validate([
             'month' => 'required|integer|between:1,12',
-            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+            'year' => 'required|integer|min:2000|max:'.(Carbon::now()->year + 1),
             // Optional filters for specific client, user, etc.
             // 'client_id' => 'nullable|integer|exists:clients,id',
             // 'user_id' => 'nullable|integer|exists:users,id',
@@ -606,7 +615,7 @@ class ReportController extends Controller
                 'payments.method',
                 DB::raw('SUM(payments.amount) as total_amount_by_method')
             )
-            ->whereBetween(DB::raw("DATE(COALESCE(sales.sale_date, sales.created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
+            ->whereBetween(DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
             ->whereBetween('payments.payment_date', [$startDate, $endDate]);
 
         $dailyPaymentsByMethod = $dailyPaymentsQuery->groupBy('payment_day', 'payments.method')
@@ -621,7 +630,7 @@ class ReportController extends Controller
             });
 
         // --- 3. Get Daily Expenses ---
-        $dailyExpenses = \App\Models\Expense::query()
+        $dailyExpenses = Expense::query()
             ->select(
                 DB::raw('DATE(expense_date) as expense_day'),
                 DB::raw('SUM(amount) as total_expense')
@@ -689,7 +698,7 @@ class ReportController extends Controller
                 'month_name' => $startDate->isoFormat('MMMM YYYY'),
                 'daily_breakdown' => array_values($report),
                 'month_summary' => $monthSummary,
-            ]
+            ],
         ]);
     }
 
@@ -700,7 +709,7 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'month' => 'required|integer|between:1,12',
-            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+            'year' => 'required|integer|min:2000|max:'.(Carbon::now()->year + 1),
         ]);
 
         $year = $validated['year'];
@@ -726,7 +735,7 @@ class ReportController extends Controller
                 'payments.method',
                 DB::raw('SUM(payments.amount) as total_amount_by_method')
             )
-            ->whereBetween(DB::raw("DATE(COALESCE(sales.sale_date, sales.created_at))"), [$startDate->toDateString(), $endDate->toDateString()])
+            ->whereBetween(DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
             ->whereBetween('payments.payment_date', [$startDate, $endDate]);
 
         $dailyPaymentsByMethod = $dailyPaymentsQuery->groupBy('payment_day', 'payments.method')
@@ -740,7 +749,7 @@ class ReportController extends Controller
                 });
             });
 
-        $dailyExpenses = \App\Models\Expense::query()
+        $dailyExpenses = Expense::query()
             ->select(
                 DB::raw('DATE(expense_date) as expense_day'),
                 DB::raw('SUM(amount) as total_expense')
@@ -803,7 +812,7 @@ class ReportController extends Controller
         }
 
         // Create Excel file
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
 
         // Set document properties
@@ -812,7 +821,7 @@ class ReportController extends Controller
             ->setLastModifiedBy('Sales System')
             ->setTitle('تقرير المبيعات الشهري')
             ->setSubject('Monthly Sales Report')
-            ->setDescription('تقرير المبيعات الشهري لشهر ' . $startDate->isoFormat('MMMM YYYY'));
+            ->setDescription('تقرير المبيعات الشهري لشهر '.$startDate->isoFormat('MMMM YYYY'));
 
         // Set RTL direction
         $sheet->setRightToLeft(true);
@@ -822,7 +831,7 @@ class ReportController extends Controller
         $headers = ['التاريخ', 'إجمالي المبيعات', 'إجمالي المدفوع', 'إجمالي النقدي', 'إجمالي البنكي', 'إجمالي المصروفات', 'صافي'];
         $col = 'A';
         foreach ($headers as $header) {
-            $sheet->setCellValue($col . $row, $header);
+            $sheet->setCellValue($col.$row, $header);
             $col++;
         }
 
@@ -850,45 +859,45 @@ class ReportController extends Controller
         ];
 
         $lastCol = chr(ord('A') + count($headers) - 1);
-        $sheet->getStyle('A' . $row . ':' . $lastCol . $row)->applyFromArray($headerStyle);
+        $sheet->getStyle('A'.$row.':'.$lastCol.$row)->applyFromArray($headerStyle);
         $sheet->getRowDimension($row)->setRowHeight(25);
 
         // Data rows
         $row = 2;
         foreach ($report as $dayData) {
             $col = 'A';
-            $sheet->setCellValue($col . $row, $dayData['date']);
+            $sheet->setCellValue($col.$row, $dayData['date']);
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_sales'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['total_sales'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_paid'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['total_paid'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_cash'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['total_cash'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_bank'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['total_bank'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_expense'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['total_expense'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['net'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['net'], 2));
             $row++;
         }
 
         // Total row
         $totalRow = $row;
         $col = 'A';
-        $sheet->setCellValue($col . $totalRow, 'الإجمالي');
+        $sheet->setCellValue($col.$totalRow, 'الإجمالي');
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_sales'], 2));
+        $sheet->setCellValue($col.$totalRow, number_format($monthSummary['total_sales'], 2));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_paid'], 2));
+        $sheet->setCellValue($col.$totalRow, number_format($monthSummary['total_paid'], 2));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_cash'], 2));
+        $sheet->setCellValue($col.$totalRow, number_format($monthSummary['total_cash'], 2));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_bank'], 2));
+        $sheet->setCellValue($col.$totalRow, number_format($monthSummary['total_bank'], 2));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_expense'], 2));
+        $sheet->setCellValue($col.$totalRow, number_format($monthSummary['total_expense'], 2));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['net'], 2));
+        $sheet->setCellValue($col.$totalRow, number_format($monthSummary['net'], 2));
 
         // Style total row
         $totalStyle = [
@@ -911,7 +920,7 @@ class ReportController extends Controller
                 ],
             ],
         ];
-        $sheet->getStyle('A' . $totalRow . ':' . $lastCol . $totalRow)->applyFromArray($totalStyle);
+        $sheet->getStyle('A'.$totalRow.':'.$lastCol.$totalRow)->applyFromArray($totalStyle);
 
         // Set column widths
         $sheet->getColumnDimension('A')->setWidth(15); // Date
@@ -923,12 +932,12 @@ class ReportController extends Controller
         $sheet->getColumnDimension('G')->setWidth(18); // Net
 
         // Center align all cells
-        $sheet->getStyle('A1:' . $lastCol . $totalRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('A1:' . $lastCol . $totalRow)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle('A1:'.$lastCol.$totalRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('A1:'.$lastCol.$totalRow)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
 
         // Generate Excel file
         $writer = new Xlsx($spreadsheet);
-        $fileName = 'daily_income_report_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.xlsx';
+        $fileName = 'daily_income_report_'.$year.'_'.str_pad($month, 2, '0', STR_PAD_LEFT).'.xlsx';
 
         // Save to temporary file
         $tempFile = tempnam(sys_get_temp_dir(), 'excel_');
@@ -947,7 +956,7 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'month' => 'required|integer|between:1,12',
-            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+            'year' => 'required|integer|min:2000|max:'.(Carbon::now()->year + 1),
         ]);
 
         $year = $validated['year'];
@@ -956,7 +965,7 @@ class ReportController extends Controller
         $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
 
         // Assume purchases table exists with purchase_date and total_amount (cost)
-        $daily = \App\Models\Purchase::query()
+        $daily = Purchase::query()
             ->select(
                 DB::raw('DATE(COALESCE(purchase_date, created_at)) as day'),
                 DB::raw('SUM(total_amount) as daily_total_cost')
@@ -990,7 +999,7 @@ class ReportController extends Controller
                 'month_summary' => [
                     'total_amount_purchases' => $summaryTotal,
                 ],
-            ]
+            ],
         ]);
     }
 
@@ -1034,12 +1043,12 @@ class ReportController extends Controller
             ],
         ]);
     }
+
     /**
      * Generate a Profit and Loss summary for a given period.
      * Calculates Revenue (from Sales) and COGS (from linked PurchaseItem batches).
      *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function profitLossReport(Request $request)
     {
@@ -1062,7 +1071,7 @@ class ReportController extends Controller
         // --- Calculate Total Revenue (Based on Sales created within the period) ---
         $revenueQuery = Sale::whereBetween('sale_date', [$startDate, $endDate]);
         // Apply filters if provided
-        if (!empty($validated['client_id'])) {
+        if (! empty($validated['client_id'])) {
             $revenueQuery->where('client_id', $validated['client_id']);
         }
         // Note: Filtering by product_id for total revenue is complex, as a sale can have multiple products.
@@ -1071,9 +1080,8 @@ class ReportController extends Controller
         $totalRevenue = (float) SaleItem::query()
             ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
             ->whereBetween('sales.sale_date', [$startDate, $endDate])
-            ->when(!empty($validated['client_id']), fn($q) => $q->where('sales.client_id', $validated['client_id']))
+            ->when(! empty($validated['client_id']), fn ($q) => $q->where('sales.client_id', $validated['client_id']))
             ->sum('sale_items.total_price');
-
 
         // --- Calculate Cost of Goods Sold (COGS) ---
         // Sum the (quantity * unit_cost_from_batch) for all SaleItems linked to sales within the period.
@@ -1085,28 +1093,26 @@ class ReportController extends Controller
             ->leftJoin('purchase_items', 'sale_items.purchase_item_id', '=', 'purchase_items.id')
             ->whereBetween('sales.sale_date', [$startDate, $endDate]);
 
-
         // Apply filters if provided
-        if (!empty($validated['client_id'])) {
+        if (! empty($validated['client_id'])) {
             // Filter SaleItems based on the client_id of their parent Sale
             $cogsQuery->where('sales.client_id', $validated['client_id']);
         }
-        if (!empty($validated['product_id'])) {
+        if (! empty($validated['product_id'])) {
             // Filter SaleItems directly by product_id
             $cogsQuery->where('sale_items.product_id', $validated['product_id']);
         }
-
 
         // Calculate COGS: Sum of (quantity sold * cost price from the specific batch)
         // Use purchase_items.unit_cost as the cost price for the batch
         $totalCOGS = $cogsQuery->sum('sale_items.cost_price_at_sale'); // <-- SIMPLIFIED COGS
 
         // --- Calculate Sale Returns ---
-        $returnsQuery = \App\Models\SaleReturn::with(['items.product', 'sale.items'])
+        $returnsQuery = SaleReturn::with(['items.product', 'sale.items'])
             ->whereBetween('created_at', [$startDate, $endDate]);
 
-        if (!empty($validated['client_id'])) {
-            $returnsQuery->whereHas('sale', fn($q) => $q->where('client_id', $validated['client_id']));
+        if (! empty($validated['client_id'])) {
+            $returnsQuery->whereHas('sale', fn ($q) => $q->where('client_id', $validated['client_id']));
         }
 
         $returns = $returnsQuery->get();
@@ -1115,7 +1121,7 @@ class ReportController extends Controller
 
         foreach ($returns as $return) {
             foreach ($return->items as $returnItem) {
-                if (!empty($validated['product_id']) && $returnItem->product_id != $validated['product_id']) {
+                if (! empty($validated['product_id']) && $returnItem->product_id != $validated['product_id']) {
                     continue;
                 }
 
@@ -1144,8 +1150,8 @@ class ReportController extends Controller
         $grossProfit = $netRevenue - $netCOGS;
 
         // --- Calculate Expenses ---
-        $expensesQuery = \App\Models\Expense::whereBetween('expense_date', [$startDate, $endDate]);
-        if (!empty($validated['user_id'])) { // If user filter is relevant for P&L context
+        $expensesQuery = Expense::whereBetween('expense_date', [$startDate, $endDate]);
+        if (! empty($validated['user_id'])) { // If user filter is relevant for P&L context
             $expensesQuery->where('user_id', $validated['user_id']);
         }
         $totalExpenses = (float) $expensesQuery->sum('amount');
@@ -1178,6 +1184,7 @@ class ReportController extends Controller
 
         return response()->json(['data' => $reportData]);
     }
+
     public function downloadSalesReportPDF(Request $request)
     {
         // Validate Input Parameters
@@ -1195,7 +1202,7 @@ class ReportController extends Controller
         $query = Sale::query()->with([
             'client:id,name',
             'user:id,name',
-            'payments.user:id,name,username'
+            'payments.user:id,name,username',
         ]);
 
         $startDate = isset($validated['start_date'])
@@ -1205,7 +1212,7 @@ class ReportController extends Controller
             ? Carbon::parse($validated['end_date'])->endOfDay()
             : null;
 
-        if (!empty($validated['shift_id'])) {
+        if (! empty($validated['shift_id'])) {
             $query->where('shift_id', $validated['shift_id']);
         } else {
             if ($startDate) {
@@ -1216,16 +1223,16 @@ class ReportController extends Controller
             }
         }
 
-        if (!empty($validated['client_id'])) {
+        if (! empty($validated['client_id'])) {
             $query->where('client_id', $validated['client_id']);
         }
-        if (!empty($validated['user_id'])) {
+        if (! empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
         }
-        if (!empty($validated['shift_id'])) {
+        if (! empty($validated['shift_id'])) {
             $query->where('shift_id', $validated['shift_id']);
         }
-        if (!empty($validated['status'])) {
+        if (! empty($validated['status'])) {
             $query->where('status', $validated['status']);
         }
         if (array_key_exists('has_discount', $validated)) {
@@ -1243,7 +1250,7 @@ class ReportController extends Controller
 
         // Query payments directly by shift_id or payment_date
         $paymentsBaseQuery = Payment::query();
-        if (!empty($validated['shift_id'])) {
+        if (! empty($validated['shift_id'])) {
             $paymentsBaseQuery->where('shift_id', $validated['shift_id']);
         } else {
             if ($startDate) {
@@ -1253,21 +1260,21 @@ class ReportController extends Controller
                 $paymentsBaseQuery->whereDate('payment_date', '<=', $endDate);
             }
         }
-        if (!empty($validated['user_id'])) {
+        if (! empty($validated['user_id'])) {
             $paymentsBaseQuery->where('user_id', $validated['user_id']);
         }
         $allPayments = $paymentsBaseQuery->get();
 
-        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
         $totalPaid = (float) $allPayments->sum('amount');
         $totalSales = $sales->count();
         $totalDiscount = 0;
         $totalDue = max(0, $totalAmount - $totalPaid);
 
         // Calculate Total Expenses for the period
-        $expensesQuery = \App\Models\Expense::query();
+        $expensesQuery = Expense::query();
 
-        if (!empty($validated['shift_id'])) {
+        if (! empty($validated['shift_id'])) {
             $expensesQuery->where('shift_id', $validated['shift_id']);
         } else {
             if ($startDate) {
@@ -1278,14 +1285,14 @@ class ReportController extends Controller
             }
         }
         // Apply user filter if provided
-        if (!empty($validated['user_id'])) {
+        if (! empty($validated['user_id'])) {
             $expensesQuery->where('user_id', $validated['user_id']);
         }
         $totalExpenses = (float) $expensesQuery->sum('amount');
 
         // Expense breakdown by payment method (cash / bank) for popup-style summary
-        $expensesForBreakdown = \App\Models\Expense::query();
-        if (!empty($validated['shift_id'])) {
+        $expensesForBreakdown = Expense::query();
+        if (! empty($validated['shift_id'])) {
             $expensesForBreakdown->where('shift_id', $validated['shift_id']);
         } else {
             if ($startDate) {
@@ -1295,7 +1302,7 @@ class ReportController extends Controller
                 $expensesForBreakdown->whereDate('expense_date', '<=', $endDate);
             }
         }
-        if (!empty($validated['user_id'])) {
+        if (! empty($validated['user_id'])) {
             $expensesForBreakdown->where('user_id', $validated['user_id']);
         }
         $expensesByMethodData = $expensesForBreakdown->get();
@@ -1305,17 +1312,19 @@ class ReportController extends Controller
             'bankak' => 0,
             'fawry' => 0,
             'ocash' => 0,
-            'bank' => 0 // Generic bank/visa
+            'bank' => 0, // Generic bank/visa
         ];
         foreach ($expensesByMethodData as $exp) {
             $method = $exp->payment_method ?? 'cash';
-            if (!isset($expensesByMethod[$method])) $expensesByMethod[$method] = 0;
-            $expensesByMethod[$method] += (float)$exp->amount;
+            if (! isset($expensesByMethod[$method])) {
+                $expensesByMethod[$method] = 0;
+            }
+            $expensesByMethod[$method] += (float) $exp->amount;
         }
 
         // Sales Returns Breakdown
-        $returnsQuery = \App\Models\SaleReturn::query();
-        if (!empty($validated['shift_id'])) {
+        $returnsQuery = SaleReturn::query();
+        if (! empty($validated['shift_id'])) {
             $returnsQuery->where('shift_id', $validated['shift_id']);
         } else {
             if ($startDate) {
@@ -1325,7 +1334,7 @@ class ReportController extends Controller
                 $returnsQuery->whereDate('created_at', '<=', $endDate);
             }
         }
-        if (!empty($validated['user_id'])) {
+        if (! empty($validated['user_id'])) {
             $returnsQuery->where('user_id', $validated['user_id']);
         }
         $returnsData = $returnsQuery->with('items')->get();
@@ -1334,16 +1343,18 @@ class ReportController extends Controller
             'cash' => 0,
             'bankak' => 0,
             'fawry' => 0,
-            'ocash' => 0
+            'ocash' => 0,
         ];
         $totalReturns = 0;
 
         foreach ($returnsData as $ret) {
             // Calculate total return amount from items
-            $returnTotal = $ret->items->sum(fn($i) => $i->quantity * $i->price);
+            $returnTotal = $ret->items->sum(fn ($i) => $i->quantity * $i->price);
             $method = $ret->returned_payment_method ?? 'cash';
 
-            if (!isset($returnsByMethod[$method])) $returnsByMethod[$method] = 0;
+            if (! isset($returnsByMethod[$method])) {
+                $returnsByMethod[$method] = 0;
+            }
             $returnsByMethod[$method] += $returnTotal;
             $totalReturns += $returnTotal;
         }
@@ -1355,11 +1366,11 @@ class ReportController extends Controller
             'fawry' => 0,
             'ocash' => 0,
             'visa' => 0,
-            'bank_transfer' => 0
+            'bank_transfer' => 0,
         ];
         foreach ($allPayments as $payment) {
             $method = $payment->method ?? 'cash';
-            if (!isset($paymentMethods[$method])) {
+            if (! isset($paymentMethods[$method])) {
                 $paymentMethods[$method] = 0;
             }
             $paymentMethods[$method] += (float) $payment->amount;
@@ -1367,12 +1378,12 @@ class ReportController extends Controller
 
         // Load shift when filtering by shift_id (for popup-style header)
         $shift = null;
-        if (!empty($validated['shift_id'])) {
+        if (! empty($validated['shift_id'])) {
             $shift = Shift::with('user')->find($validated['shift_id']);
         }
 
         // Generate PDF using service
-        $pdfService = new SalesReportPdfService();
+        $pdfService = new SalesReportPdfService;
         $summaryStats = [
             'totalSales' => $totalSales,
             'totalAmount' => $totalAmount,
@@ -1391,7 +1402,7 @@ class ReportController extends Controller
         ];
 
         // Get base URL for hyperlinks
-        $baseUrl = $request->getSchemeAndHttpHost() . $request->getBasePath();
+        $baseUrl = $request->getSchemeAndHttpHost().$request->getBasePath();
 
         $pdfContent = $pdfService->generate(
             $sales,
@@ -1404,7 +1415,7 @@ class ReportController extends Controller
         );
 
         // Output PDF
-        $pdfFileName = 'sales_report_' . now()->format('Y-m-d_His') . '.pdf';
+        $pdfFileName = 'sales_report_'.now()->format('Y-m-d_His').'.pdf';
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
@@ -1414,9 +1425,7 @@ class ReportController extends Controller
     /**
      * Download PDF report for a single sale with full details
      *
-     * @param Request $request
-     * @param int $saleId
-     * @return \Illuminate\Http\Response
+     * @return Response
      */
     public function downloadSaleDetailPDF(Request $request, int $saleId)
     {
@@ -1425,15 +1434,15 @@ class ReportController extends Controller
             'client:id,name',
             'user:id,name',
             'items.product:id,name,sku',
-            'payments.user:id,name'
+            'payments.user:id,name',
         ])->findOrFail($saleId);
 
         // Generate PDF using service
-        $pdfService = new \App\Services\SaleDetailPdfService();
+        $pdfService = new SaleDetailPdfService;
         $pdfContent = $pdfService->generate($sale);
 
         // Output PDF
-        $pdfFileName = 'sale_detail_' . $saleId . '_' . now()->format('Y-m-d_His') . '.pdf';
+        $pdfFileName = 'sale_detail_'.$saleId.'_'.now()->format('Y-m-d_His').'.pdf';
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
@@ -1444,8 +1453,8 @@ class ReportController extends Controller
     {
         $sales->load(['items', 'payments']);
         $totalSales = $sales->count();
-        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
         $totalDue = max(0, $totalAmount - $totalPaid);
 
         $paymentMethods = $sales->flatMap->payments->groupBy('method')->map->sum('amount');
@@ -1454,8 +1463,8 @@ class ReportController extends Controller
             ->map(function ($clientSales) {
                 return [
                     'name' => $clientSales->first()->client?->name ?? 'Unknown',
-                    'total' => (float) $clientSales->sum(fn($s) => $s->items->sum('total_price')),
-                    'count' => $clientSales->count()
+                    'total' => (float) $clientSales->sum(fn ($s) => $s->items->sum('total_price')),
+                    'count' => $clientSales->count(),
                 ];
             })
             ->sortByDesc('total')
@@ -1469,14 +1478,14 @@ class ReportController extends Controller
             'completion_rate' => 0,
             'status_breakdown' => [],
             'payment_methods' => $paymentMethods,
-            'top_clients' => $topClients
+            'top_clients' => $topClients,
         ];
     }
 
     private function generateProfessionalPDFHeader($pdf, $startDate, $endDate, $filters)
     {
         // Company Information
-        $settings = (new \App\Services\SettingsService())->getAll();
+        $settings = (new SettingsService)->getAll();
         $companyName = $settings['company_name'] ?? 'Your Company';
         $companyAddress = $settings['company_address'] ?? '';
         $companyPhone = $settings['company_phone'] ?? '';
@@ -1492,10 +1501,10 @@ class ReportController extends Controller
             $pdf->Cell(0, 6, $companyAddress, 0, 1, 'C');
         }
         if ($companyPhone) {
-            $pdf->Cell(0, 6, 'Phone: ' . $companyPhone, 0, 1, 'C');
+            $pdf->Cell(0, 6, 'Phone: '.$companyPhone, 0, 1, 'C');
         }
         if ($companyEmail) {
-            $pdf->Cell(0, 6, 'Email: ' . $companyEmail, 0, 1, 'C');
+            $pdf->Cell(0, 6, 'Email: '.$companyEmail, 0, 1, 'C');
         }
 
         $pdf->Ln(5);
@@ -1510,24 +1519,24 @@ class ReportController extends Controller
         $pdf->Cell(0, 8, "Period: {$formattedStartDate} to {$formattedEndDate}", 0, 1, 'C');
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
-        $pdf->Cell(0, 6, 'Generated on: ' . now()->format('F j, Y \a\t g:i A'), 0, 1, 'C');
+        $pdf->Cell(0, 6, 'Generated on: '.now()->format('F j, Y \a\t g:i A'), 0, 1, 'C');
 
         // Applied Filters - Enhanced and more prominent
         $appliedFilters = [];
-        if (!empty($filters['client_id'])) {
-            $client = \App\Models\Client::find($filters['client_id']);
-            $appliedFilters[] = 'Client: ' . ($client ? $client->name : 'Unknown');
+        if (! empty($filters['client_id'])) {
+            $client = Client::find($filters['client_id']);
+            $appliedFilters[] = 'Client: '.($client ? $client->name : 'Unknown');
         }
-        if (!empty($filters['user_id'])) {
-            $user = \App\Models\User::find($filters['user_id']);
-            $appliedFilters[] = 'Salesperson: ' . ($user ? $user->name : 'Unknown');
+        if (! empty($filters['user_id'])) {
+            $user = User::find($filters['user_id']);
+            $appliedFilters[] = 'Salesperson: '.($user ? $user->name : 'Unknown');
         }
-        if (!empty($filters['status'])) {
-            $appliedFilters[] = 'Status: ' . ucfirst($filters['status']);
+        if (! empty($filters['status'])) {
+            $appliedFilters[] = 'Status: '.ucfirst($filters['status']);
         }
 
         // Enhanced filters display
-        if (!empty($appliedFilters)) {
+        if (! empty($appliedFilters)) {
             $pdf->Ln(5);
             $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 11);
             $pdf->SetFillColor(240, 240, 240);
@@ -1554,7 +1563,7 @@ class ReportController extends Controller
         // Large prominent total income display
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
         $pdf->SetFillColor(240, 248, 255); // Light blue background
-        $pdf->Cell(0, 12, 'Total Revenue: ' . number_format($summaryStats['total_amount'], 0), 1, 1, 'C', true);
+        $pdf->Cell(0, 12, 'Total Revenue: '.number_format($summaryStats['total_amount'], 0), 1, 1, 'C', true);
         $pdf->Ln(5);
 
         // Income breakdown in a table format
@@ -1568,7 +1577,7 @@ class ReportController extends Controller
             'Total Paid Amount' => number_format($summaryStats['total_paid'], 0),
             'Total Due Amount' => number_format($summaryStats['total_due'], 0),
             'Number of Sales' => $summaryStats['total_sales'],
-            'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 0) : '0'
+            'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 0) : '0',
         ];
 
         $pdf->addSummaryBox('Income Details', $incomeData, 2);
@@ -1589,7 +1598,7 @@ class ReportController extends Controller
             $paymentData = [];
             foreach ($summaryStats['payment_methods'] as $method => $amount) {
                 $percentage = $summaryStats['total_paid'] > 0 ? ($amount / $summaryStats['total_paid']) * 100 : 0;
-                $paymentData[ucfirst($method)] = number_format($amount, 0) . ' (' . number_format($percentage, 1) . '%)';
+                $paymentData[ucfirst($method)] = number_format($amount, 0).' ('.number_format($percentage, 1).'%)';
             }
             $pdf->addSummaryBox('Payment Methods', $paymentData, 1);
         }
@@ -1604,14 +1613,14 @@ class ReportController extends Controller
             'completed' => ['Completed', 'green'],
             'pending' => ['Pending', 'orange'],
             'draft' => ['Draft', 'gray'],
-            'cancelled' => ['Cancelled', 'red']
+            'cancelled' => ['Cancelled', 'red'],
         ];
 
         foreach ($statuses as $status => $info) {
             $count = $summaryStats['status_breakdown'][$status] ?? 0;
             $percentage = $summaryStats['total_sales'] > 0 ? ($count / $summaryStats['total_sales']) * 100 : 0;
 
-            $pdf->Cell(47, 6, $info[0] . ': ' . $count . ' (' . number_format($percentage, 1) . '%)', 1, 0, 'C');
+            $pdf->Cell(47, 6, $info[0].': '.$count.' ('.number_format($percentage, 1).'%)', 1, 0, 'C');
         }
         $pdf->Ln(8);
 
@@ -1623,7 +1632,7 @@ class ReportController extends Controller
 
             $clientData = [];
             foreach ($summaryStats['top_clients'] as $client) {
-                $clientData[$client['name']] = number_format($client['total'], 0) . ' (' . $client['count'] . ' sales)';
+                $clientData[$client['name']] = number_format($client['total'], 0).' ('.$client['count'].' sales)';
             }
             $pdf->addSummaryBox('Top Clients', $clientData, 1);
         }
@@ -1646,6 +1655,7 @@ class ReportController extends Controller
             $pdf->SetFont($pdf->getDefaultFontFamily(), '', 12);
             $pdf->SetTextColor(128, 128, 128);
             $pdf->Cell(0, 15, 'No sales transactions found for the selected period.', 1, 1, 'C');
+
             return;
         }
 
@@ -1657,7 +1667,7 @@ class ReportController extends Controller
             'Discount',
             'Date',
             'User',
-            'Items'
+            'Items',
         ];
         // Optimized column widths for landscape A4 (297mm width)
         // Total width: 20+25+20+20+30+25+35 = 175mm (leaving margin for borders)
@@ -1675,11 +1685,12 @@ class ReportController extends Controller
             $itemNames = $sale->items->map(function ($item) {
                 $productName = $item->product?->name ?? 'Unknown';
                 $quantity = $item->quantity ?? 1;
-                return $productName . ' (x' . $quantity . ')';
+
+                return $productName.' (x'.$quantity.')';
             })->implode(', ');
 
             if (strlen($itemNames) > 30) {
-                $itemNames = substr($itemNames, 0, 27) . '...';
+                $itemNames = substr($itemNames, 0, 27).'...';
             }
 
             $statusColor = $this->getStatusColor('completed');
@@ -1692,10 +1703,10 @@ class ReportController extends Controller
 
             $userName = $sale->user?->name ?? 'System';
             if (strlen($userName) > 20) {
-                $userName = substr($userName, 0, 17) . '...';
+                $userName = substr($userName, 0, 17).'...';
             }
 
-            $transactionId = '#' . $sale->id;
+            $transactionId = '#'.$sale->id;
 
             $rowData = [
                 $transactionId,
@@ -1704,11 +1715,11 @@ class ReportController extends Controller
                 $discountAmount,
                 $saleDate,
                 $userName,
-                $itemNames
+                $itemNames,
             ];
 
             $pdf->addTableRow($rowData, $columnWidths, 8, $fill, $statusColor);
-            $fill = !$fill;
+            $fill = ! $fill;
         }
 
         // Professional Summary Section
@@ -1725,8 +1736,8 @@ class ReportController extends Controller
         $pdf->SetFillColor(70, 130, 180);
         $pdf->SetTextColor(255, 255, 255);
 
-        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
         $totalDiscount = 0;
         $totalDue = max(0, $totalAmount - $totalPaid);
 
@@ -1735,9 +1746,9 @@ class ReportController extends Controller
             number_format($totalAmount, 0),
             number_format($totalPaid, 0),
             number_format($totalDiscount, 0),
-            $sales->count() . ' sales',
+            $sales->count().' sales',
             'All Users',
-            'All Items'
+            'All Items',
         ];
 
         foreach ($summaryData as $i => $cellData) {
@@ -1757,8 +1768,8 @@ class ReportController extends Controller
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 9);
 
-        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
-        $totalPaid = (float) $sales->sum(fn($s) => $s->payments->sum('amount'));
+        $totalAmount = (float) $sales->sum(fn ($s) => $s->items->sum('total_price'));
+        $totalPaid = (float) $sales->sum(fn ($s) => $s->payments->sum('amount'));
         $totalDue = max(0, $totalAmount - $totalPaid);
         $avgSaleValue = $sales->count() > 0 ? $totalAmount / $sales->count() : 0;
         $paymentRate = $totalAmount > 0 ? ($totalPaid / $totalAmount) * 100 : 0;
@@ -1769,11 +1780,11 @@ class ReportController extends Controller
         // Create statistics in a professional format
         $statsData = [
             'Average Transaction Value' => number_format($avgSaleValue, 0),
-            'Payment Collection Rate' => number_format($paymentRate, 1) . '%',
+            'Payment Collection Rate' => number_format($paymentRate, 1).'%',
             'Outstanding Amount' => number_format($totalDue, 0),
             'Completed Transactions' => $completedCount,
             'Pending Transactions' => $pendingCount,
-            'Total Products Sold' => $sales->flatMap->items->sum('quantity')
+            'Total Products Sold' => $sales->flatMap->items->sum('quantity'),
         ];
 
         $pdf->addSummaryBox('Key Performance Metrics', $statsData, 2);
@@ -1804,18 +1815,16 @@ class ReportController extends Controller
 
         $pdf->Cell(0, 5, 'This report was generated automatically by the sales management system.', 0, 1, 'C');
         $pdf->Cell(0, 5, 'For questions or support, please contact your system administrator.', 0, 1, 'C');
-        $pdf->Cell(0, 5, 'Report generated on: ' . now()->format('Y-m-d H:i:s'), 0, 1, 'C');
+        $pdf->Cell(0, 5, 'Report generated on: '.now()->format('Y-m-d H:i:s'), 0, 1, 'C');
     }
 
     /**
      * Generate inventory PDF report
      *
-     * @param Request $request
-     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
+     * @return Response|JsonResponse
      */
     public function inventoryPdf(Request $request)
     {
-
 
         // Validate request
         $validated = $request->validate([
@@ -1829,26 +1838,24 @@ class ReportController extends Controller
         $validated['out_of_stock_only'] = filter_var($validated['out_of_stock_only'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         try {
-            $inventoryPdfService = new InventoryPdfService();
+            $inventoryPdfService = new InventoryPdfService;
             $pdfContent = $inventoryPdfService->generateInventoryPdf($validated);
 
             return response($pdfContent)
                 ->header('Content-Type', 'application/pdf')
-                ->header('Content-Disposition', 'inline; filename="inventory_report_' . now()->format('Y-m-d_H-i-s') . '.pdf"');
+                ->header('Content-Disposition', 'inline; filename="inventory_report_'.now()->format('Y-m-d_H-i-s').'.pdf"');
         } catch (\Exception $e) {
-            return response()->json(['error' => 'Failed to generate PDF: ' . $e->getMessage()], 500);
+            return response()->json(['error' => 'Failed to generate PDF: '.$e->getMessage()], 500);
         }
     }
 
     /**
      * Generate daily sales PDF report
      *
-     * @param Request $request
-     * @return \Illuminate\Http\Response
+     * @return Response
      */
     public function dailySalesPdf(Request $request)
     {
-
 
         // Validate parameters
         $validated = $request->validate([
@@ -1863,11 +1870,11 @@ class ReportController extends Controller
         ]);
 
         // Generate PDF using the service with filters
-        $pdfService = new DailySalesPdfService();
+        $pdfService = new DailySalesPdfService;
         $pdfContent = $pdfService->generateDailySalesPdf($validated);
 
         // Return PDF response
-        $filename = 'sales_report_' . now()->format('Y-m-d_H-i-s') . '.pdf';
+        $filename = 'sales_report_'.now()->format('Y-m-d_H-i-s').'.pdf';
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
@@ -1881,7 +1888,7 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'month' => 'required|integer|between:1,12',
-            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+            'year' => 'required|integer|min:2000|max:'.(Carbon::now()->year + 1),
         ]);
 
         $year = $validated['year'];
@@ -1890,7 +1897,7 @@ class ReportController extends Controller
         $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
 
         // Get all expenses for the month
-        $expenses = \App\Models\Expense::query()
+        $expenses = Expense::query()
             ->with(['category:id,name', 'user:id,name'])
             ->whereBetween('expense_date', [$startDate->toDateString(), $endDate->toDateString()])
             ->orderBy('expense_date', 'asc')
@@ -1966,7 +1973,7 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'month' => 'required|integer|between:1,12',
-            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+            'year' => 'required|integer|min:2000|max:'.(Carbon::now()->year + 1),
         ]);
 
         $year = $validated['year'];
@@ -1975,7 +1982,7 @@ class ReportController extends Controller
         $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
 
         // Get the same data as monthlyExpenses
-        $expenses = \App\Models\Expense::query()
+        $expenses = Expense::query()
             ->whereBetween('expense_date', [$startDate->toDateString(), $endDate->toDateString()])
             ->orderBy('expense_date', 'asc')
             ->get();
@@ -2016,7 +2023,7 @@ class ReportController extends Controller
         }
 
         // Create Excel file
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
 
         // Set document properties
@@ -2025,7 +2032,7 @@ class ReportController extends Controller
             ->setLastModifiedBy('Sales System')
             ->setTitle('تقرير المصروفات الشهري')
             ->setSubject('Monthly Expenses Report')
-            ->setDescription('تقرير المصروفات الشهري لشهر ' . $startDate->isoFormat('MMMM YYYY'));
+            ->setDescription('تقرير المصروفات الشهري لشهر '.$startDate->isoFormat('MMMM YYYY'));
 
         // Set RTL direction
         $sheet->setRightToLeft(true);
@@ -2035,7 +2042,7 @@ class ReportController extends Controller
         $headers = ['التاريخ', 'إجمالي المصروفات', 'نقدي', 'بنكي'];
         $col = 'A';
         foreach ($headers as $header) {
-            $sheet->setCellValue($col . $row, $header);
+            $sheet->setCellValue($col.$row, $header);
             $col++;
         }
 
@@ -2063,29 +2070,29 @@ class ReportController extends Controller
         ];
 
         $lastCol = chr(ord('A') + count($headers) - 1);
-        $sheet->getStyle('A' . $row . ':' . $lastCol . $row)->applyFromArray($headerStyle);
+        $sheet->getStyle('A'.$row.':'.$lastCol.$row)->applyFromArray($headerStyle);
         $sheet->getRowDimension($row)->setRowHeight(25);
 
         // Data rows
         $row = 2;
         foreach ($report as $dayData) {
             $col = 'A';
-            $sheet->setCellValue($col . $row, $dayData['date']);
+            $sheet->setCellValue($col.$row, $dayData['date']);
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['total'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['cash_total'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['cash_total'], 2));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['bank_total'], 2));
+            $sheet->setCellValue($col.$row, number_format($dayData['bank_total'], 2));
             $row++;
         }
 
         // Summary row
         $row++;
-        $sheet->setCellValue('A' . $row, 'الإجمالي');
-        $sheet->setCellValue('B' . $row, number_format($monthSummary['total'], 2));
-        $sheet->setCellValue('C' . $row, number_format($monthSummary['cash_total'], 2));
-        $sheet->setCellValue('D' . $row, number_format($monthSummary['bank_total'], 2));
+        $sheet->setCellValue('A'.$row, 'الإجمالي');
+        $sheet->setCellValue('B'.$row, number_format($monthSummary['total'], 2));
+        $sheet->setCellValue('C'.$row, number_format($monthSummary['cash_total'], 2));
+        $sheet->setCellValue('D'.$row, number_format($monthSummary['bank_total'], 2));
 
         // Style summary row
         $summaryStyle = [
@@ -2104,7 +2111,7 @@ class ReportController extends Controller
                 ],
             ],
         ];
-        $sheet->getStyle('A' . $row . ':D' . $row)->applyFromArray($summaryStyle);
+        $sheet->getStyle('A'.$row.':D'.$row)->applyFromArray($summaryStyle);
 
         // Auto-size columns
         foreach (range('A', 'D') as $col) {
@@ -2112,11 +2119,11 @@ class ReportController extends Controller
         }
 
         // Set data format for numeric columns
-        $sheet->getStyle('B2:D' . ($row - 1))->getNumberFormat()->setFormatCode('#,##0.00');
+        $sheet->getStyle('B2:D'.($row - 1))->getNumberFormat()->setFormatCode('#,##0.00');
 
         // Generate Excel file
         $writer = new Xlsx($spreadsheet);
-        $filename = 'monthly_expenses_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.xlsx';
+        $filename = 'monthly_expenses_'.$year.'_'.str_pad($month, 2, '0', STR_PAD_LEFT).'.xlsx';
 
         $tempFile = tempnam(sys_get_temp_dir(), 'expenses_');
         $writer->save($tempFile);
@@ -2138,18 +2145,40 @@ class ReportController extends Controller
      */
     public function bestSelling(Request $request)
     {
-        $days = (int) $request->input('days', 30);
-        $limit = (int) $request->input('limit', 10);
+        $validated = $request->validate([
+            'days' => 'nullable|integer|min:1',
+            'limit' => 'nullable|integer|min:1|max:100',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
+            'product_name' => 'nullable|string|max:255',
+        ]);
 
-        $startDate = Carbon::now()->subDays($days)->startOfDay();
+        $limit = (int) ($validated['limit'] ?? 10);
 
-        $bestSelling = SaleItem::select('product_id', DB::raw('SUM(quantity) as total_quantity_sold'), DB::raw('SUM(total_price) as total_revenue'))
-            ->where('created_at', '>=', $startDate)
+        if (! empty($validated['start_date']) && ! empty($validated['end_date'])) {
+            $startDate = Carbon::parse($validated['start_date'])->startOfDay();
+            $endDate = Carbon::parse($validated['end_date'])->endOfDay();
+        } else {
+            $days = (int) ($validated['days'] ?? 30);
+            $startDate = Carbon::now()->subDays($days)->startOfDay();
+            $endDate = Carbon::now()->endOfDay();
+        }
+
+        $bestSellingQuery = SaleItem::select('product_id', DB::raw('SUM(quantity) as total_quantity_sold'), DB::raw('SUM(total_price) as total_revenue'))
+            ->whereBetween('created_at', [$startDate, $endDate])
             ->groupBy('product_id')
             ->orderByDesc('total_quantity_sold')
-            ->limit($limit)
+            ->limit($limit);
+
+        if (! empty($validated['product_name'])) {
+            $bestSellingQuery->whereHas('product', function ($query) use ($validated) {
+                $query->where('name', 'like', '%'.$validated['product_name'].'%');
+            });
+        }
+
+        $bestSelling = $bestSellingQuery
             ->with(['product' => function ($query) {
-                // Ensure we select necessary columns and calculate total stock properly 
+                // Ensure we select necessary columns and calculate total stock properly
                 $query->select('id', 'name', 'sku', 'image_url', 'category_id')->with('category:id,name', 'warehouses');
             }])
             ->get();
@@ -2157,6 +2186,7 @@ class ReportController extends Controller
         // Map data to simpler structure
         $results = $bestSelling->map(function ($item) {
             $product = $item->product;
+
             return [
                 'id' => $product ? $product->id : null,
                 'name' => $product ? $product->name : 'Unknown Product',
@@ -2229,6 +2259,7 @@ class ReportController extends Controller
         // Filter those with early expiry
         $expiring = $productsInStock->map(function ($product) {
             $earliest = $product->earliest_expiry_date;
+
             return [
                 'id' => $product->id,
                 'name' => $product->name,
@@ -2237,12 +2268,15 @@ class ReportController extends Controller
                 'stock_quantity' => $product->total_stock,
                 'earliest_expiry_date' => $earliest,
             ];
-        })->filter(function ($item) use ($dateThreshold, $now) {
-            if (!$item['earliest_expiry_date']) return false;
+        })->filter(function ($item) use ($dateThreshold) {
+            if (! $item['earliest_expiry_date']) {
+                return false;
+            }
             try {
                 $date = Carbon::parse($item['earliest_expiry_date']);
+
                 // Return soon expiring items AND already expired items in stock
-                return ltrim($date->format('Y-m-d'), "0") !== "" && $date->lte($dateThreshold);
+                return ltrim($date->format('Y-m-d'), '0') !== '' && $date->lte($dateThreshold);
             } catch (\Exception $e) {
                 return false;
             }
@@ -2254,7 +2288,7 @@ class ReportController extends Controller
     /**
      * Download Shift Cost (Expenses) PDF
      */
-    public function shiftCostPdf(Request $request, \App\Services\ShiftCostPdfService $pdfService)
+    public function shiftCostPdf(Request $request, ShiftCostPdfService $pdfService)
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
@@ -2264,17 +2298,17 @@ class ReportController extends Controller
 
         $pdfContent = $pdfService->generate($shift);
 
-        $filename = 'Shift_' . $shift->id . '_Costs_' . now()->format('Ymd_His') . '.pdf';
+        $filename = 'Shift_'.$shift->id.'_Costs_'.now()->format('Ymd_His').'.pdf';
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+            ->header('Content-Disposition', 'inline; filename="'.$filename.'"');
     }
 
     /**
      * Download Shift Sales Returns PDF
      */
-    public function shiftReturnsPdf(Request $request, \App\Services\ShiftSalesReturnPdfService $pdfService)
+    public function shiftReturnsPdf(Request $request, ShiftSalesReturnPdfService $pdfService)
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
@@ -2284,17 +2318,17 @@ class ReportController extends Controller
 
         $pdfContent = $pdfService->generate($shift);
 
-        $filename = 'Shift_' . $shift->id . '_Returns_' . now()->format('Ymd_His') . '.pdf';
+        $filename = 'Shift_'.$shift->id.'_Returns_'.now()->format('Ymd_His').'.pdf';
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+            ->header('Content-Disposition', 'inline; filename="'.$filename.'"');
     }
 
     /**
      * Download Shift Sold Items PDF (الأصناف المباعة)
      */
-    public function shiftSoldItemsPdf(Request $request, \App\Services\ShiftSoldItemsPdfService $pdfService)
+    public function shiftSoldItemsPdf(Request $request, ShiftSoldItemsPdfService $pdfService)
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
@@ -2304,17 +2338,17 @@ class ReportController extends Controller
 
         $pdfContent = $pdfService->generate($shift);
 
-        $filename = 'Shift_' . $shift->id . '_SoldItems_' . now()->format('Ymd_His') . '.pdf';
+        $filename = 'Shift_'.$shift->id.'_SoldItems_'.now()->format('Ymd_His').'.pdf';
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+            ->header('Content-Disposition', 'inline; filename="'.$filename.'"');
     }
 
     /**
      * Download Shift Inventory Effects PDF (أثر المخزون)
      */
-    public function shiftInventoryEffectsPdf(Request $request, \App\Services\ShiftInventoryEffectsPdfService $pdfService)
+    public function shiftInventoryEffectsPdf(Request $request, ShiftInventoryEffectsPdfService $pdfService)
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
@@ -2324,30 +2358,31 @@ class ReportController extends Controller
 
         $pdfContent = $pdfService->generate($shift);
 
-        $filename = 'Shift_' . $shift->id . '_InventoryEffects_' . now()->format('Ymd_His') . '.pdf';
+        $filename = 'Shift_'.$shift->id.'_InventoryEffects_'.now()->format('Ymd_His').'.pdf';
 
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
-            ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+            ->header('Content-Disposition', 'inline; filename="'.$filename.'"');
     }
 
     /**
      * Generate Multi-Warehouse Inventory Audit PDF
      */
-    public function inventoryAuditPdf(Request $request, \App\Services\InventoryAuditPdfService $pdfService)
+    public function inventoryAuditPdf(Request $request, InventoryAuditPdfService $pdfService)
     {
         $filters = $request->only(['search', 'category_id']);
-        
+
         try {
             $pdfContent = $pdfService->generate($filters);
-            
-            $filename = 'Inventory_Audit_' . now()->format('Ymd_His') . '.pdf';
-            
+
+            $filename = 'Inventory_Audit_'.now()->format('Ymd_His').'.pdf';
+
             return response($pdfContent, 200)
                 ->header('Content-Type', 'application/pdf')
-                ->header('Content-Disposition', 'inline; filename="' . $filename . '"');
+                ->header('Content-Disposition', 'inline; filename="'.$filename.'"');
         } catch (\Exception $e) {
-            \Log::error('Inventory Audit PDF generation failed: ' . $e->getMessage());
+            \Log::error('Inventory Audit PDF generation failed: '.$e->getMessage());
+
             return response()->json(['message' => 'Failed to generate PDF report', 'error' => $e->getMessage()], 500);
         }
     }
