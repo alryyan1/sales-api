@@ -352,6 +352,11 @@ class ShiftController extends Controller
             $numbersString = $settings['whatsapp_shift_closure_numbers'] ?? '';
             $adminNumbers = array_filter(array_map('trim', explode(',', $numbersString)));
 
+            // Tenant identifier for Firestore (pharmacies/{collection}/shifts/{id}).
+            // Embedded in each button payload so the shared webhook resolves the
+            // right tenant's PDFs regardless of which phone number it came through.
+            $collectionName = $settings['firebase_collection_name'] ?? 'none';
+
             if (empty($adminNumbers)) {
                 $whatsappStatus = 'skipped';
                 $whatsappMessage = 'No WhatsApp numbers configured for shift closures.';
@@ -373,13 +378,15 @@ class ShiftController extends Controller
                             ['type' => 'text', 'text' => number_format($netBank, 2)],                  // 8 - net bank
                         ]
                     ],
-                    // Embed shift_id in each button payload so the webhook can extract it
+                    // Embed shift_id in each button payload so the webhook can extract it.
+                    // Order must match the approved template's button order exactly:
+                    // 0 = تقرير المبيعات, 1 = تقرير مردودات المبيعات, 2 = تقرير الاصناف المباعه
                     [
                         'type'       => 'button',
                         'sub_type'   => 'quick_reply',
                         'index'      => '0',
                         'parameters' => [
-                            ['type' => 'payload', 'payload' => 'sales_' . $shift->id],
+                            ['type' => 'payload', 'payload' => 'sales_' . $shift->id . '|collection:' . $collectionName],
                         ],
                     ],
                     [
@@ -387,7 +394,7 @@ class ShiftController extends Controller
                         'sub_type'   => 'quick_reply',
                         'index'      => '1',
                         'parameters' => [
-                            ['type' => 'payload', 'payload' => 'sold_items_' . $shift->id],
+                            ['type' => 'payload', 'payload' => 'returns_' . $shift->id . '|collection:' . $collectionName],
                         ],
                     ],
                     [
@@ -395,7 +402,7 @@ class ShiftController extends Controller
                         'sub_type'   => 'quick_reply',
                         'index'      => '2',
                         'parameters' => [
-                            ['type' => 'payload', 'payload' => 'returns_' . $shift->id],
+                            ['type' => 'payload', 'payload' => 'sold_items_' . $shift->id . '|collection:' . $collectionName],
                         ],
                     ],
                 ];

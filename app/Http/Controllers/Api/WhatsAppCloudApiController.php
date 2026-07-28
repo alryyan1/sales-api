@@ -579,6 +579,16 @@ class WhatsAppCloudApiController extends Controller
                 return;
             }
 
+            // Extract an embedded tenant collection, e.g. "sales_71|collection:aura",
+            // so multi-tenant shift reports resolve against the right Firestore path
+            // (pharmacies/{collection}/shifts/{id}) regardless of which phone number
+            // this WABA/webhook routed the reply through.
+            $payloadCollection = null;
+            if (str_contains($buttonPayload, '|collection:')) {
+                [$buttonPayload, $collectionPart] = explode('|collection:', $buttonPayload, 2);
+                $payloadCollection = trim($collectionPart) ?: null;
+            }
+
             $buttonPayload = strtolower($buttonPayload);
 
             // Identify the report type from the button
@@ -604,7 +614,7 @@ class WhatsAppCloudApiController extends Controller
 
             if ($shiftId) {
                 \Illuminate\Support\Facades\Log::info('WhatsApp Cloud API: Shift ID found: ' . $shiftId);
-                $shiftPdfs = $this->getShiftPdfUrlsFromFirestore($shiftId, $collection);
+                $shiftPdfs = $this->getShiftPdfUrlsFromFirestore($shiftId, $payloadCollection ?? $collection);
             } else {
                 \Illuminate\Support\Facades\Log::info('WhatsApp Cloud API: Shift ID not found.');
                 $shiftPdfs = null;
@@ -625,7 +635,7 @@ class WhatsAppCloudApiController extends Controller
 
                 if ($pdfUrl) {
                     $this->sendTextToUser($from, "سيتم إرسال {$label} خلال لحظات", $phoneNumberId);
-                    $this->sendDocumentToUser($from, $pdfUrl, "shift_{$shiftId}", $phoneNumberId);
+                    $this->sendDocumentToUser($from, $pdfUrl, "shift_{$shiftId}", $phoneNumberId, $label);
                 } else {
                     $this->sendTextToUser($from, "عذراً، {$label} غير متاح لهذه الوردية.", $phoneNumberId);
                 }
@@ -819,10 +829,13 @@ class WhatsAppCloudApiController extends Controller
     /**
      * Send a document to a user via WhatsApp Cloud API.
      */
-    protected function sendDocumentToUser(string $to, string $documentUrl, ?string $code = null, $phoneNumberId = null): void
+    protected function sendDocumentToUser(string $to, string $documentUrl, ?string $code = null, $phoneNumberId = null, ?string $label = null): void
     {
         try {
-            $filename = $code ? "result_{$code}.pdf" : 'result.pdf';
+            $namePart = $label ? str_replace(' ', '_', $label) : 'result';
+            $filename = $code ? "{$namePart}_{$code}.pdf" : "{$namePart}.pdf";
+            $caption  = $label ?? 'PDF Report';
+
             Log::info('WhatsApp Cloud API: Sending document to user.', [
                 'to' => $to,
                 'document_url' => $documentUrl,
@@ -836,7 +849,7 @@ class WhatsAppCloudApiController extends Controller
                 $to,
                 $documentUrl,
                 $filename,
-                'PDF Report',
+                $caption,
                 $accessToken,
                 $phoneNumberId
             );
