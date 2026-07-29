@@ -718,12 +718,13 @@ class ReportController extends Controller
         $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
 
         // Get the same data as monthlyRevenueReport
-        $dailySales = Sale::query()
+        $dailySales = SaleItem::query()
+            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
             ->select(
-                DB::raw('DATE(COALESCE(sale_date, created_at)) as sale_day'),
-                DB::raw('SUM(total_amount) as total_sales')
+                DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at)) as sale_day'),
+                DB::raw('SUM(sale_items.total_price) as total_sales')
             )
-            ->whereBetween(DB::raw('DATE(COALESCE(sale_date, created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
+            ->whereBetween(DB::raw('DATE(COALESCE(sales.sale_date, sales.created_at))'), [$startDate->toDateString(), $endDate->toDateString()])
             ->groupBy('sale_day')
             ->get()
             ->keyBy('sale_day');
