@@ -7,7 +7,7 @@ return [
     'company_email' => env('APP_SETTINGS_COMPANY_EMAIL', 'contact@example.com'),
     'company_logo_url' => env('APP_SETTINGS_COMPANY_LOGO_URL', null), // URL to a logo image
 
-    'currency_symbol' => env('APP_SETTINGS_CURRENCY_SYMBOL', 'SDG'),
+    'currency_symbol' => env('APP_SETTINGS_CURRENCY_SYMBOL', 'OMR'),
     'date_format' => env('APP_SETTINGS_DATE_FORMAT', 'YYYY-MM-DD'), // Example: 'MM/DD/YYYY', 'DD.MM.YYYY'
     'global_low_stock_threshold' => (int) env('APP_SETTINGS_LOW_STOCK_THRESHOLD', 10),
 
@@ -27,11 +27,8 @@ return [
     // 'timezone' => env('APP_TIMEZONE', 'UTC'),
     'payment_methods_ar' => [
         'cash' => 'نقدي',
-        'visa' => 'فيزا',
-        'mastercard' => 'ماستركارد',
         'bank_transfer' => 'تحويل بنكي',
-        'mada' => 'مدى',
-        'store_credit' => 'رصيد متجر',
+        'visa' => 'فيزا',
         'other' => 'أخرى',
     ],
     'invoice_thermal_footer' => 'شكراً لزيارتكم!زورونا مرة أخرى!',

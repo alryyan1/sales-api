@@ -19,7 +19,6 @@ class ProductResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'scientific_name' => $this->scientific_name,
             'sku' => $this->sku,
             'description' => $this->description,
             'image_url' => $this->image_url ? (str_starts_with($this->image_url, 'http') ? $this->image_url : asset($this->image_url)) : null,
@@ -37,23 +36,15 @@ class ProductResource extends JsonResource
 
             'sale_price' => $this->sale_price !== null ? (float) $this->sale_price : null,
             'cost_price' => $this->cost_price !== null ? (float) $this->cost_price : null,
-            'expire_date' => $this->expire_date ? (\Carbon\Carbon::parse($this->expire_date)->format('Y-m-d')) : null,
 
             'latest_cost_per_sellable_unit' => $this->latest_cost_per_sellable_unit ?? null,
-            'preferred_currency' => $this->preferred_currency,
-            'last_purchase_currency' => $this->preferred_currency
-                ?? $this->attributes['last_purchase_currency']
-                ?? optional($this->latestPurchaseItem?->purchase)->currency
-                ?? 'SDG',
             'suggested_sale_price_per_sellable_unit' => $this->suggested_sale_price_per_sellable_unit ?? null,
             'last_sale_price_per_sellable_unit' => $this->last_sale_price_per_sellable_unit ?? null,
             'suggested_sale_price_per_stocking_unit' => $this->suggested_sale_price_per_stocking_unit ?? null,
             'last_sale_price_per_stocking_unit' => $this->last_sale_price_per_stocking_unit ?? null,
-            'earliest_expiry_date' => $this->earliest_expiry_date ?? null,
             'current_stock_quantity' => $this->current_stock_quantity ?? 0,
             'total_items_purchased' => $this->total_items_purchased ?? 0,
             'total_items_sold' => $this->total_items_sold ?? 0,
-            'has_expiry_date' => (bool) $this->has_expiry_date,
             'available_batches' => $this->whenLoaded('purchaseItemsWithStock', function () {
                 return PurchaseItemResource::collection($this->purchaseItemsWithStock);
             }),

@@ -92,8 +92,6 @@ class Shift extends Model
      */
     public function calculateStats(): array
     {
-        $bankMethods = ['bank', 'bank_transfer', 'visa', 'bankak'];
-
         // 1. Sales — iterate payments directly (mirrors ShiftResource)
         $salesCash = 0.0;
         $salesBank = 0.0;

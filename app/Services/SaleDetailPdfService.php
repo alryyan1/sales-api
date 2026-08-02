@@ -22,7 +22,7 @@ class SaleDetailPdfService
         $companyName = $settings['company_name'] ?? 'Company';
         $companyAddress = $settings['company_address'] ?? '';
         $companyPhone = $settings['company_phone'] ?? '';
-        $currencySymbol = $settings['currency_symbol'] ?? 'SDG';
+        $currencySymbol = $settings['currency_symbol'] ?? 'OMR';
 
         // Generate PDF
         $renderer = new PdfHeaderRenderer('sale_detail');
@@ -247,13 +247,9 @@ class SaleDetailPdfService
     {
         $labels = [
             'cash' => 'نقدي',
-            'visa' => 'فيزا',
-            'mastercard' => 'ماستركارد',
             'bank_transfer' => 'تحويل بنكي',
-            'mada' => 'مدى',
-            'store_credit' => 'رصيد متجر',
+            'visa' => 'فيزا',
             'other' => 'أخرى',
-            'refund' => 'استرداد',
         ];
         
         return $labels[$method] ?? $method;

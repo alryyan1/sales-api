@@ -11,7 +11,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 /**
  * @property int $id
  * @property string $name
- * @property string|null $scientific_name
  * @property string|null $sku
  * @property string|null $description
  * @property int|null $category_id
@@ -25,7 +24,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property-read \App\Models\Category|null $category
  * @property-read int $calculated_total_stock
  * @property-read int $current_stock_quantity
- * @property-read string|null $earliest_expiry_date
  * @property-read float|null $last_sale_price_per_sellable_unit
  * @property-read float|null $latest_cost_per_sellable_unit
  * @property-read float|null $latest_purchase_cost
@@ -54,7 +52,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereDescription($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereName($value)
- * @method static \Illuminate\Database\Eloquent\Builder|Product whereScientificName($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereSellableUnitId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereSku($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Product whereStockAlertLevel($value)
@@ -89,7 +86,6 @@ class Product extends Model
      */
     protected $fillable = [
         'name',
-        'scientific_name',
         'sku',
         'description',
         'category_id',
@@ -101,11 +97,8 @@ class Product extends Model
         'sellable_unit_id',
         'units_per_stocking_unit',
         'image_url',
-        'has_expiry_date',
         'sale_price',
         'cost_price',
-        'expire_date',
-        'preferred_currency',
     ];
 
     /**
@@ -118,10 +111,8 @@ class Product extends Model
         // 'stock_quantity' => 'integer', // Dropped - now virtual via accessor
         'stock_alert_level' => 'integer', // Cast to integer
         'units_per_stocking_unit' => 'integer', // Cast to integer
-        'has_expiry_date' => 'boolean',
         'sale_price' => 'float',
         'cost_price' => 'float',
-        'expire_date' => 'date',
     ];
 
     /**
@@ -248,12 +239,12 @@ class Product extends Model
     }
 
     /**
-     * Batches (purchase items) for this product, for cost/expiry reference. Ordered by expiry.
+     * Batches (purchase items) for this product, for cost reference.
      * Stock quantity is from product_warehouse only.
      */
     public function purchaseItemsWithStock(): HasMany
     {
-        return $this->hasMany(PurchaseItem::class)->orderBy('expiry_date', 'asc');
+        return $this->hasMany(PurchaseItem::class)->orderBy('created_at', 'asc');
     }
 
     /**
@@ -449,25 +440,6 @@ class Product extends Model
         }
 
         return null;
-    }
-
-    // Accessor to get the earliest expiry date from available stock
-    public function getEarliestExpiryDateAttribute(): ?string
-    {
-        if ($this->expire_date !== null) {
-            return $this->expire_date instanceof \Carbon\Carbon ? $this->expire_date->format('Y-m-d') : $this->expire_date;
-        }
-
-        if (array_key_exists('earliest_expiry_date', $this->attributes)) {
-            return $this->attributes['earliest_expiry_date'];
-        }
-
-        $earliestExpiry = $this->purchaseItems()
-            ->whereNotNull('expiry_date')
-            ->orderBy('expiry_date', 'asc')
-            ->value('expiry_date');
-
-        return $earliestExpiry ? $earliestExpiry->format('Y-m-d') : null;
     }
 
     // Accessor to get current stock quantity (already exists as stock_quantity)

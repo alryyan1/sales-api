@@ -34,10 +34,6 @@ class ProductController extends Controller
 
         // Add subqueries for expensive attributes to avoid N+1 queries
         $query->addSelect([
-            'earliest_expiry_date' => PurchaseItem::selectRaw('MIN(expiry_date)')
-                ->whereColumn('product_id', 'products.id')
-                ->where('is_moved_to_expired', false),
-
             'latest_purchase_cost_raw' => PurchaseItem::select('unit_cost')
                 ->whereColumn('product_id', 'products.id')
                 ->latest('created_at')
@@ -47,12 +43,6 @@ class ProductController extends Controller
                 ->whereColumn('product_id', 'products.id')
                 ->whereNotNull('sale_price')
                 ->latest('created_at')
-                ->limit(1),
-
-            'last_purchase_currency' => PurchaseItem::select('purchases.currency')
-                ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
-                ->whereColumn('purchase_items.product_id', 'products.id')
-                ->latest('purchase_items.created_at')
                 ->limit(1),
         ]);
 
@@ -76,7 +66,6 @@ class ProductController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhere('sku', 'like', "%{$search}%")
-                    ->orWhere('scientific_name', 'like', "%{$search}%")
                     ->orWhere('description', 'like', "%{$search}%");
             });
         }
@@ -149,7 +138,6 @@ class ProductController extends Controller
     {
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
-            'scientific_name' => 'nullable|string|max:255',
             'sku' => 'nullable|string|max:100|unique:products,sku',
             'description' => 'nullable|string|max:65535',
             'image_url' => 'nullable|string|max:500',
@@ -159,10 +147,8 @@ class ProductController extends Controller
             'stocking_unit_id' => 'nullable|exists:units,id',
             'sellable_unit_id' => 'nullable|exists:units,id',
             'units_per_stocking_unit' => 'nullable|integer|min:1',
-            'has_expiry_date' => 'nullable|boolean',
             'sale_price' => 'nullable|numeric|min:0',
             'cost_price' => 'nullable|numeric|min:0',
-            'expire_date' => 'nullable|date',
         ]);
 
         $product = Product::create($validatedData);
@@ -186,7 +172,6 @@ class ProductController extends Controller
     {
         $validatedData = $request->validate([
             'name' => 'sometimes|required|string|max:255',
-            'scientific_name' => 'sometimes|nullable|string|max:255',
             'sku' => 'sometimes|nullable|string|max:100|unique:products,sku,' . $product->id, // Allow SKU update, ignore current ID
             'description' => 'sometimes|nullable|string|max:65535',
             'image_url' => 'sometimes|nullable|string|max:500',
@@ -195,11 +180,8 @@ class ProductController extends Controller
             'stocking_unit_id' => 'sometimes|nullable|exists:units,id',
             'sellable_unit_id' => 'sometimes|nullable|exists:units,id',
             'units_per_stocking_unit' => 'sometimes|nullable|integer|min:1',
-            'has_expiry_date' => 'sometimes|boolean',
             'sale_price' => 'sometimes|nullable|numeric|min:0',
             'cost_price' => 'sometimes|nullable|numeric|min:0',
-            'expire_date' => 'sometimes|nullable|date',
-            'preferred_currency' => 'sometimes|nullable|in:SDG,USD',
         ]);
 
         // Important Note on stock_quantity:
@@ -270,13 +252,12 @@ class ProductController extends Controller
 
         $warehouseId = $request->input('warehouse_id');
 
-        $query = Product::select('products.*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem.purchase:id,currency']);
+        $query = Product::select('products.*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem']);
 
         if (!empty($search)) {
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('sku', 'like', "%{$search}%")
-                    ->orWhere('scientific_name', 'like', "%{$search}%");
+                    ->orWhere('sku', 'like', "%{$search}%");
             });
         }
 
@@ -309,7 +290,7 @@ class ProductController extends Controller
         ]);
 
         $products = Product::whereIn('id', $validated['ids'])
-            ->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem.purchase:id,currency', 'warehouses'])
+            ->with(['category', 'stockingUnit', 'sellableUnit', 'latestPurchaseItem', 'warehouses'])
             ->withSum('purchaseItems', 'quantity')
             ->withSum('saleItems', 'quantity')
             ->get();
@@ -321,8 +302,7 @@ class ProductController extends Controller
     {
         $warehouseId = $request->query('warehouse_id');
 
-        $query = PurchaseItem::where('product_id', $product->id)
-            ->where('is_moved_to_expired', false);
+        $query = PurchaseItem::where('product_id', $product->id);
 
         if ($warehouseId) {
             $query->whereHas('purchase', function ($q) use ($warehouseId) {
@@ -330,9 +310,8 @@ class ProductController extends Controller
             });
         }
 
-        $batches = $query->orderBy('expiry_date', 'asc')
-            ->orderBy('id', 'asc')
-            ->select(['id', 'batch_number', 'expiry_date', 'sale_price', 'unit_cost'])
+        $batches = $query->orderBy('id', 'asc')
+            ->select(['id', 'batch_number', 'sale_price', 'unit_cost'])
             ->get();
 
         return response()->json(['data' => $batches]);
@@ -675,7 +654,7 @@ class ProductController extends Controller
             $collectionName = $settings['firebase_collection_name'] ?? 'none';
         }
 
-        // Load products with category; accessors handle stock/price/cost/expiry
+        // Load products with category; accessors handle stock/price/cost
         $products = Product::with('category')->get();
 
         $syncedCount = 0;
@@ -694,14 +673,12 @@ class ProductController extends Controller
                         'fields' => [
                             'id'              => ['integerValue'   => (string) $product->id],
                             'name'            => ['stringValue'    => (string) ($product->name ?? '')],
-                            'scientific_name' => ['stringValue'    => (string) ($product->scientific_name ?? '')],
                             'sku'             => ['stringValue'    => (string) ($product->sku ?? '')],
                             'description'     => ['stringValue'    => (string) ($product->description ?? '')],
                             'category_name'   => ['stringValue'    => (string) ($product->category?->name ?? $product->category_name ?? '')],
                             'stock_quantity'  => ['integerValue'   => (string) ($product->current_stock_quantity ?? $product->stock_quantity ?? 0)],
                             'sale_price'      => ['doubleValue'    => (float) ($product->suggested_sale_price_per_sellable_unit ?? 0)],
                             'cost'            => ['doubleValue'    => (float) ($product->latest_cost_per_sellable_unit ?? 0)],
-                            'expiry_date'     => ['stringValue'    => (string) ($product->earliest_expiry_date ?? '')],
                             'updated_at'      => ['timestampValue' => $now],
                             'synced_at'       => ['timestampValue' => $now],
                         ],

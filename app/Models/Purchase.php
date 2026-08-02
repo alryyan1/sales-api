@@ -71,7 +71,6 @@ class Purchase extends Model
         'status',
         'total_amount', // Although calculated, might be set initially or updated
         'notes',
-        'currency',
         'tax_amount',
         'customs_amount',
         'tax_details',

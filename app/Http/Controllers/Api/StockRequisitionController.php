@@ -151,7 +151,7 @@ class StockRequisitionController extends Controller
             'requesterUser:id,name,email',
             'approvedByUser:id,name,email',
             'items.product:id,name,sku,stock_quantity', // Include current total stock for reference
-            'items.issuedFromPurchaseItemBatch:id,batch_number,expiry_date', // Batch it was issued from
+            'items.issuedFromPurchaseItemBatch:id,batch_number', // Batch it was issued from
         ]);
         return new StockRequisitionResource($stockRequisition);
     }

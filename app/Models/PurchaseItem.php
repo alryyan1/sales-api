@@ -16,7 +16,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @property string $total_cost
  * @property string|null $sale_price
  * @property string|null $sale_price_stocking_unit
- * @property \Illuminate\Support\Carbon|null $expiry_date
  * @property float|null $cost_per_sellable_unit
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
@@ -29,7 +28,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereBatchNumber($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereCostPerSellableUnit($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereCreatedAt($value)
- * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereExpiryDate($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem whereProductId($value)
  * @method static \Illuminate\Database\Eloquent\Builder|PurchaseItem wherePurchaseId($value)
@@ -55,7 +53,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo; // Import relationship typ
  *     @OA\Property(property="total_cost", type="number", format="float", example=500.00),
  *     @OA\Property(property="sale_price", type="number", format="float", example=15.00),
  *     @OA\Property(property="sale_price_stocking_unit", type="number", format="float", example=150.00),
- *     @OA\Property(property="expiry_date", type="string", format="date", example="2024-12-31"),
  *     @OA\Property(property="cost_per_sellable_unit", type="number", format="float", example=1.00),
  *     @OA\Property(property="created_at", type="string", format="date-time"),
  *     @OA\Property(property="updated_at", type="string", format="date-time"),
@@ -75,8 +72,6 @@ class PurchaseItem extends Model
         'sale_price',               // Intended sale price PER SELLABLE UNIT for this batch (required)
         'sale_price_stocking_unit', // Optional: Intended sale price per STOCKING UNIT
         'cost_per_sellable_unit',   // Cost per sellable unit (calculated)
-        'expiry_date',
-        'is_moved_to_expired',
     ];
 
     protected $casts = [
@@ -86,8 +81,6 @@ class PurchaseItem extends Model
         'sale_price' => 'decimal:2',
         'sale_price_stocking_unit' => 'decimal:2',
         'cost_per_sellable_unit' => 'decimal:2',
-        'expiry_date' => 'date',
-        'is_moved_to_expired' => 'boolean',
     ];
     /**
      * Get the parent purchase record.

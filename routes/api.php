@@ -5,7 +5,6 @@ use App\Http\Controllers\Api\{
   AuthController,
   BackupController,
   ExpenseCategoryController,
-  PackageController,
   SystemController,
   ExpenseController,
   CategoryController,
@@ -55,9 +54,6 @@ Route::post('/whatsapp-cloud/webhook', [WhatsAppCloudApiController::class, 'webh
 
 // --- Public Settings (read-only, no auth required) ---
 Route::get('admin/settings', [SettingController::class, 'index'])->name('settings.index.public');
-
-// --- Public PDF Routes (token validated in controller) ---
-Route::get('/reports/moved-expired-pdf', [ReportController::class, 'movedExpiredPdf'])->name('api.reports.moved-expired-pdf');
 
 // --- Public Firestore Sync Routes (called by mobile app, no auth required) ---
 Route::post('/clients/sync-to-firestore', [ClientController::class, 'syncToFirestore'])->name('api.clients.sync-to-firestore');
@@ -129,11 +125,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/purchases', [ReportController::class, 'purchasesReport'])->name('purchases');
     Route::get('/inventory', [ReportController::class, 'inventoryReport'])->name('inventory');
     Route::get('/profit-loss', [ReportController::class, 'profitLossReport'])->name('profit-loss');
-    Route::get('/near-expiry', [ReportController::class, 'nearExpiryReport'])->name('near-expiry');
-    Route::get('/expired-products', [ReportController::class, 'expiredProductsReport'])->name('expired-products');
-    Route::post('/expired-products/{id}/move', [ReportController::class, 'moveExpiredProduct'])->name('expired-products.move');
-    Route::get('/moved-expired', [ReportController::class, 'movedExpiredProductsReport'])->name('moved-expired');
-    Route::get('/expiry-counts', [ReportController::class, 'expiryCountsSummary'])->name('expiry-counts');
     Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue');
     Route::get('/monthly-revenue-excel', [ReportController::class, 'monthlyRevenueExcel'])->name('monthly-revenue-excel');
     Route::get('/monthly-purchases', [ReportController::class, 'monthlyPurchasesReport'])->name('monthly-purchases');
@@ -142,7 +133,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // Statistical Dashboard Routes
     Route::get('/stats/best-selling', [ReportController::class, 'bestSelling'])->name('stats.best-selling');
     Route::get('/stats/stagnant', [ReportController::class, 'stagnant'])->name('stats.stagnant');
-    Route::get('/stats/expiring', [ReportController::class, 'expiring'])->name('stats.expiring');
 
     Route::get('/daily-sales-pdf', [ReportController::class, 'dailySalesPdf'])->name('daily-sales-pdf');
     Route::get('/sales-pdf', [ReportController::class, 'downloadSalesReportPDF'])->name('sales-pdf');
@@ -219,7 +209,6 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::post('/products/bulk-update-sale-price', [ProductController::class, 'bulkUpdateSalePrice']);
   Route::post('/products/{product}/clear-sale-price', [ProductController::class, 'clearSalePrice']);
   Route::apiResource('products', ProductController::class);
-  Route::apiResource('packages', PackageController::class);
 
   // -- Warehouses Management --
   Route::apiResource('warehouses', WarehouseController::class);

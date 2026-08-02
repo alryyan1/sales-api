@@ -32,10 +32,8 @@ class PurchaseItemResource extends JsonResource
             'total_cost' => $this->total_cost,
             'sale_price' => $this->sale_price, // Intended sale price per sellable unit for this batch
             'sale_price_stocking_unit' => $this->sale_price_stocking_unit,
-            'expiry_date' => $this->expiry_date ? $this->expiry_date->format('Y-m-d') : null,
             'purchase_id' => $this->purchase_id,
             'purchase_date' => $this->whenLoaded('purchase', fn() => $this->purchase?->purchase_date),
-            'purchase_currency' => $this->whenLoaded('purchase', fn() => $this->purchase?->currency ?? 'SDG'),
             'supplier_name' => $this->whenLoaded('purchase', fn() => $this->purchase?->supplier?->name),
             'created_at' => $this->created_at?->toISOString(),
         ];

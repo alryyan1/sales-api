@@ -51,8 +51,6 @@ class ImportPharmacyInventory extends Command
             }
             $dataRows[] = [
                 'name'            => $name,
-                'scientific_name' => trim((string) ($sheet->getCell("D{$r}")->getValue() ?? '')),
-                'expiry_raw'      => trim((string) ($sheet->getCell("G{$r}")->getValue() ?? '')),
                 'cost_price'      => $this->toFloat($sheet->getCell("I{$r}")->getValue()),
                 'sale_price'      => $this->toFloat($sheet->getCell("K{$r}")->getValue()),
                 'quantity'        => $qty,
@@ -64,9 +62,9 @@ class ImportPharmacyInventory extends Command
 
         if ($dryRun) {
             $this->table(
-                ['الاسم', 'الاسم العلمي', 'الانتهاء', 'التكلفة', 'البيع', 'الكمية', 'الباركود'],
+                ['الاسم', 'التكلفة', 'البيع', 'الكمية', 'الباركود'],
                 array_slice(array_map(fn($r) => [
-                    $r['name'], $r['scientific_name'], $r['expiry_raw'],
+                    $r['name'],
                     $r['cost_price'], $r['sale_price'], $r['quantity'], $r['barcode'],
                 ], $dataRows), 0, 20)
             );
@@ -146,19 +144,15 @@ class ImportPharmacyInventory extends Command
                 }
 
                 if (!$product) {
-                    $expiry  = $this->parseExpiry($row['expiry_raw']);
                     $product = Product::create([
                         'name'                    => $row['name'],
-                        'scientific_name'         => $row['scientific_name'] ?: null,
                         'sku'                     => $sku,
                         'stocking_unit_id'        => $unit->id,
                         'sellable_unit_id'        => $unit->id,
                         'units_per_stocking_unit' => 1,
                         'stock_alert_level'       => 10,
-                        'has_expiry_date'         => $expiry !== null,
                         'sale_price'              => $row['sale_price'] ?: null,
                         'cost_price'              => $row['cost_price'] ?: null,
-                        'expire_date'             => $expiry,
                     ]);
                     $productMap[$nameKey] = $product;
                     if ($sku) $skuMap[$sku] = $product;
@@ -247,21 +241,6 @@ class ImportPharmacyInventory extends Command
         if ($v === null || $v === '') return 0.0;
         $s = str_replace([',', ' '], '', (string) $v);
         return is_numeric($s) ? (float) $s : 0.0;
-    }
-
-    private function parseExpiry(string $raw): ?string
-    {
-        if (empty($raw)) return null;
-        $norm  = str_replace(['\\', '_', '-', '/'], '|', $raw);
-        $parts = explode('|', $norm);
-        if (count($parts) === 2) {
-            $m = (int) $parts[0];
-            $y = (int) $parts[1];
-            if ($m >= 1 && $m <= 12 && $y >= 2020 && $y <= 2040) {
-                return sprintf('%04d-%02d-01', $y, $m);
-            }
-        }
-        return null;
     }
 
     private function extractSku(string $raw): ?string

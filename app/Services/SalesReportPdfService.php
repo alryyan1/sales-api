@@ -37,7 +37,7 @@ class SalesReportPdfService
     ): string {
         $settings = (new SettingsService())->getAll();
         $this->companyName    = $settings['company_name']    ?? '';
-        $this->currencySymbol = $settings['currency_symbol'] ?? 'SAR';
+        $this->currencySymbol = $settings['currency_symbol'] ?? 'OMR';
         $this->renderer       = new PdfHeaderRenderer('sales_report');
 
         $pdf = $this->makePdf();
@@ -150,15 +150,14 @@ class SalesReportPdfService
     {
         $this->sectionTitle($pdf, 'ملخص مالي');
 
-        // RTL columns: الخصم | الإجمالي | أوكاش | فوري | بنكك | نقدي | البيان
+        // RTL columns: الخصم | الإجمالي | فيزا | تحويل بنكي | نقدي | البيان
         $cols = [
             ['w' => 20, 't' => 'الخصم'],
             ['w' => 26, 't' => 'الإجمالي'],
-            ['w' => 22, 't' => 'أوكاش'],
-            ['w' => 22, 't' => 'فوري'],
-            ['w' => 22, 't' => 'بنكك'],
-            ['w' => 22, 't' => 'نقدي'],
-            ['w' => 48, 't' => 'البيان'],
+            ['w' => 24, 't' => 'فيزا'],
+            ['w' => 24, 't' => 'تحويل بنكي'],
+            ['w' => 24, 't' => 'نقدي'],
+            ['w' => 58, 't' => 'البيان'],
         ];
 
         // Header
@@ -168,62 +167,53 @@ class SalesReportPdfService
         }
         $pdf->Ln();
 
-        // Calculations
-        $revCash   = (float)($paymentMethods['cash']          ?? 0);
-        $revBank   = (float)($paymentMethods['bankak']        ?? 0)
-                   + (float)($paymentMethods['visa']          ?? 0)
-                   + (float)($paymentMethods['bank_transfer'] ?? 0)
-                   + (float)($paymentMethods['bank']          ?? 0);
-        $revFawry  = (float)($paymentMethods['fawry']         ?? 0);
-        $revOcash  = (float)($paymentMethods['ocash']         ?? 0);
-        $revTotal  = array_sum($paymentMethods);
+        // Calculations (totals include 'other' amounts even though it has no dedicated column)
+        $revCash    = (float)($paymentMethods['cash']          ?? 0);
+        $revBank    = (float)($paymentMethods['bank_transfer'] ?? 0);
+        $revVisa    = (float)($paymentMethods['visa']          ?? 0);
+        $revTotal   = array_sum($paymentMethods);
 
-        $eb        = $stats['expenses_breakdown'] ?? [];
-        $expCash   = (float)($eb['cash']   ?? 0);
-        $expBank   = (float)($eb['bankak'] ?? 0) + (float)($eb['bank'] ?? 0);
-        $expFawry  = (float)($eb['fawry']  ?? 0);
-        $expOcash  = (float)($eb['ocash']  ?? 0);
-        $expTotal  = (float)($stats['totalExpenses'] ?? 0);
+        $eb         = $stats['expenses_breakdown'] ?? [];
+        $expCash    = (float)($eb['cash']          ?? 0);
+        $expBank    = (float)($eb['bank_transfer'] ?? 0);
+        $expVisa    = (float)($eb['visa']          ?? 0);
+        $expTotal   = (float)($stats['totalExpenses'] ?? 0);
 
-        $rb        = $stats['returns_breakdown'] ?? [];
-        $retCash   = (float)($rb['cash']   ?? 0);
-        $retBank   = (float)($rb['bankak'] ?? 0);
-        $retFawry  = (float)($rb['fawry']  ?? 0);
-        $retOcash  = (float)($rb['ocash']  ?? 0);
-        $retTotal  = (float)($stats['totalReturns'] ?? 0);
+        $rb         = $stats['returns_breakdown'] ?? [];
+        $retCash    = (float)($rb['cash']          ?? 0);
+        $retBank    = (float)($rb['bank_transfer'] ?? 0);
+        $retVisa    = (float)($rb['visa']          ?? 0);
+        $retTotal   = (float)($stats['totalReturns'] ?? 0);
 
-        $netCash   = $revCash  - $expCash  - $retCash;
-        $netBank   = $revBank  - $expBank  - $retBank;
-        $netFawry  = $revFawry - $expFawry - $retFawry;
-        $netOcash  = $revOcash - $expOcash - $retOcash;
-        $netTotal  = $revTotal - $expTotal - $retTotal;
+        $netCash    = $revCash  - $expCash  - $retCash;
+        $netBank    = $revBank  - $expBank  - $retBank;
+        $netVisa    = $revVisa  - $expVisa  - $retVisa;
+        $netTotal   = $revTotal - $expTotal - $retTotal;
 
         $rows = [
-            ['label' => 'الإيرادات',        'cash' => $revCash,  'bank' => $revBank,  'fawry' => $revFawry,  'ocash' => $revOcash,  'total' => $revTotal,  'disc' => $totalDiscount],
-            ['label' => 'المصروفات',         'cash' => $expCash,  'bank' => $expBank,  'fawry' => $expFawry,  'ocash' => $expOcash,  'total' => $expTotal,  'disc' => 0],
-            ['label' => 'مردودات المبيعات', 'cash' => $retCash,  'bank' => $retBank,  'fawry' => $retFawry,  'ocash' => $retOcash,  'total' => $retTotal,  'disc' => 0],
+            ['label' => 'الإيرادات',        'cash' => $revCash,  'bank' => $revBank,  'visa' => $revVisa,  'total' => $revTotal,  'disc' => $totalDiscount],
+            ['label' => 'المصروفات',         'cash' => $expCash,  'bank' => $expBank,  'visa' => $expVisa,  'total' => $expTotal,  'disc' => 0],
+            ['label' => 'مردودات المبيعات', 'cash' => $retCash,  'bank' => $retBank,  'visa' => $retVisa,  'total' => $retTotal,  'disc' => 0],
         ];
 
         $pdf->SetFont(self::FONT, '', 8);
         foreach ($rows as $row) {
             $pdf->Cell($cols[0]['w'], 6, $row['disc'] > 0 ? $this->fmt($row['disc']) : '—', 1, 0, 'C');
-            $pdf->Cell($cols[1]['w'], 6, $this->fmt($row['total']),  1, 0, 'C');
-            $pdf->Cell($cols[2]['w'], 6, $this->fmt($row['ocash']),  1, 0, 'C');
-            $pdf->Cell($cols[3]['w'], 6, $this->fmt($row['fawry']),  1, 0, 'C');
-            $pdf->Cell($cols[4]['w'], 6, $this->fmt($row['bank']),   1, 0, 'C');
-            $pdf->Cell($cols[5]['w'], 6, $this->fmt($row['cash']),   1, 0, 'C');
-            $pdf->Cell($cols[6]['w'], 6, $row['label'],              1, 1, 'R');
+            $pdf->Cell($cols[1]['w'], 6, $this->fmt($row['total']), 1, 0, 'C');
+            $pdf->Cell($cols[2]['w'], 6, $this->fmt($row['visa']),  1, 0, 'C');
+            $pdf->Cell($cols[3]['w'], 6, $this->fmt($row['bank']),  1, 0, 'C');
+            $pdf->Cell($cols[4]['w'], 6, $this->fmt($row['cash']),  1, 0, 'C');
+            $pdf->Cell($cols[5]['w'], 6, $row['label'],             1, 1, 'R');
         }
 
         // Net row (bold)
         $pdf->SetFont(self::FONT, 'B', 8);
         $pdf->Cell($cols[0]['w'], 6, '—',                   1, 0, 'C');
         $pdf->Cell($cols[1]['w'], 6, $this->fmt($netTotal), 1, 0, 'C');
-        $pdf->Cell($cols[2]['w'], 6, $this->fmt($netOcash), 1, 0, 'C');
-        $pdf->Cell($cols[3]['w'], 6, $this->fmt($netFawry), 1, 0, 'C');
-        $pdf->Cell($cols[4]['w'], 6, $this->fmt($netBank),  1, 0, 'C');
-        $pdf->Cell($cols[5]['w'], 6, $this->fmt($netCash),  1, 0, 'C');
-        $pdf->Cell($cols[6]['w'], 6, 'الصافي',              1, 1, 'R');
+        $pdf->Cell($cols[2]['w'], 6, $this->fmt($netVisa),  1, 0, 'C');
+        $pdf->Cell($cols[3]['w'], 6, $this->fmt($netBank),  1, 0, 'C');
+        $pdf->Cell($cols[4]['w'], 6, $this->fmt($netCash),  1, 0, 'C');
+        $pdf->Cell($cols[5]['w'], 6, 'الصافي',              1, 1, 'R');
 
         $pdf->Ln(4);
     }
@@ -357,9 +347,8 @@ class SalesReportPdfService
 
     private function methodLabel(string $m): string
     {
-        return ['cash' => 'نقدي', 'bankak' => 'بنكك', 'bank' => 'بنك',
-                'fawry' => 'فوري', 'ocash' => 'أوكاش', 'visa' => 'فيزا',
-                'bank_transfer' => 'بنك', 'refund' => 'مرتجع'][$m] ?? $m;
+        return ['cash' => 'نقدي', 'bank_transfer' => 'تحويل بنكي',
+                'visa' => 'فيزا', 'other' => 'أخرى'][$m] ?? $m;
     }
 
     private function getSaleTotalAmount(Sale $sale): float

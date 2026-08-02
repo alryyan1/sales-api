@@ -114,13 +114,13 @@ class TaxPdfService
         // Taxes Row
         $this->pdf->Cell($pageWidth * 0.4, 10, 'إجمالي الضرائب:', 1, 0, 'C', true);
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->tax_amount, 2) . ' ' . $purchase->currency, 1, 1, 'R');
+        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->tax_amount, 2) . ' OMR', 1, 1, 'R');
 
         // Customs Row
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_BODY);
         $this->pdf->Cell($pageWidth * 0.4, 10, 'إجمالي الجمارك:', 1, 0, 'C', true);
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->customs_amount, 2) . ' ' . $purchase->currency, 1, 1, 'R');
+        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->customs_amount, 2) . ' OMR', 1, 1, 'R');
 
         // Combined Total
         $total = (float)$purchase->tax_amount + (float)$purchase->customs_amount;
@@ -128,7 +128,7 @@ class TaxPdfService
         $this->pdf->SetFillColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
         $this->pdf->SetTextColor(255, 255, 255);
         $this->pdf->Cell($pageWidth * 0.4, 10, 'الإجمالي الكلي:', 1, 0, 'C', true);
-        $this->pdf->Cell($pageWidth * 0.6, 10, number_format($total, 2) . ' ' . $purchase->currency, 1, 1, 'R', true);
+        $this->pdf->Cell($pageWidth * 0.6, 10, number_format($total, 2) . ' OMR', 1, 1, 'R', true);
 
         $this->pdf->SetTextColor(0, 0, 0);
         $this->pdf->Ln(10);

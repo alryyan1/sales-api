@@ -120,7 +120,6 @@ class LifeCareProductsSeeder extends Seeder
                         'units_per_stocking_unit' => 1,
                         'stock_quantity' => 0, // Will be updated by Purchase if system has observers, else set explicitly
                         'stock_alert_level' => 5,
-                        'has_expiry_date' => false,
                     ]
                 );
 
@@ -135,7 +134,6 @@ class LifeCareProductsSeeder extends Seeder
                     'total_cost' => $totalCost,
                     'sale_price' => $item['price'] * 1.3, // Example markup 30%
                     'cost_per_sellable_unit' => $item['price'],
-                    'expiry_date' => Carbon::now()->addYears(2), // Default expiry
                 ]);
 
                 // Update product_warehouse (SSOT)

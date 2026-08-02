@@ -18,7 +18,6 @@ use App\Services\InventoryPdfService;
 use App\Services\SalesReportPdfService;
 use App\Services\ShiftCostPdfService;
 use App\Services\ShiftSalesReturnPdfService;
-use App\Services\MovedExpiredProductsPdfService;
 use Arr;
 use DB;
 use Carbon\Carbon; // Ensure correct Carbon namespace is used
@@ -200,8 +199,7 @@ class ReportController extends Controller
         if (filter_var($validated['include_batches'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
             $query->with([
                 'purchaseItems' => function ($query) {
-                    $query->select(['id', 'product_id', 'batch_number', 'expiry_date', 'unit_cost', 'sale_price'])
-                        ->orderBy('expiry_date', 'asc')
+                    $query->select(['id', 'product_id', 'batch_number', 'unit_cost', 'sale_price'])
                         ->orderBy('created_at', 'asc');
                 }
             ]);
@@ -244,322 +242,6 @@ class ReportController extends Controller
         // If you added accessors like latest_purchase_cost to Product model and resource, they'll be included.
         return ProductResource::collection($products);
     }
-    /**
-     * Fetch products/batches nearing their expiry date.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
-     */
-    public function nearExpiryReport(Request $request)
-    {
-        // --- Input Validation ---
-        $validated = $request->validate([
-            'days_threshold' => 'nullable|integer|min:1|max:730', // e.g., 1 to 730 days (2 years)
-            'product_id' => 'nullable|integer|exists:products,id',
-            // 'category_id' => 'nullable|integer|exists:categories,id', // If categories implemented
-            'per_page' => 'nullable|integer|min:5|max:100',
-            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'purchase_items.created_at'])],
-            'sort_direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
-        ]);
-
-        // --- Authorization Check ---
-        // if ($request->user()->cannot('viewNearExpiryReport')) { // Define this permission
-        //     abort(403, 'Unauthorized action.');
-        // }
-
-        $daysThreshold = $validated['days_threshold'] ?? 30; // Default to 30 days
-        $today = Carbon::today()->toDateString(); // Get today's date as YYYY-MM-DD string
-        $expiryCutoffDate = Carbon::today()->addDays($daysThreshold)->toDateString(); // Get cutoff date as string
-
-        // --- Query Building ---
-        $query = PurchaseItem::query()
-            ->with(['product:id,name,sku'])
-            ->where('is_moved_to_expired', false)
-            ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
-            ->whereBetween('expiry_date', [$today, $expiryCutoffDate]);
-
-        // --- Apply Filters ---
-        if (!empty($validated['product_id'])) {
-            $query->where('product_id', $validated['product_id']);
-        }
-        // if (!empty($validated['category_id'])) {
-        //     $query->whereHas('product.category', function ($q) use ($validated) {
-        //         $q->where('categories.id', $validated['category_id']); // Ensure table name for ambiguity
-        //     });
-        // }
-
-        // --- Sorting ---
-        $sortBy = $validated['sort_by'] ?? 'expiry_date'; // Default sort by expiry date (soonest first)
-        $sortDirection = $validated['sort_direction'] ?? 'asc';
-
-        if ($sortBy === 'products.name') {
-            // If sorting by product name, we need to join the products table
-            $query->join('products', 'purchase_items.product_id', '=', 'products.id')
-                ->orderBy('products.name', $sortDirection)
-                ->select('purchase_items.*'); // Select all columns from purchase_items to avoid ambiguity
-        } else {
-            $query->orderBy($sortBy, $sortDirection);
-        }
-        // Add a secondary sort for consistency if primary sort values are the same
-        if ($sortBy !== 'purchase_items.created_at' && $sortBy !== 'id') { // Avoid re-adding if already primary
-            $query->orderBy('purchase_items.created_at', 'asc')->orderBy('purchase_items.id', 'asc');
-        }
-
-
-        // --- Pagination ---
-        $perPage = $validated['per_page'] ?? 25;
-        $nearExpiryItems = $query->paginate($perPage);
-
-        // --- Return Paginated Resource Collection ---
-        // PurchaseItemResource should already format expiry_date and include product info (name, sku)
-        return PurchaseItemResource::collection($nearExpiryItems);
-    }
-
-    /**
-     * Fetch products/batches that are already expired.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
-     */
-    public function expiredProductsReport(Request $request)
-    {
-        // --- Input Validation ---
-        $validated = $request->validate([
-            'product_id' => 'nullable|integer|exists:products,id',
-            'per_page' => 'nullable|integer|min:5|max:100',
-            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'purchase_items.created_at'])],
-            'sort_direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
-        ]);
-
-        $today = Carbon::today()->toDateString();
-
-        // --- Query Building ---
-        $query = PurchaseItem::query()
-            ->with(['product:id,name,sku'])
-            ->where('is_moved_to_expired', false)
-            ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
-            ->where('expiry_date', '<', $today);
-
-        // --- Apply Filters ---
-        if (!empty($validated['product_id'])) {
-            $query->where('product_id', $validated['product_id']);
-        }
-
-        // --- Sorting ---
-        $sortBy = $validated['sort_by'] ?? 'expiry_date';
-        $sortDirection = $validated['sort_direction'] ?? 'asc';
-
-        if ($sortBy === 'products.name') {
-            $query->join('products', 'purchase_items.product_id', '=', 'products.id')
-                ->orderBy('products.name', $sortDirection)
-                ->select('purchase_items.*');
-        } else {
-            $query->orderBy($sortBy, $sortDirection);
-        }
-
-        if ($sortBy !== 'purchase_items.created_at' && $sortBy !== 'id') {
-            $query->orderBy('purchase_items.created_at', 'asc')->orderBy('purchase_items.id', 'asc');
-        }
-
-        // --- Pagination ---
-        $perPage = $validated['per_page'] ?? 25;
-        $expiredItems = $query->paginate($perPage);
-
-        // --- Return Paginated Resource Collection ---
-        return PurchaseItemResource::collection($expiredItems);
-    }
-
-    /**
-     * Get counts of near-expiring and expired products for badge display.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function expiryCountsSummary(Request $request)
-    {
-        // --- Input Validation ---
-        $validated = $request->validate([
-            'days_threshold' => 'nullable|integer|min:1|max:730',
-        ]);
-
-        $daysThreshold = $validated['days_threshold'] ?? 30;
-        $today = Carbon::today()->toDateString();
-        $expiryCutoffDate = Carbon::today()->addDays($daysThreshold)->toDateString();
-
-        // Count near-expiring products (between today and cutoff date)
-        $nearExpiringCount = PurchaseItem::query()
-            ->where('is_moved_to_expired', false)
-            ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
-            ->whereBetween('expiry_date', [$today, $expiryCutoffDate])
-            ->distinct('product_id')
-            ->count('product_id');
-
-        // Count expired products (before today)
-        $expiredCount = PurchaseItem::query()
-            ->where('is_moved_to_expired', false)
-            ->whereNotNull('expiry_date')
-            ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
-            ->where('expiry_date', '<', $today)
-            ->distinct('product_id')
-            ->count('product_id');
-
-        return response()->json([
-            'near_expiring_count' => $nearExpiringCount,
-            'expired_count' => $expiredCount,
-            'days_threshold' => $daysThreshold,
-        ]);
-    }
-
-    /**
-     * Fetch products that have been moved to expired (is_moved_to_expired = true).
-     */
-    public function movedExpiredProductsReport(Request $request)
-    {
-        $validated = $request->validate([
-            'product_id' => 'nullable|integer|exists:products,id',
-            'per_page' => 'nullable|integer|min:5|max:100',
-            'sort_by' => ['nullable', 'string', Rule::in(['expiry_date', 'products.name', 'purchase_items.created_at'])],
-            'sort_direction' => ['nullable', 'string', Rule::in(['asc', 'desc'])],
-        ]);
-
-        $query = PurchaseItem::query()
-            ->with(['product:id,name,sku'])
-            ->where('is_moved_to_expired', true);
-
-        if (!empty($validated['product_id'])) {
-            $query->where('product_id', $validated['product_id']);
-        }
-
-        $sortBy = $validated['sort_by'] ?? 'expiry_date';
-        $sortDirection = $validated['sort_direction'] ?? 'desc';
-
-        if ($sortBy === 'products.name') {
-            $query->join('products', 'purchase_items.product_id', '=', 'products.id')
-                ->orderBy('products.name', $sortDirection)
-                ->select('purchase_items.*');
-        } else {
-            $query->orderBy($sortBy, $sortDirection);
-        }
-
-        $perPage = $validated['per_page'] ?? 25;
-        $movedItems = $query->paginate($perPage);
-
-        return PurchaseItemResource::collection($movedItems);
-    }
-
-    /**
-     * Generate PDF for moved expired products
-     */
-    public function movedExpiredPdf(Request $request, MovedExpiredProductsPdfService $pdfService)
-    {
-        // Require role permissions check if needed, same as movedExpiredProductsReport
-
-        // Handle token from query string (used when opening PDF in a new window)
-        if ($request->has('token')) {
-            $request->headers->set('Authorization', 'Bearer ' . $request->query('token'));
-            // Authenticate the user for this request using the token
-            if (auth('sanctum')->check()) {
-                auth()->setUser(auth('sanctum')->user());
-            } else {
-                return response()->json(['message' => 'Unauthenticated.'], 401);
-            }
-        }
-
-        $filters = $request->only(['product_id', 'search', 'sort_by', 'sort_direction']);
-
-        try {
-            $pdfContent = $pdfService->generatePdf($filters);
-
-            return response($pdfContent)
-                ->header('Content-Type', 'application/pdf')
-                ->header('Content-Disposition', 'inline; filename="moved_expired_products_report.pdf"');
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Failed to generate moved expired products PDF: ' . $e->getMessage());
-            return response()->json(['message' => 'Failed to generate PDF report'], 500);
-        }
-    }
-
-    /**
-     * Move an expired product batch off the shelves by updating stock levels.
-     */
-    public function moveExpiredProduct($id, Request $request)
-    {
-        try {
-            DB::beginTransaction();
-
-            $purchaseItem = PurchaseItem::with('product')->findOrFail($id);
-
-            // Validation: Ensure it's not already moved
-            if ($purchaseItem->is_moved_to_expired) {
-                return response()->json(['message' => 'Product batch has already been moved to expired.'], 400);
-            }
-
-            // Mark as moved
-            $purchaseItem->is_moved_to_expired = true;
-            $purchaseItem->save();
-
-            // Deduct from ALL warehouses (or specific one, depending on how stock is currently managed)
-            // Assuming we take it evenly out of wherever the stock currently resides up to the remaining items in batch.
-            $product = clone $purchaseItem->product;
-
-            // For simplicity and since we don't know EXACTLY which warehouse the batch is in, 
-            // we will deduct product_warehouse quantity, starting from the first warehouse that has stock,
-            // up to the total amount of this batch, or simply creating an adjustment 
-            // based on what's available globally if we can't map batches to specific warehouses perfectly.
-            // Since we don't have remaining_quantity on purchase_item anymore, we assume the whole batch's equivalent amount
-            // needs to be removed from global stock.
-            $quantityToRemove = $purchaseItem->quantity;
-
-            if ($product && $quantityToRemove > 0) {
-                $warehouses = DB::table('product_warehouse')
-                    ->where('product_id', $product->id)
-                    ->where('quantity', '>', 0)
-                    ->orderBy('warehouse_id')
-                    ->get();
-
-                $remainingToRemove = $quantityToRemove;
-                foreach ($warehouses as $wh) {
-                    if ($remainingToRemove <= 0) break;
-
-                    $deduct = min($wh->quantity, $remainingToRemove);
-                    DB::table('product_warehouse')
-                        ->where('product_id', $product->id)
-                        ->where('warehouse_id', $wh->warehouse_id)
-                        ->decrement('quantity', $deduct);
-
-                    $remainingToRemove -= $deduct;
-                }
-
-                // Log the stock adjustment
-                DB::table('stock_adjustments')->insert([
-                    'product_id' => $product->id,
-                    'purchase_item_id' => $purchaseItem->id,
-                    'user_id' => $request->user() ? $request->user()->id : null,
-                    'quantity_change' => -$quantityToRemove,
-                    'quantity_before' => $product->stock_quantity, // Before all warehouse decrements (approximate)
-                    'quantity_after' => max(0, $product->stock_quantity - $quantityToRemove),
-                    'reason' => 'Expired - Moved',
-                    'notes' => "Moved expired batch #{$purchaseItem->batch_number} off shelves.",
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            }
-
-            DB::commit();
-
-            return response()->json([
-                'message' => 'Product batch successfully moved to expired.',
-                'data' => new PurchaseItemResource($purchaseItem)
-            ], 200);
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['message' => 'Failed to move product.', 'error' => $e->getMessage()], 500);
-        }
-    }
-
     /**
      * Generate a Monthly Revenue Report with daily breakdown and payment method summary.
      *
@@ -654,7 +336,7 @@ class ReportController extends Controller
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
             // Calculate bank total from all bank-related payment methods
-            $bankMethods = ['bankak', 'fawry', 'ocash'];
+            $bankMethods = ['bank_transfer'];
             $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
                 return in_array($method, $bankMethods);
             })->sum();
@@ -772,7 +454,7 @@ class ReportController extends Controller
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
             // Calculate bank total from all bank-related payment methods
-            $bankMethods = ['bankak', 'fawry', 'ocash'];
+            $bankMethods = ['bank_transfer'];
             $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
                 return in_array($method, $bankMethods);
             })->sum();
@@ -1302,10 +984,8 @@ class ReportController extends Controller
         // Manually group to ensure all methods are covered
         $expensesByMethod = [
             'cash' => 0,
-            'bankak' => 0,
-            'fawry' => 0,
-            'ocash' => 0,
-            'bank' => 0 // Generic bank/visa
+            'bank_transfer' => 0,
+            'visa' => 0,
         ];
         foreach ($expensesByMethodData as $exp) {
             $method = $exp->payment_method ?? 'cash';
@@ -1332,9 +1012,8 @@ class ReportController extends Controller
 
         $returnsByMethod = [
             'cash' => 0,
-            'bankak' => 0,
-            'fawry' => 0,
-            'ocash' => 0
+            'bank_transfer' => 0,
+            'visa' => 0,
         ];
         $totalReturns = 0;
 
@@ -1351,11 +1030,8 @@ class ReportController extends Controller
         // Payment methods breakdown — use the already-fetched $allPayments collection
         $paymentMethods = [
             'cash' => 0,
-            'bankak' => 0,
-            'fawry' => 0,
-            'ocash' => 0,
+            'bank_transfer' => 0,
             'visa' => 0,
-            'bank_transfer' => 0
         ];
         foreach ($allPayments as $payment) {
             $method = $payment->method ?? 'cash';
@@ -2208,47 +1884,6 @@ class ReportController extends Controller
         })->sortByDesc('stock_quantity')->take($limit)->values();
 
         return response()->json(['data' => $results]);
-    }
-
-    /**
-     * Get products expiring within the next X months.
-     */
-    public function expiring(Request $request)
-    {
-        $months = (int) $request->input('months', 3);
-        $limit = (int) $request->input('limit', 20);
-
-        $dateThreshold = Carbon::now()->addMonths($months)->endOfDay();
-        $now = Carbon::now()->startOfDay();
-
-        // Get products with stock
-        $productsInStock = Product::whereHas('warehouses', function ($q) {
-            $q->where('product_warehouse.quantity', '>', 0);
-        })->with(['category:id,name', 'warehouses', 'purchaseItems'])->get();
-
-        // Filter those with early expiry
-        $expiring = $productsInStock->map(function ($product) {
-            $earliest = $product->earliest_expiry_date;
-            return [
-                'id' => $product->id,
-                'name' => $product->name,
-                'sku' => $product->sku,
-                'category_name' => $product->category ? $product->category->name : 'N/A',
-                'stock_quantity' => $product->total_stock,
-                'earliest_expiry_date' => $earliest,
-            ];
-        })->filter(function ($item) use ($dateThreshold, $now) {
-            if (!$item['earliest_expiry_date']) return false;
-            try {
-                $date = Carbon::parse($item['earliest_expiry_date']);
-                // Return soon expiring items AND already expired items in stock
-                return ltrim($date->format('Y-m-d'), "0") !== "" && $date->lte($dateThreshold);
-            } catch (\Exception $e) {
-                return false;
-            }
-        })->sortBy('earliest_expiry_date')->take($limit)->values();
-
-        return response()->json(['data' => $expiring]);
     }
 
     /**

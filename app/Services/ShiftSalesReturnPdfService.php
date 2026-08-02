@@ -155,13 +155,9 @@ class ShiftSalesReturnPdfService
     {
         $labels = [
             'cash' => 'نقدي',
-            'bankak' => 'بنكك',
-            'bank' => 'بنك',
-            'fawry' => 'فوري',
-            'ocash' => 'أوكاش',
+            'bank_transfer' => 'تحويل بنكي',
             'visa' => 'فيزا',
-            'bank_transfer' => 'بنك',
-            'refund' => 'مرتجع',
+            'other' => 'أخرى',
         ];
         return $labels[$method] ?? $method;
     }

@@ -8,7 +8,6 @@ use App\Models\Product;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Warehouse;
-use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -21,7 +20,7 @@ class ImportOpeningStockFromExcel extends Command
 
     protected $description = 'Import products and opening stock quantities from the merged invoices and opening stock Excel files via an Inventory Count';
 
-    /** @var array<string, array{name:string, unit:?string, qty:float, price:?float, expiry:?string, has_expiry:bool, source: string[]}> */
+    /** @var array<string, array{name:string, unit:?string, qty:float, price:?float, source: string[]}> */
     private array $grouped = [];
 
     public function handle(): int
@@ -53,13 +52,12 @@ class ImportOpeningStockFromExcel extends Command
 
         if ($dryRun) {
             $this->table(
-                ['Name', 'Unit', 'Qty', 'Price', 'Expiry'],
+                ['Name', 'Unit', 'Qty', 'Price'],
                 collect($this->grouped)->take(40)->map(fn($p) => [
                     $p['name'],
                     $p['unit'],
                     $p['qty'],
                     $p['price'],
-                    $p['expiry'],
                 ])->toArray()
             );
             $this->warn('Dry run only - nothing was written. Showing first 40 of ' . count($this->grouped) . ' products.');
@@ -91,8 +89,6 @@ class ImportOpeningStockFromExcel extends Command
                         'stocking_unit_id' => $unitId,
                         'sellable_unit_id' => $unitId,
                         'units_per_stocking_unit' => 1,
-                        'has_expiry_date' => $data['has_expiry'],
-                        'expire_date' => $data['expiry'],
                         'cost_price' => $data['price'],
                         'sale_price' => $data['price'],
                     ]);
@@ -132,7 +128,7 @@ class ImportOpeningStockFromExcel extends Command
 
         for ($row = 2; $row <= $highestRow; $row++) {
             $data = $sheet->rangeToArray("A{$row}:L{$row}", null, true, true, false)[0];
-            [$num, , , , , $name, $qty, , $unit, $expiry, $price] = array_pad($data, 11, null);
+            [$num, , , , , $name, $qty, , $unit, , $price] = array_pad($data, 11, null);
 
             if (!is_numeric($num) || empty($name)) {
                 continue; // header/total/blank rows
@@ -142,9 +138,8 @@ class ImportOpeningStockFromExcel extends Command
             $qty = is_numeric($qty) ? (float) $qty : 0.0;
 
             $priceValue = $this->parsePrice($price);
-            $expiryDate = $this->parseYearMonthExpiry($expiry);
 
-            $this->addToGroup($name, $unit, $qty, $priceValue, $expiryDate);
+            $this->addToGroup($name, $unit, $qty, $priceValue);
         }
     }
 
@@ -155,7 +150,7 @@ class ImportOpeningStockFromExcel extends Command
 
         for ($row = 4; $row <= $highestRow; $row++) {
             $data = $sheet->rangeToArray("A{$row}:H{$row}", null, true, true, false)[0];
-            [$num, $name, $expiry, $qty, , $unit, $price] = array_pad($data, 7, null);
+            [$num, $name, , $qty, , $unit, $price] = array_pad($data, 7, null);
 
             if (!is_numeric($num) || empty($name)) {
                 continue; // header/total/blank rows
@@ -165,13 +160,12 @@ class ImportOpeningStockFromExcel extends Command
             $qty = is_numeric($qty) ? (float) $qty : 0.0;
 
             $priceValue = $this->parsePrice($price);
-            $expiryDate = $this->parseDayMonthYearExpiry($expiry);
 
-            $this->addToGroup($name, $unit, $qty, $priceValue, $expiryDate);
+            $this->addToGroup($name, $unit, $qty, $priceValue);
         }
     }
 
-    private function addToGroup(string $name, ?string $unit, float $qty, ?float $price, ?string $expiry): void
+    private function addToGroup(string $name, ?string $unit, float $qty, ?float $price): void
     {
         $key = mb_strtolower($name);
         $unit = $unit ? trim($unit) : null;
@@ -184,8 +178,6 @@ class ImportOpeningStockFromExcel extends Command
                 'price' => null,
                 'price_weighted_sum' => 0.0,
                 'price_qty_sum' => 0.0,
-                'expiry' => null,
-                'has_expiry' => false,
             ];
         }
 
@@ -203,13 +195,6 @@ class ImportOpeningStockFromExcel extends Command
                 2
             );
         }
-
-        if ($expiry !== null) {
-            if ($this->grouped[$key]['expiry'] === null || $expiry < $this->grouped[$key]['expiry']) {
-                $this->grouped[$key]['expiry'] = $expiry;
-            }
-            $this->grouped[$key]['has_expiry'] = true;
-        }
     }
 
     private function parsePrice($value): ?float
@@ -221,30 +206,6 @@ class ImportOpeningStockFromExcel extends Command
             return null; // e.g. "#VALUE!" or a stray date string
         }
         return (float) str_replace(',', '', (string) $value);
-    }
-
-    private function parseYearMonthExpiry($value): ?string
-    {
-        if (!$value || $value === '-' || !is_string($value)) {
-            return null;
-        }
-        try {
-            return Carbon::createFromFormat('Y/m/d', trim($value) . '/01')->endOfMonth()->toDateString();
-        } catch (\Throwable) {
-            return null;
-        }
-    }
-
-    private function parseDayMonthYearExpiry($value): ?string
-    {
-        if (!$value || $value === '-' || !is_string($value)) {
-            return null;
-        }
-        try {
-            return Carbon::createFromFormat('d/m/Y', trim($value))->toDateString();
-        } catch (\Throwable) {
-            return null;
-        }
     }
 
     private function getOrCreateUnit(?string $name): ?int

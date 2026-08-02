@@ -35,7 +35,6 @@ class ProductExcelService
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                     ->orWhere('sku', 'like', "%{$search}%")
-                    ->orWhere('scientific_name', 'like', "%{$search}%")
                     ->orWhere('description', 'like', "%{$search}%");
             });
         }
@@ -74,15 +73,14 @@ class ProductExcelService
         $headers = [
             'A1' => '#',
             'B1' => 'الاسم',
-            'C1' => 'الاسم العلمي',
-            'D1' => 'رمز المنتج',
-            'E1' => 'الفئة',
-            'F1' => 'المخزون',
-            'G1' => 'الوحدة',
-            'H1' => 'مستوى التنبيه',
-            'I1' => 'الحالة',
-            'J1' => 'تاريخ الإنشاء',
-            'K1' => 'آخر تحديث'
+            'C1' => 'رمز المنتج',
+            'D1' => 'الفئة',
+            'E1' => 'المخزون',
+            'F1' => 'الوحدة',
+            'G1' => 'مستوى التنبيه',
+            'H1' => 'الحالة',
+            'I1' => 'تاريخ الإنشاء',
+            'J1' => 'آخر تحديث'
         ];
 
         // Set headers
@@ -112,20 +110,19 @@ class ProductExcelService
             ],
         ];
 
-        $sheet->getStyle('A1:K1')->applyFromArray($headerStyle);
+        $sheet->getStyle('A1:J1')->applyFromArray($headerStyle);
 
         // Set column widths
         $sheet->getColumnDimension('A')->setWidth(8);  // #
         $sheet->getColumnDimension('B')->setWidth(25); // Name
-        $sheet->getColumnDimension('C')->setWidth(25); // Scientific Name
-        $sheet->getColumnDimension('D')->setWidth(15); // SKU
-        $sheet->getColumnDimension('E')->setWidth(20); // Category
-        $sheet->getColumnDimension('F')->setWidth(12); // Stock
-        $sheet->getColumnDimension('G')->setWidth(12); // Unit
-        $sheet->getColumnDimension('H')->setWidth(15); // Alert Level
-        $sheet->getColumnDimension('I')->setWidth(15); // Status
-        $sheet->getColumnDimension('J')->setWidth(15); // Created At
-        $sheet->getColumnDimension('K')->setWidth(15); // Updated At
+        $sheet->getColumnDimension('C')->setWidth(15); // SKU
+        $sheet->getColumnDimension('D')->setWidth(20); // Category
+        $sheet->getColumnDimension('E')->setWidth(12); // Stock
+        $sheet->getColumnDimension('F')->setWidth(12); // Unit
+        $sheet->getColumnDimension('G')->setWidth(15); // Alert Level
+        $sheet->getColumnDimension('H')->setWidth(15); // Status
+        $sheet->getColumnDimension('I')->setWidth(15); // Created At
+        $sheet->getColumnDimension('J')->setWidth(15); // Updated At
 
         // Add data rows
         $row = 2;
@@ -134,19 +131,18 @@ class ProductExcelService
 
             $sheet->setCellValue('A' . $row, $index + 1);
             $sheet->setCellValue('B' . $row, $product->name);
-            $sheet->setCellValue('C' . $row, $product->scientific_name ?: '-');
-            $sheet->setCellValue('D' . $row, $product->sku ?: '-');
-            $sheet->setCellValue('E' . $row, $product->category?->name ?: '-');
-            $sheet->setCellValue('F' . $row, $product->stock_quantity);
-            $sheet->setCellValue('G' . $row, $product->sellableUnit?->name ?: '-');
-            $sheet->setCellValue('H' . $row, $product->stock_alert_level ?: '-');
-            $sheet->setCellValue('I' . $row, $stockStatus);
-            $sheet->setCellValue('J' . $row, $product->created_at ? $product->created_at->format('Y-m-d H:i') : '-');
-            $sheet->setCellValue('K' . $row, $product->updated_at ? $product->updated_at->format('Y-m-d H:i') : '-');
+            $sheet->setCellValue('C' . $row, $product->sku ?: '-');
+            $sheet->setCellValue('D' . $row, $product->category?->name ?: '-');
+            $sheet->setCellValue('E' . $row, $product->stock_quantity);
+            $sheet->setCellValue('F' . $row, $product->sellableUnit?->name ?: '-');
+            $sheet->setCellValue('G' . $row, $product->stock_alert_level ?: '-');
+            $sheet->setCellValue('H' . $row, $stockStatus);
+            $sheet->setCellValue('I' . $row, $product->created_at ? $product->created_at->format('Y-m-d H:i') : '-');
+            $sheet->setCellValue('J' . $row, $product->updated_at ? $product->updated_at->format('Y-m-d H:i') : '-');
 
             // Style status column based on stock status
             $statusStyle = $this->getStatusStyle($product);
-            $sheet->getStyle('I' . $row)->applyFromArray($statusStyle);
+            $sheet->getStyle('H' . $row)->applyFromArray($statusStyle);
 
             $row++;
         }
@@ -167,14 +163,14 @@ class ProductExcelService
 
         $lastRow = $row - 1;
         if ($lastRow >= 2) {
-            $sheet->getStyle('A2:K' . $lastRow)->applyFromArray($dataStyle);
+            $sheet->getStyle('A2:J' . $lastRow)->applyFromArray($dataStyle);
         }
 
         // Add summary information
         $summaryRow = $lastRow + 2;
         $sheet->setCellValue('A' . $summaryRow, 'ملخص التقرير');
         $sheet->getStyle('A' . $summaryRow)->getFont()->setBold(true)->setSize(14);
-        $sheet->mergeCells('A' . $summaryRow . ':K' . $summaryRow);
+        $sheet->mergeCells('A' . $summaryRow . ':J' . $summaryRow);
 
         $summaryRow++;
         $sheet->setCellValue('A' . $summaryRow, 'إجمالي المنتجات:');
@@ -548,7 +544,6 @@ class ProductExcelService
         $defaultValues = [
             'name' => null,
             'sku' => null,
-            'scientific_name' => null,
             'stock_quantity' => 0, // Keep 0 as default for stock quantity
         ];
 
@@ -620,7 +615,6 @@ class ProductExcelService
             $productsToCreate[] = [
                 'name' => trim($data['name'] ?? ''),
                 'sku' => isset($data['sku']) && $data['sku'] !== '' ? (string) $data['sku'] : null,
-                'scientific_name' => isset($data['scientific_name']) && $data['scientific_name'] !== '' ? (string) $data['scientific_name'] : null,
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
@@ -644,7 +638,6 @@ class ProductExcelService
         $productData = [
             'name' => trim($data['name'] ?? ''),
             'sku' => isset($data['sku']) && $data['sku'] !== '' ? (string) $data['sku'] : null,
-            'scientific_name' => isset($data['scientific_name']) && $data['scientific_name'] !== '' ? (string) $data['scientific_name'] : null,
         ];
 
         return Product::create($productData);

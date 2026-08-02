@@ -411,8 +411,7 @@ class PurchasePdfService
             'qty'     => $pageWidth * 0.10,  // Quantity
             'cost'    => $pageWidth * 0.12,  // Unit Cost
             'sale'    => $pageWidth * 0.12,  // Sale Price
-            'expiry'  => $pageWidth * 0.10,  // Expiry
-            'total'   => $pageWidth * 0.13,  // Total
+            'total'   => $pageWidth * 0.23,  // Total
         ];
 
         // Table headers
@@ -423,7 +422,6 @@ class PurchasePdfService
         $this->pdf->Cell($widths['qty'],     8, 'الكمية',     1, 0, 'C', true);
         $this->pdf->Cell($widths['cost'],    8, 'سعر الوحدة', 1, 0, 'C', true);
         $this->pdf->Cell($widths['sale'],    8, 'سعر البيع',  1, 0, 'C', true);
-        $this->pdf->Cell($widths['expiry'],  8, 'الصلاحية',   1, 0, 'C', true);
         $this->pdf->Cell($widths['total'],   8, 'الإجمالي',   1, 1, 'C', true);
 
         // Reset colors for body
@@ -462,7 +460,6 @@ class PurchasePdfService
             $this->pdf->Cell($widths['qty'],     $rowH, number_format($item->quantity) . ($unit ? " $unit" : ''),                  1, 0, 'C', true);
             $this->pdf->Cell($widths['cost'],    $rowH, number_format($item->unit_cost, 2),                                        1, 0, 'C', true);
             $this->pdf->Cell($widths['sale'],    $rowH, $item->sale_price ? number_format($item->sale_price, 2) : '---',           1, 0, 'C', true);
-            $this->pdf->Cell($widths['expiry'],  $rowH, $item->expiry_date ? date('Y-m-d', strtotime($item->expiry_date)) : '---', 1, 0, 'C', true);
 
             // Total with bold font
             $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL);
@@ -548,7 +545,7 @@ class PurchasePdfService
         $this->pdf->SetTextColor(255, 255, 255);
         $this->pdf->Cell($labelWidth, 9, 'المبلغ الإجمالي:', 1, 0, 'R', true);
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_HEADING - 1);
-        $this->pdf->Cell($valueWidth, 9, number_format($totalAmount, 2) . ' ' . ($purchase->currency ?? 'SDG'), 1, 1, 'C', true);
+        $this->pdf->Cell($valueWidth, 9, number_format($totalAmount, 2) . ' OMR', 1, 1, 'C', true);
         $this->pdf->SetTextColor(0, 0, 0);
     }
 

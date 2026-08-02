@@ -183,8 +183,7 @@ class PurchaseController extends Controller
      *                     @OA\Property(property="quantity", type="integer", example=100, description="Quantity in stocking units"),
      *                     @OA\Property(property="unit_cost", type="number", format="float", example=10.50, description="Cost per stocking unit"),
      *                     @OA\Property(property="sale_price", type="number", format="float", example=15.00, description="Sale price per sellable unit"),
-     *                     @OA\Property(property="sale_price_stocking_unit", type="number", format="float", example=150.00, description="Optional sale price per stocking unit"),
-     *                     @OA\Property(property="expiry_date", type="string", format="date", example="2024-10-27")
+     *                     @OA\Property(property="sale_price_stocking_unit", type="number", format="float", example=150.00, description="Optional sale price per stocking unit")
      *                 )
      *             )
      *         )
@@ -210,8 +209,6 @@ class PurchaseController extends Controller
             'purchase_date' => 'required|date_format:Y-m-d',
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
             'status' => ['required', Rule::in(['received', 'pending', 'ordered'])],
-            'currency' => ['nullable', Rule::in(['SDG', 'USD'])],
-
             'notes' => 'nullable|string|max:65535',
             'items' => 'nullable|array',
             'items.*.product_id' => 'required|exists:products,id',
@@ -220,7 +217,6 @@ class PurchaseController extends Controller
             'items.*.unit_cost' => 'required|numeric|min:0',   // Cost per stocking unit
             'items.*.sale_price' => 'required|numeric|min:0', // Required: sale price per SELLABLE UNIT
             'items.*.sale_price_stocking_unit' => 'nullable|numeric|min:0', // Optional: sale price per STOCKING UNIT
-            'items.*.expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date', // Expiry date after purchase date
         ]);
 
         try {
@@ -233,7 +229,6 @@ class PurchaseController extends Controller
                     'purchase_date' => $validatedData['purchase_date'],
                     'reference_number' => $validatedData['reference_number'] ?? null,
                     'status' => $validatedData['status'],
-                    'currency' => $validatedData['currency'] ?? 'SDG',
                     'notes' => $validatedData['notes'] ?? null,
 
                     'total_amount' => 0, // Initialize total amount
@@ -266,7 +261,6 @@ class PurchaseController extends Controller
                             'total_cost' => $totalCostForStockingUnits,
                             'sale_price' => $itemData['sale_price'],
                             'sale_price_stocking_unit' => $itemData['sale_price_stocking_unit'] ?? null,
-                            'expiry_date' => $itemData['expiry_date'] ?? null,
                         ]);
 
                         // UPDATE WAREHOUSE STOCK (SSOT)
@@ -567,7 +561,6 @@ class PurchaseController extends Controller
             'unit_cost' => 'required|numeric|min:0',
             'sale_price' => 'required|numeric|min:0',
             'sale_price_stocking_unit' => 'nullable|numeric|min:0',
-            'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',
         ]);
 
         try {
@@ -597,7 +590,6 @@ class PurchaseController extends Controller
                     'cost_per_sellable_unit' => $costPerSellableUnit,
                     'sale_price' => $validatedData['sale_price'],
                     'sale_price_stocking_unit' => $validatedData['sale_price_stocking_unit'] ?? null,
-                    'expiry_date' => $validatedData['expiry_date'] ?? null,
                 ]);
 
                 // UPDATE WAREHOUSE STOCK (SSOT)
@@ -655,7 +647,6 @@ class PurchaseController extends Controller
             'quantity' => 'required|integer|min:0',
             'unit_cost' => 'required|numeric|min:0',
             'sale_price' => 'nullable|numeric|min:0',
-            'expiry_date' => 'nullable|date_format:Y-m-d|after_or_equal:purchase_date',
         ]);
 
         try {
@@ -692,7 +683,6 @@ class PurchaseController extends Controller
                     'unit_cost' => $validatedData['unit_cost'],
                     'total_cost' => $validatedData['quantity'] * $validatedData['unit_cost'],
                     'sale_price' => $validatedData['sale_price'] ?? null,
-                    'expiry_date' => $validatedData['expiry_date'] ?? null,
                 ]);
 
                 // Update purchase total amount
@@ -849,7 +839,6 @@ class PurchaseController extends Controller
                         'cost_per_sellable_unit' => $product->latest_cost_per_sellable_unit ?? 0,
                         'sale_price' => $product->suggested_sale_price_per_sellable_unit ?? 0,
                         'sale_price_stocking_unit' => $product->suggested_sale_price ?? null,
-                        'expiry_date' => null,
                     ]);
                     $addedCount++;
                 }
@@ -1124,7 +1113,7 @@ class PurchaseController extends Controller
     {
         $validatedData = $request->validate([
             'amount' => 'required|numeric|min:0.01',
-            'method' => 'required|string|in:cash,visa,mastercard,bank_transfer,mada,refund,other,bankak,fawry,ocash',
+            'method' => 'required|string|in:cash,bank_transfer,visa,other',
             'payment_date' => 'required|date',
             'reference_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string',
@@ -1164,12 +1153,11 @@ class PurchaseController extends Controller
 
 // Key Changes and Considerations:
 // store() Method:
-// Validation: Includes items.*.batch_number, items.*.sale_price (intended sale price for this batch), and items.*.expiry_date.
+// Validation: Includes items.*.batch_number and items.*.sale_price (intended sale price for this batch).
 // Item Creation: When creating PurchaseItem records, it now includes:
 // batch_number: From the request or generated if necessary (though usually user-supplied or derived).
 // remaining_quantity: Set to the initial quantity purchased.
 // sale_price: The intended sale price for items from this specific batch.
-// expiry_date.
 // Stock Update: The direct $product->increment('stock_quantity', $quantity); line is still present. However, if you have correctly implemented the PurchaseItemObserver to update Product->stock_quantity based on the sum of remaining_quantity of its purchase_items, this direct increment in the controller becomes redundant and potentially causes double counting.
 // If PurchaseItemObserver is active and correct: You can remove $product->increment('stock_quantity', $quantity); from this controller. The observer will handle the total product stock update when PurchaseItem is created/saved.
 // If not using an observer for aggregate stock: Keep the $product->increment() line, but understand that Product.stock_quantity is a direct sum and PurchaseItem.remaining_quantity is for batch-level tracking.

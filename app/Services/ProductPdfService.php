@@ -35,7 +35,7 @@ class ProductPdfService
 
     // ── Column widths (sum = 273 = 297 - 2×12) ───────────────────────────────
     //    #    Name  Sci   SKU   Cat   Qty   Unit  Cost  Sale  Alert Status
-    private const COLS = [7, 48, 30, 24, 28, 16, 22, 24, 24, 16, 24];
+    private const COLS = [7, 78, 24, 28, 16, 22, 24, 24, 16, 24];
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -90,8 +90,7 @@ class ProductPdfService
             $s = $filters['search'];
             $query->where(fn($q) => $q
                 ->where('name', 'like', "%$s%")
-                ->orWhere('sku', 'like', "%$s%")
-                ->orWhere('scientific_name', 'like', "%$s%"));
+                ->orWhere('sku', 'like', "%$s%"));
         }
         if (!empty($filters['category_id']))   $query->where('category_id', $filters['category_id']);
         if (!empty($filters['in_stock_only']))  $query->hasStock();
@@ -195,7 +194,7 @@ class ProductPdfService
         $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
         $pdf->SetLineWidth(0.1);
 
-        $labels = ['#', 'الاسم', 'الاسم العلمي', 'الكود', 'الفئة', 'المخزون', 'الوحدة', 'آخر تكلفة', 'سعر البيع', 'حد التنبيه', 'الحالة'];
+        $labels = ['#', 'الاسم', 'الكود', 'الفئة', 'المخزون', 'الوحدة', 'آخر تكلفة', 'سعر البيع', 'حد التنبيه', 'الحالة'];
         $last   = count($labels) - 1;
         foreach ($labels as $i => $lbl) {
             $pdf->Cell(self::COLS[$i], self::HEADER_H, $lbl, 1, ($i === $last ? 1 : 0), 'C', true);
@@ -235,7 +234,6 @@ class ProductPdfService
             $cells = [
                 $i + 1,
                 $this->cut($product->name, 30),
-                $this->cut($product->scientific_name ?: '-', 20),
                 $this->cut($product->sku ?: '-', 14),
                 $this->cut($product->category?->name ?: '-', 17),
                 number_format((int) $product->stock_quantity),

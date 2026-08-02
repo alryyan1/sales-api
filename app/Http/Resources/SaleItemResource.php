@@ -47,10 +47,6 @@ class SaleItemResource extends JsonResource
                 // This is the cost of the item from the specific batch it was sold from, crucial for COGS
                 return $this->purchaseItemBatch?->unit_cost;
             }),
-            'batch_expiry_date' => $this->whenLoaded('purchaseItemBatch', function () {
-                return $this->purchaseItemBatch?->expiry_date?->format('Y-m-d');
-            }),
-
             // Current stock information from the product (Specific to sale warehouse or user warehouse)
             'current_stock_quantity' => $this->whenLoaded('product', function () {
                 $warehouseId = $this->sale?->warehouse_id ?? request()->user()?->warehouse_id;
@@ -66,9 +62,6 @@ class SaleItemResource extends JsonResource
             }),
             'stock_alert_level' => $this->whenLoaded('product', function () {
                 return $this->product?->stock_alert_level;
-            }),
-            'earliest_expiry_date' => $this->whenLoaded('product', function () {
-                return $this->product?->earliest_expiry_date;
             }),
             'sellable_unit_name' => $this->whenLoaded('product', function () {
                 return $this->product?->sellableUnit?->name ?? 'Piece';

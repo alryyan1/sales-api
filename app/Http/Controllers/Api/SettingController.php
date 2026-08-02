@@ -34,15 +34,6 @@ class SettingController extends Controller
        // Log::info('Settings update request data:', $request->all());
         $validated = $request->validate($rules);
 
-        // Authorization logic:
-        $isUpdatingDollarRate = $request->has('usd_to_sdg_factor');
-        $isUpdatingOtherSettings = count(array_diff(array_keys($validated), ['usd_to_sdg_factor'])) > 0;
-
-        // If updating general settings (anything except/besides dollar rate)
-      
-        // If updating dollar rate
-     
-
         $newSettings = $service->update($validated);
         return response()->json([
             'message' => 'Settings updated successfully.',

@@ -530,7 +530,7 @@ class InventoryTest extends TestCase
         $batch1Quantity = 30;
         $batch2Quantity = 50;
 
-        // Create first purchase (older, expires sooner)
+        // Create first purchase (older batch)
         $purchase1Response = $this->postJson('/api/purchases', [
             'warehouse_id' => $this->warehouse->id,
             'supplier_id' => $this->supplier->id,
@@ -542,7 +542,6 @@ class InventoryTest extends TestCase
                     'quantity' => $batch1Quantity,
                     'unit_cost' => 10,
                     'sale_price' => 15,
-                    'expiry_date' => now()->addDays(10)->format('Y-m-d'), // Expires sooner
                 ]
             ]
         ]);
@@ -550,7 +549,7 @@ class InventoryTest extends TestCase
         $purchase1 = Purchase::latest()->first();
         $batch1 = PurchaseItem::where('purchase_id', $purchase1->id)->first();
 
-        // Create second purchase (newer, expires later)
+        // Create second purchase (newer batch)
         $purchase2Response = $this->postJson('/api/purchases', [
             'warehouse_id' => $this->warehouse->id,
             'supplier_id' => $this->supplier->id,
@@ -562,7 +561,6 @@ class InventoryTest extends TestCase
                     'quantity' => $batch2Quantity,
                     'unit_cost' => 10,
                     'sale_price' => 15,
-                    'expiry_date' => now()->addDays(20)->format('Y-m-d'), // Expires later
                 ]
             ]
         ]);
@@ -577,7 +575,7 @@ class InventoryTest extends TestCase
 
         // Sell 25 units (should take all from batch1 first due to FIFO, then 0 from batch2)
         // Note: Due to unique constraint on (sale_id, product_id), the system may aggregate batches
-        // into a single SaleItem. We test that batch1 (older expiry) is consumed first.
+        // into a single SaleItem. We test that batch1 (older) is consumed first.
         $saleQuantity = 25; // Less than batch1, so batch1 should be partially consumed
 
         $saleResponse = $this->postJson('/api/sales', [
@@ -596,7 +594,7 @@ class InventoryTest extends TestCase
 
         $saleResponse->assertStatus(201);
 
-        // Stock is tracked in product_warehouse only; batch is reference for cost/expiry.
+        // Stock is tracked in product_warehouse only; batch is reference for cost.
         // Verify sale item is linked to a batch (for reference)
         $sale = Sale::latest()->first();
         $saleItem = $sale->items()->where('product_id', $this->product->id)->first();

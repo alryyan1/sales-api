@@ -31,9 +31,8 @@ class ShiftResource extends JsonResource
                 // Calculate Sales Breakdown — iterate payments directly via shift_id
                 $salesBreakdown = [
                     'cash' => 0,
-                    'bankak' => 0,
-                    'fawry' => 0,
-                    'ocash' => 0,
+                    'bank_transfer' => 0,
+                    'visa' => 0,
                     'total' => 0,
                 ];
 
@@ -46,8 +45,6 @@ class ShiftResource extends JsonResource
                     $amount = (float)$payment->amount;
                     if (isset($salesBreakdown[$method])) {
                         $salesBreakdown[$method] += $amount;
-                    } elseif (in_array($method, ['visa', 'bank', 'bank_transfer'])) {
-                        $salesBreakdown['bankak'] += $amount;
                     }
                     $salesBreakdown['total'] += $amount;
                 }
@@ -56,9 +53,8 @@ class ShiftResource extends JsonResource
                 $expenses = $this->expenses;
                 $expensesBreakdown = [
                     'cash' => 0,
-                    'bankak' => 0,
-                    'fawry' => 0,
-                    'ocash' => 0,
+                    'bank_transfer' => 0,
+                    'visa' => 0,
                     'total' => 0,
                 ];
                 if ($expenses) {
@@ -71,15 +67,9 @@ class ShiftResource extends JsonResource
                         $method = $expense->payment_method ?? 'cash';
                         $amount = (float)$expense->amount;
 
-                        $key = match ($method) {
-                            'cash' => 'cash',
-                            'bank', 'bank_transfer', 'visa', 'bankak' => 'bankak',
-                            'fawry' => 'fawry',
-                            'ocash' => 'ocash',
-                            default => 'cash'
-                        };
-
-                        $expensesBreakdown[$key] += $amount;
+                        if (isset($expensesBreakdown[$method])) {
+                            $expensesBreakdown[$method] += $amount;
+                        }
                         $expensesBreakdown['total'] += $amount;
                     }
                 }
@@ -88,9 +78,8 @@ class ShiftResource extends JsonResource
                 $returns = $this->saleReturns;
                 $returnsBreakdown = [
                     'cash' => 0,
-                    'bankak' => 0,
-                    'fawry' => 0,
-                    'ocash' => 0,
+                    'bank_transfer' => 0,
+                    'visa' => 0,
                     'total' => 0,
                 ];
 
@@ -107,15 +96,9 @@ class ShiftResource extends JsonResource
 
                         $method = $ret->returned_payment_method ?? 'cash';
 
-                        $key = match ($method) {
-                            'cash' => 'cash',
-                            'bank', 'bank_transfer', 'visa', 'bankak' => 'bankak',
-                            'fawry' => 'fawry',
-                            'ocash' => 'ocash',
-                            default => 'cash'
-                        };
-
-                        $returnsBreakdown[$key] += $amount;
+                        if (isset($returnsBreakdown[$method])) {
+                            $returnsBreakdown[$method] += $amount;
+                        }
                         $returnsBreakdown['total'] += $amount;
                     }
                 }
@@ -126,9 +109,8 @@ class ShiftResource extends JsonResource
                     'returns' => $returnsBreakdown,
                     'net' => [
                         'cash' => $salesBreakdown['cash'] - $expensesBreakdown['cash'] - $returnsBreakdown['cash'],
-                        'bankak' => $salesBreakdown['bankak'] - $expensesBreakdown['bankak'] - $returnsBreakdown['bankak'],
-                        'fawry' => $salesBreakdown['fawry'] - $expensesBreakdown['fawry'] - $returnsBreakdown['fawry'],
-                        'ocash' => $salesBreakdown['ocash'] - $expensesBreakdown['ocash'] - $returnsBreakdown['ocash'],
+                        'bank_transfer' => $salesBreakdown['bank_transfer'] - $expensesBreakdown['bank_transfer'] - $returnsBreakdown['bank_transfer'],
+                        'visa' => $salesBreakdown['visa'] - $expensesBreakdown['visa'] - $returnsBreakdown['visa'],
                         'total' => $salesBreakdown['total'] - $expensesBreakdown['total'] - $returnsBreakdown['total'],
                     ]
                 ];

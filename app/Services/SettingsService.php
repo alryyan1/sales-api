@@ -61,15 +61,9 @@ class SettingsService
             'product_images_show_in_reports' => 'bool',
             'whatsapp_shift_closure_numbers' => 'string',
             'firebase_collection_name' => 'string',
-            'usd_to_sdg_factor' => 'float',
             'product_row_color_highlight' => 'bool',
-            'product_scientific_name_visible' => 'bool',
-            'product_scientific_name_required' => 'bool',
-            'pos_show_expired_products' => 'bool',
             'pos_show_out_of_stock_products' => 'bool',
             'purchase_use_batch_number' => 'bool',
-            'purchase_use_expiry_date' => 'bool',
-            'default_purchase_currency' => 'string',
         ];
     }
 
@@ -86,7 +80,7 @@ class SettingsService
             'company_phone_2' => $c['company_phone_2'] ?? null,
             'company_email' => $c['company_email'] ?? 'contact@example.com',
             'company_logo_url' => $c['company_logo_url'] ?? null,
-            'currency_symbol' => $c['currency_symbol'] ?? 'SDG',
+            'currency_symbol' => $c['currency_symbol'] ?? 'OMR',
             'date_format' => $c['date_format'] ?? 'YYYY-MM-DD',
             'global_low_stock_threshold' => $c['global_low_stock_threshold'] ?? 10,
             'invoice_prefix' => $c['invoice_prefix'] ?? 'INV-',
@@ -116,15 +110,9 @@ class SettingsService
             'product_images_show_in_reports' => $c['product_images_show_in_reports'] ?? false,
             'whatsapp_shift_closure_numbers' => $c['whatsapp_shift_closure_numbers'] ?? '',
             'firebase_collection_name' => $c['firebase_collection_name'] ?? 'none',
-            'usd_to_sdg_factor' => $c['usd_to_sdg_factor'] ?? 1.0,
             'product_row_color_highlight' => $c['product_row_color_highlight'] ?? true,
-            'product_scientific_name_visible' => $c['product_scientific_name_visible'] ?? true,
-            'product_scientific_name_required' => $c['product_scientific_name_required'] ?? false,
-            'pos_show_expired_products' => $c['pos_show_expired_products'] ?? false,
             'pos_show_out_of_stock_products' => $c['pos_show_out_of_stock_products'] ?? false,
             'purchase_use_batch_number' => $c['purchase_use_batch_number'] ?? true,
-            'purchase_use_expiry_date' => $c['purchase_use_expiry_date'] ?? true,
-            'default_purchase_currency' => $c['default_purchase_currency'] ?? 'SDG',
         ];
     }
 
@@ -194,7 +182,6 @@ class SettingsService
         $rules['company_email'] = ['nullable', 'email', 'max:255'];
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
-        $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'USD'])];
         return $rules;
     }
 

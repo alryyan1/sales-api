@@ -35,7 +35,6 @@ class PurchaseResource extends JsonResource
             'total_amount' => $this->total_amount, // Already cast in model
             'notes' => $this->notes,
             'created_at' => $this->created_at->toISOString(),
-            'currency' => $this->currency,
 
             'items_count' => $this->items_count ?? null,
 

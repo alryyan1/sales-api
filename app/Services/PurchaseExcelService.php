@@ -452,7 +452,6 @@ class PurchaseExcelService
             'quantity' => 1, // Default to 1 instead of 0 for quantity
             'unit_cost' => 0,
             'sale_price' => null,
-            'expiry_date' => null,
         ];
 
         // Apply defaults for any field that is not in the data or was skipped
@@ -568,7 +567,6 @@ class PurchaseExcelService
             'unit_cost' => $unitCost,
             'total_cost' => $totalCost,
             'sale_price' => isset($data['sale_price']) && $data['sale_price'] > 0 ? (float) $data['sale_price'] : null,
-            'expiry_date' => !empty($data['expiry_date']) ? $data['expiry_date'] : null,
         ]);
 
 

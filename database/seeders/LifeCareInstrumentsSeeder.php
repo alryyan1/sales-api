@@ -160,7 +160,6 @@ class LifeCareInstrumentsSeeder extends Seeder
                             'units_per_stocking_unit' => 1,
                             'stock_quantity' => 0,
                             'stock_alert_level' => 5,
-                            'has_expiry_date' => false,
                         ]
                     );
                 }

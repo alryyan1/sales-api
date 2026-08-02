@@ -155,12 +155,9 @@ class ShiftCostPdfService
     {
         $labels = [
             'cash' => 'نقدي',
-            'bankak' => 'بنكك',
-            'bank' => 'بنك',
-            'fawry' => 'فوري',
-            'ocash' => 'أوكاش',
+            'bank_transfer' => 'تحويل بنكي',
             'visa' => 'فيزا',
-            'bank_transfer' => 'بنك',
+            'other' => 'أخرى',
         ];
         return $labels[$method] ?? $method;
     }

@@ -156,12 +156,6 @@ class AddRandomStock extends Command
                     // Optional: Generate batch number
                     $batchNumber = 'BATCH-' . strtoupper(substr(md5($product->id . time() . rand()), 0, 8));
 
-                    // Optional: Set expiry date if product has expiry
-                    $expiryDate = null;
-                    if ($product->has_expiry_date) {
-                        $expiryDate = Carbon::now()->addMonths(rand(6, 24))->format('Y-m-d');
-                    }
-
                     // Calculate sale_price_stocking_unit
                     $salePriceStockingUnit = $salePrice * $unitsPerStockingUnit;
 
@@ -175,7 +169,6 @@ class AddRandomStock extends Command
                         'cost_per_sellable_unit' => $costPerSellableUnit,
                         'sale_price' => $salePrice,
                         'sale_price_stocking_unit' => $salePriceStockingUnit,
-                        'expiry_date' => $expiryDate,
                     ]);
 
                     $calculatedTotalAmount += $totalCost;

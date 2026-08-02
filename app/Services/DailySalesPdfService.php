@@ -410,11 +410,8 @@ class DailySalesPdfService
     {
         $methods = [
             'cash' => 'نقداً',
-            'visa' => 'فيزا',
-            'mastercard' => 'ماستركارد',
             'bank_transfer' => 'تحويل بنكي',
-            'mada' => 'مدى',
-            'store_credit' => 'رصيد المحل',
+            'visa' => 'فيزا',
             'other' => 'أخرى'
         ];
 

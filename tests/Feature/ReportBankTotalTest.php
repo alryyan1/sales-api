@@ -13,7 +13,7 @@ class ReportBankTotalTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_monthly_revenue_report_includes_bankak_fawry_and_ocash_in_bank_total()
+    public function test_monthly_revenue_report_includes_bank_transfer_in_bank_total()
     {
         $user = User::factory()->create();
         $this->actingAs($user);
@@ -36,27 +36,19 @@ class ReportBankTotalTest extends TestCase
             'payment_date' => $now,
         ]);
 
-        // Bankak payment (should be included in bank total)
+        // Bank transfer payment (should be included in bank total)
         Payment::factory()->create([
             'sale_id' => $sale->id,
             'amount' => 200,
-            'method' => 'bankak',
+            'method' => 'bank_transfer',
             'payment_date' => $now,
         ]);
 
-        // Fawry payment (should be included in bank total)
+        // Visa payment (not counted as "bank" — tracked separately, still in total_paid)
         Payment::factory()->create([
             'sale_id' => $sale->id,
             'amount' => 300,
-            'method' => 'fawry',
-            'payment_date' => $now,
-        ]);
-
-        // Ocash payment (should be included in bank total)
-        Payment::factory()->create([
-            'sale_id' => $sale->id,
-            'amount' => 400,
-            'method' => 'ocash',
+            'method' => 'visa',
             'payment_date' => $now,
         ]);
 
@@ -65,19 +57,13 @@ class ReportBankTotalTest extends TestCase
         $response->assertStatus(200);
         $data = $response->json('data');
 
-        // Total bank should be 200 (bankak) + 300 (fawry) + 400 (ocash) = 900
-        $this->assertEquals(900, $data['month_summary']['total_bank']);
+        // Total bank should be 200 (bank_transfer)
+        $this->assertEquals(200, $data['month_summary']['total_bank']);
 
         // Check daily breakdown
         $todayStr = $now->toDateString();
         $dailyEntry = collect($data['daily_breakdown'])->firstWhere('date', $todayStr);
-        $this->assertEquals(900, $dailyEntry['total_bank']);
-
-        // Check bank methods breakdown
-        $this->assertArrayHasKey('bank_methods', $dailyEntry);
-        $this->assertContains('bankak', $dailyEntry['bank_methods']);
-        $this->assertContains('fawry', $dailyEntry['bank_methods']);
-        $this->assertContains('ocash', $dailyEntry['bank_methods']);
+        $this->assertEquals(200, $dailyEntry['total_bank']);
 
         // --- Verify Returns ---
         $saleReturn = \App\Models\SaleReturn::create([
@@ -100,7 +86,7 @@ class ReportBankTotalTest extends TestCase
         $this->assertEquals(100, $dailyEntry['total_returns']);
         $this->assertEquals(100, $data['month_summary']['total_returns']);
 
-        // Net = total_paid (1000) - total_expense (0) - total_returns (100) = 900
-        $this->assertEquals(900, $dailyEntry['net']);
+        // Net = total_paid (600) - total_expense (0) = 600
+        $this->assertEquals(600, $dailyEntry['net']);
     }
 }

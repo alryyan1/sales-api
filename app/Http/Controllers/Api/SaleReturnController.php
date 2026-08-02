@@ -65,7 +65,7 @@ class SaleReturnController extends Controller
             'returned_payment_method' => [
                 'required',
                 'string',
-                Rule::in(['cash', 'bankak', 'fawry', 'ocash']),
+                Rule::in(['cash', 'bank_transfer', 'visa', 'other']),
             ],
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
