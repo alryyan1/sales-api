@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\{
   ShiftController,
   WarehouseController,
   StockTransferController,
+  TransitOrderController,
   WhatsAppCloudApiController,
 };
 use App\Http\Controllers\UpdateController;
@@ -225,6 +226,7 @@ Route::middleware('auth:sanctum')->group(function () {
   Route::apiResource('warehouses', WarehouseController::class);
   Route::post('warehouses/{warehouse}/import-missing-products', [WarehouseController::class, 'importMissingProducts']);
   Route::apiResource('stock-transfers', StockTransferController::class)->only(['index', 'store']);
+  Route::apiResource('transit-orders', TransitOrderController::class)->only(['index', 'store']);
 
   // -- Inventory Counts --
   Route::apiResource('inventory-counts', InventoryCountController::class);

@@ -165,7 +165,7 @@ class Product extends Model
     public function warehouses(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Warehouse::class, 'product_warehouse')
-            ->withPivot('quantity', 'min_stock_level')
+            ->withPivot('quantity', 'min_stock_level', 'in_transit_quantity')
             ->withTimestamps();
     }
 
@@ -299,6 +299,30 @@ class Product extends Model
                 ->whereNotNull('product_warehouse.min_stock_level')
                 ->whereColumn('product_warehouse.quantity', '<=', 'product_warehouse.min_stock_level');
         });
+    }
+
+    /**
+     * Get in-transit (ordered but not yet received) stock quantity for a specific warehouse.
+     */
+    public function getWarehouseTransitStock(int $warehouseId): float
+    {
+        $warehouse = $this->warehouses()->where('warehouses.id', $warehouseId)->first();
+        return $warehouse ? (float) $warehouse->pivot->in_transit_quantity : 0;
+    }
+
+    /**
+     * Increment the in-transit stock balance for a warehouse without touching physical quantity.
+     */
+    public function incrementWarehouseTransitStock($warehouseId, $quantity)
+    {
+        $warehouse = $this->warehouses()->where('warehouses.id', $warehouseId)->first();
+        if ($warehouse) {
+            $this->warehouses()->updateExistingPivot($warehouseId, [
+                'in_transit_quantity' => $warehouse->pivot->in_transit_quantity + $quantity
+            ]);
+        } else {
+            $this->warehouses()->attach($warehouseId, ['quantity' => 0, 'in_transit_quantity' => $quantity]);
+        }
     }
 
     public function incrementWarehouseStock($warehouseId, $quantity)

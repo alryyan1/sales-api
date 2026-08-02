@@ -269,6 +269,7 @@ class ProductController extends Controller
         }
 
         $warehouseId = $request->input('warehouse_id');
+        $stockWarehouseId = $request->input('stock_warehouse_id') ?: $warehouseId;
 
         $query = Product::select('products.*')->with(['stockingUnit:id,name', 'sellableUnit:id,name', 'category:id,name', 'latestPurchaseItem.purchase:id,currency']);
 
@@ -288,12 +289,12 @@ class ProductController extends Controller
 
         $products = $query->orderBy('name')->limit($limit)->get();
 
-        $products->each(function ($product) use ($warehouseId) {
+        $products->each(function ($product) use ($stockWarehouseId) {
             $product->append(['suggested_sale_price_per_sellable_unit', 'latest_cost_per_sellable_unit']);
 
-            if ($warehouseId) {
+            if ($stockWarehouseId) {
                 // Override total stock with warehouse-specific stock
-                $product->current_stock_quantity = $product->countStock($warehouseId);
+                $product->current_stock_quantity = $product->countStock($stockWarehouseId);
             }
         });
 
