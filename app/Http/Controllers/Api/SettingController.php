@@ -36,12 +36,11 @@ class SettingController extends Controller
 
         // Authorization logic:
         $isUpdatingDollarRate = $request->has('usd_to_sdg_factor');
-        $isUpdatingOtherSettings = count(array_diff(array_keys($validated), ['usd_to_sdg_factor'])) > 0;
 
-        // If updating general settings (anything except/besides dollar rate)
-      
-        // If updating dollar rate
-     
+        // If updating dollar rate, require the dedicated permission
+        if ($isUpdatingDollarRate) {
+            $this->checkAuthorization('تعديل سعر الدولار');
+        }
 
         $newSettings = $service->update($validated);
         return response()->json([

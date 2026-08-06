@@ -238,6 +238,17 @@ class SaleController extends Controller
             'sale_date' => 'sometimes|required|date_format:Y-m-d',
         ]);
 
+        if (array_key_exists('sale_date', $validatedData)) {
+            // Keep the invoice's creation time-of-day, but move it (and sale_date) to the corrected day,
+            // so the printed invoice date and the record's creation date stay in sync.
+            $originalCreatedAt = $sale->created_at ?? now();
+            $sale->created_at = Carbon::parse($validatedData['sale_date'])->setTimeFrom($originalCreatedAt);
+
+            // Move payments recorded for this sale to the corrected day too, so dashboard/report
+            // date filters (which key off payment_date) surface this invoice on the edited day.
+            $sale->payments()->update(['payment_date' => $validatedData['sale_date']]);
+        }
+
         $sale->update($validatedData);
 
         $sale = $sale->fresh([
@@ -252,6 +263,50 @@ class SaleController extends Controller
             'payments.user:id,name'
         ]);
         return response()->json(['sale' => new SaleResource($sale)]);
+    }
+
+    /**
+     * Delete a sale entirely, reverting any stock quantities its items had reserved.
+     */
+    public function destroy(Sale $sale)
+    {
+        if (!Auth::user()->can('حذف فاتورة')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
+        if ($sale->payments()->exists()) {
+            return response()->json([
+                'message' => 'لا يمكن حذف الفاتورة لوجود مدفوعات مرتبطة بها. يرجى حذف الدفعات أولاً.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        DB::beginTransaction();
+        try {
+            $warehouseId = $sale->warehouse_id ?? 1;
+            if (!$sale->is_quote) {
+                foreach ($sale->items()->with('product')->get() as $item) {
+                    $item->product?->incrementWarehouseStock($warehouseId, $item->quantity);
+                }
+            }
+
+            $sale->delete();
+
+            DB::commit();
+
+            return response()->json(['message' => 'تم حذف الفاتورة بنجاح.'], Response::HTTP_OK);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Failed to delete sale', [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'فشل حذف الفاتورة. حاول مرة أخرى.',
+                'error' => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**

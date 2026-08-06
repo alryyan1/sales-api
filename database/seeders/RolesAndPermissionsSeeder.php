@@ -69,6 +69,8 @@ class RolesAndPermissionsSeeder extends Seeder
             'حذف منتج مضاف في عمليه بيع',
             'فتح ورديه',
             'اغلاق ورديه',
+            'تعديل سعر الدولار',
+            'حذف فاتورة',
         ];
 
         foreach ($permissions as $permission) {
