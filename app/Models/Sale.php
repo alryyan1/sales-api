@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Payment> $payments
  * @property-read int|null $payments_count
  * @property-read \App\Models\User|null $user
+ *
  * @method static \Database\Factories\SaleFactory factory($count = null, $state = [])
  * @method static \Illuminate\Database\Eloquent\Builder|Sale newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder|Sale newQuery()
@@ -39,6 +40,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereIsReturned($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUpdatedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder|Sale whereUserId($value)
+ *
  * @mixin \Eloquent
  */
 class Sale extends Model
@@ -56,6 +58,8 @@ class Sale extends Model
         'is_quote',
         'total_cost',
         'discount_amount',
+        'finance_exported_at',
+        'finance_export_error',
     ];
 
     protected $casts = [
@@ -63,6 +67,7 @@ class Sale extends Model
         'is_returned' => 'boolean',
         'is_quote' => 'boolean',
         'discount_amount' => 'decimal:2',
+        'finance_exported_at' => 'datetime',
     ];
 
     /**
@@ -148,6 +153,24 @@ class Sale extends Model
         $itemsTotal = (float) $this->items()->sum('total_price');
         $discount = (float) ($this->discount_amount ?? 0);
         $paid = $this->getCalculatedPaidAmountAttribute();
+
         return (float) max(0, $itemsTotal - $discount - $paid);
+    }
+
+    // Accessor for the sale's total revenue (subtotal - discount_amount), regardless of payment status
+    public function getCalculatedTotalAmountAttribute(): float
+    {
+        $itemsTotal = (float) $this->items()->sum('total_price');
+        $discount = (float) ($this->discount_amount ?? 0);
+
+        return (float) max(0, $itemsTotal - $discount);
+    }
+
+    // Accessor for the sale's total cost of goods sold (sum of cost_price_at_sale * quantity)
+    public function getCalculatedCostAmountAttribute(): float
+    {
+        return (float) $this->items()
+            ->selectRaw('COALESCE(SUM(cost_price_at_sale * quantity), 0) as total')
+            ->value('total');
     }
 }

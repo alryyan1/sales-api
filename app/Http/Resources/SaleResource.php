@@ -19,22 +19,24 @@ class SaleResource extends JsonResource
             'number' => $this->number,
             // Client Info
             'client_id' => $this->client_id,
-            'client_name' => $this->whenLoaded('client', fn() => $this->client?->name), // Use optional chaining
+            'client_name' => $this->whenLoaded('client', fn () => $this->client?->name), // Use optional chaining
             // Include full client object when eager loaded so frontend can pre-select it in UI
-            'client' => $this->whenLoaded('client', fn() => new ClientResource($this->client)),
+            'client' => $this->whenLoaded('client', fn () => new ClientResource($this->client)),
 
-             // User (Salesperson) Info
-             'user_id' => $this->user_id,
-             'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
-             'user' => $this->whenLoaded('user', fn() => $this->user ? ['id' => $this->user->id, 'name' => $this->user->name] : null),
+            // User (Salesperson) Info
+            'user_id' => $this->user_id,
+            'user_name' => $this->whenLoaded('user', fn () => $this->user?->name),
+            'user' => $this->whenLoaded('user', fn () => $this->user ? ['id' => $this->user->id, 'name' => $this->user->name] : null),
 
-             // Warehouse Info
-             'warehouse_id' => $this->warehouse_id,
-             'warehouse' => $this->whenLoaded('warehouse', fn() => $this->warehouse ? ['id' => $this->warehouse->id, 'name' => $this->warehouse->name] : null),
+            // Warehouse Info
+            'warehouse_id' => $this->warehouse_id,
+            'warehouse' => $this->whenLoaded('warehouse', fn () => $this->warehouse ? ['id' => $this->warehouse->id, 'name' => $this->warehouse->name] : null),
 
             'sale_date' => $this->sale_date->format('Y-m-d'),
             'is_returned' => $this->is_returned ?? false,
             'is_quote' => $this->is_quote ?? false,
+            'finance_exported_at' => $this->finance_exported_at?->toISOString(),
+            'finance_export_error' => $this->finance_export_error,
 
             // Subtotal from items; discount stored as amount; total = subtotal - discount
             'subtotal' => (float) $this->items->sum('total_price'),
@@ -48,7 +50,7 @@ class SaleResource extends JsonResource
             'paid_amount' => $this->getCalculatedPaidAmountAttribute(), // computed from payments
             'due_amount' => $this->getCalculatedDueAmountAttribute(),   // computed from items, discount, and payments
             'payments' => PaymentResource::collection($this->whenLoaded('payments')),
-            
+
         ];
     }
 }

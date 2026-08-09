@@ -2,24 +2,25 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Events\SaleCreated;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SaleItemResource;
+use App\Http\Resources\SaleResource;
+use App\Models\Product; // Needed for batch selection
+use App\Models\PurchaseItem;
 use App\Models\Sale;
-use App\Models\Product;
-use App\Models\PurchaseItem; // Needed for batch selection
 use App\Models\Shift;
-use App\Events\SaleCreated;
+use App\Services\FinanceBridgeService;
+use App\Services\Pdf\PdfHeaderRenderer;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use App\Http\Resources\SaleResource;
-use App\Services\Pdf\PdfHeaderRenderer;
-use TCPDF;
-use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use TCPDF;
 
 class SaleController extends Controller
 {
@@ -31,7 +32,7 @@ class SaleController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('id', $search)
                     ->orWhere('number', 'like', "%{$search}%")
-                    ->orWhereHas('client', fn($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
+                    ->orWhereHas('client', fn ($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
             });
         }
         // Status filtering removed because the status column was dropped.
@@ -43,9 +44,10 @@ class SaleController extends Controller
                     $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost', 'warehouses']);
                 },
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for expiry date
-                'payments.user:id,name,username' // Load payments with user relationship for today's sales
+                'payments.user:id,name,username', // Load payments with user relationship for today's sales
             ]);
             $sales = $query->latest('sale_date')->latest('id')->get();
+
             return SaleResource::collection($sales);
         }
         if ($request->boolean('for_current_user')) {
@@ -142,11 +144,12 @@ class SaleController extends Controller
                 $query->with(['category', 'stockingUnit', 'sellableUnit', 'purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost', 'warehouses']);
             },
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for expiry date
-            'payments.user:id,name,username' // Load payments with user relationship
+            'payments.user:id,name,username', // Load payments with user relationship
         ])
             ->whereDate('created_at', Carbon::today());
 
         $sales = $query->latest('created_at')->latest('id')->get();
+
         return response()->json(['data' => SaleResource::collection($sales)]);
     }
 
@@ -161,13 +164,13 @@ class SaleController extends Controller
             $currentShift = Shift::orderBy('id', 'desc')
                 ->first();
 
-            if (!$currentShift) {
+            if (! $currentShift) {
                 return response()->json([
                     'message' => 'لا توجد وردية مفتوحة. يرجى فتح وردية أولاً.',
                 ], Response::HTTP_BAD_REQUEST);
             }
 
-            $sale = DB::transaction(function () use ($validatedData, $request, $currentShift) {
+            $sale = DB::transaction(function () use ($request, $currentShift) {
                 $saleHeader = Sale::create([
                     'client_id' => null,
                     'user_id' => $request->user()->id,
@@ -191,16 +194,172 @@ class SaleController extends Controller
             return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
         } catch (\Throwable $e) {
 
-
             return response()->json($e->getMessage(), Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
+    /**
+     * Create a complete sale in a single request: header, items (with stock/cost
+     * resolution identical to addSaleItem), an optional discount (same math as
+     * updateDiscount), and optional payments (same shape as addPayment). Used by
+     * the client-side POS cart, which builds the whole sale locally and only
+     * talks to the server once, at the end.
+     */
+    public function store(Request $request)
+    {
+        $validatedData = $request->validate([
+            'client_id' => 'nullable|exists:clients,id',
+            'sale_date' => 'nullable|date_format:Y-m-d',
+            'shift_id' => 'nullable|exists:shifts,id',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'discount_type' => ['nullable', Rule::in(['percentage', 'fixed'])],
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.purchase_item_id' => 'nullable|exists:purchase_items,id',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_price' => 'required|numeric|min:0',
+            'payments' => 'nullable|array',
+            'payments.*.method' => 'nullable|string|in:cash,bankak,fawry,ocash',
+            'payments.*.amount' => 'nullable|numeric|min:0.01',
+            'payments.*.payment_date' => 'nullable|date_format:Y-m-d',
+            'payments.*.reference_number' => 'nullable|string|max:255',
+            'payments.*.notes' => 'nullable|string|max:65535',
+        ]);
 
+        if (! empty($validatedData['discount_amount']) && $validatedData['discount_amount'] > 0 && ! Auth::user()->can('تخفيض')) {
+            abort(403, 'This action is unauthorized.');
+        }
+        if (! empty($validatedData['payments']) && ! Auth::user()->can('سداد')) {
+            abort(403, 'This action is unauthorized.');
+        }
 
+        try {
+            $sale = DB::transaction(function () use ($validatedData, $request) {
+                $shift = ! empty($validatedData['shift_id'])
+                    ? Shift::find($validatedData['shift_id'])
+                    : Shift::orderBy('id', 'desc')->first();
 
+                $sale = Sale::create([
+                    'client_id' => $validatedData['client_id'] ?? null,
+                    'user_id' => $request->user()->id,
+                    'warehouse_id' => $request->user()->warehouse_id ?? 1,
+                    'shift_id' => $shift?->id,
+                    'sale_date' => $validatedData['sale_date'] ?? now(),
+                ]);
 
-  
+                $warehouseId = $sale->warehouse_id ?? 1;
+
+                foreach ($validatedData['items'] as $itemData) {
+                    $product = Product::findOrFail($itemData['product_id']);
+
+                    $availableInWarehouse = $product->countStock($warehouseId);
+                    $currentQuantityInThisSale = $sale->items()->where('product_id', $product->id)->sum('quantity');
+                    $availableForThisAdd = $availableInWarehouse - $currentQuantityInThisSale;
+
+                    if ($availableForThisAdd < $itemData['quantity']) {
+                        throw ValidationException::withMessages([
+                            'items' => ["Insufficient stock for '{$product->name}'. Available: {$availableForThisAdd}, Requested: {$itemData['quantity']}"],
+                        ]);
+                    }
+
+                    $unitPrice = (float) $itemData['unit_price'];
+                    if ($unitPrice <= 0) {
+                        $unitPrice = $product->last_sale_price_per_sellable_unit > 0
+                            ? (float) $product->last_sale_price_per_sellable_unit
+                            : 0;
+                    }
+
+                    $sale->items()->create([
+                        'product_id' => $product->id,
+                        'purchase_item_id' => $itemData['purchase_item_id'] ?? null,
+                        'batch_number_sold' => null,
+                        'quantity' => $itemData['quantity'],
+                        'unit_price' => $unitPrice,
+                        'total_price' => $itemData['quantity'] * $unitPrice,
+                        'cost_price_at_sale' => $this->resolveCostPrice($product),
+                    ]);
+
+                    $product->decrementWarehouseStock($warehouseId, $itemData['quantity']);
+                }
+
+                // Discount — same math as updateDiscount(), persisted only as an absolute amount
+                // (there is no discount_type column; the type is only used to compute the amount here).
+                if (! empty($validatedData['discount_amount']) && $validatedData['discount_amount'] > 0) {
+                    $subtotal = (float) $sale->items()->sum('total_price');
+                    $discountType = $validatedData['discount_type'] ?? 'fixed';
+
+                    if ($discountType === 'percentage') {
+                        if ($validatedData['discount_amount'] > 100) {
+                            throw ValidationException::withMessages([
+                                'discount_amount' => ['Discount percentage cannot exceed 100%'],
+                            ]);
+                        }
+                        $discountValue = $subtotal * ((float) $validatedData['discount_amount'] / 100);
+                    } else {
+                        $discountValue = min((float) $validatedData['discount_amount'], $subtotal);
+                    }
+
+                    $sale->update(['discount_amount' => round($discountValue, 2)]);
+                }
+
+                // Payments — same shape as addPayment()/addSinglePayment().
+                if (! empty($validatedData['payments'])) {
+                    foreach ($validatedData['payments'] as $paymentData) {
+                        if (isset($paymentData['method'], $paymentData['amount'])) {
+                            $sale->payments()->create([
+                                'user_id' => $request->user()->id,
+                                'shift_id' => $shift?->id,
+                                'method' => $paymentData['method'],
+                                'amount' => $paymentData['amount'],
+                                'payment_date' => $paymentData['payment_date'] ?? now()->format('Y-m-d'),
+                                'reference_number' => $paymentData['reference_number'] ?? null,
+                                'notes' => $paymentData['notes'] ?? null,
+                            ]);
+                        }
+                    }
+                }
+
+                return $sale;
+            });
+
+            $sale->load([
+                'client:id,name',
+                'user:id,name',
+                'warehouse:id,name',
+                'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
+                'items.product.warehouses',
+                'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
+                'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
+                'payments.user:id,name',
+            ]);
+
+            event(new SaleCreated($sale));
+
+            return response()->json(['sale' => new SaleResource($sale)], Response::HTTP_CREATED);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        } catch (\Throwable $e) {
+            Log::error('Error creating sale: '.$e->getMessage(), [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            $payload = [
+                'message' => 'Failed to create sale. Please try again.',
+                'error' => $e->getMessage(),
+            ];
+            if (config('app.debug')) {
+                $payload['file'] = $e->getFile();
+                $payload['line'] = $e->getLine();
+            }
+
+            return response()->json($payload, Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
     /**
      * Display the specified sale.
      */
@@ -216,8 +375,9 @@ class SaleController extends Controller
             'items.product.warehouses',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
-            'payments.user:id,name,username' // Load user relationship for payments to get user_name
+            'payments.user:id,name,username', // Load user relationship for payments to get user_name
         ]);
+
         return response()->json(['sale' => new SaleResource($sale)]);
     }
 
@@ -260,8 +420,9 @@ class SaleController extends Controller
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
-            'payments.user:id,name'
+            'payments.user:id,name',
         ]);
+
         return response()->json(['sale' => new SaleResource($sale)]);
     }
 
@@ -270,7 +431,7 @@ class SaleController extends Controller
      */
     public function destroy(Sale $sale)
     {
-        if (!Auth::user()->can('حذف فاتورة')) {
+        if (! Auth::user()->can('حذف فاتورة')) {
             abort(403, 'This action is unauthorized.');
         }
 
@@ -283,7 +444,7 @@ class SaleController extends Controller
         DB::beginTransaction();
         try {
             $warehouseId = $sale->warehouse_id ?? 1;
-            if (!$sale->is_quote) {
+            if (! $sale->is_quote) {
                 foreach ($sale->items()->with('product')->get() as $item) {
                     $item->product?->incrementWarehouseStock($warehouseId, $item->quantity);
                 }
@@ -324,22 +485,21 @@ class SaleController extends Controller
             'items.product.sellableUnit:id,name',
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
-            'payments.user:id,name'
+            'payments.user:id,name',
         ]);
+
         return response()->json([
             'message' => 'Client removed successfully.',
-            'sale' => new SaleResource($sale)
+            'sale' => new SaleResource($sale),
         ]);
     }
-
-
 
     /**
      * Add a payment to an existing sale.
      */
     public function addPayment(Request $request, Sale $sale)
     {
-        if (!Auth::user()->can('سداد')) {
+        if (! Auth::user()->can('سداد')) {
             abort(403, 'This action is unauthorized.');
         }
 
@@ -360,18 +520,18 @@ class SaleController extends Controller
                 $sale->payments()->delete();
 
                 // Create new payment records only if payments array is not empty
-                if (!empty($validatedData['payments'])) {
+                if (! empty($validatedData['payments'])) {
                     foreach ($validatedData['payments'] as $paymentData) {
                         // Only create payment if all required fields are present
                         if (isset($paymentData['method']) && isset($paymentData['amount']) && isset($paymentData['payment_date'])) {
                             $sale->payments()->create([
-                                'user_id'          => $request->user()->id,
-                                'shift_id'         => $latestShift?->id,
-                                'method'           => $paymentData['method'],
-                                'amount'           => $paymentData['amount'],
-                                'payment_date'     => $paymentData['payment_date'],
+                                'user_id' => $request->user()->id,
+                                'shift_id' => $latestShift?->id,
+                                'method' => $paymentData['method'],
+                                'amount' => $paymentData['amount'],
+                                'payment_date' => $paymentData['payment_date'],
                                 'reference_number' => $paymentData['reference_number'] ?? null,
-                                'notes'            => $paymentData['notes'] ?? null,
+                                'notes' => $paymentData['notes'] ?? null,
                             ]);
                         }
                     }
@@ -387,25 +547,25 @@ class SaleController extends Controller
                 'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
-                'payments.user:id,name,username' // Load user relationship for payments
+                'payments.user:id,name,username', // Load user relationship for payments
             ]);
 
             $message = empty($validatedData['payments']) ? 'All payments cleared successfully' : 'Payment(s) added successfully';
 
             return response()->json([
                 'message' => $message,
-                'sale' => new SaleResource($sale)
+                'sale' => new SaleResource($sale),
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
-            Log::error('Error adding payment to sale: ' . $e->getMessage(), [
+            Log::error('Error adding payment to sale: '.$e->getMessage(), [
                 'sale_id' => $sale->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to add payment. Please try again.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -430,23 +590,23 @@ class SaleController extends Controller
                 'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.sellableUnit:id,name',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
-                'payments.user:id,name,username' // Load user relationship for payments
+                'payments.user:id,name,username', // Load user relationship for payments
             ]);
 
             return response()->json([
                 'message' => 'All payments deleted successfully',
-                'sale' => new SaleResource($sale->fresh())
+                'sale' => new SaleResource($sale->fresh()),
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
-            Log::error('Error deleting payments from sale: ' . $e->getMessage(), [
+            Log::error('Error deleting payments from sale: '.$e->getMessage(), [
                 'sale_id' => $sale->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to delete payments. Please try again.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -461,9 +621,9 @@ class SaleController extends Controller
         ]);
 
         $latestShift = Shift::orderBy('id', 'desc')->first();
-        if (!$latestShift) {
+        if (! $latestShift) {
             return response()->json([
-                'message' => 'No shift found. Please open a shift first.'
+                'message' => 'No shift found. Please open a shift first.',
             ], Response::HTTP_BAD_REQUEST);
         }
 
@@ -472,7 +632,7 @@ class SaleController extends Controller
                 // Create a single payment record
                 $sale->payments()->create([
                     'user_id' => $request->user()->id,
-                    'shift_id' =>  $latestShift->id,
+                    'shift_id' => $latestShift->id,
                     'method' => $validatedData['method'],
                     'amount' => $validatedData['amount'],
                     'payment_date' => now()->format('Y-m-d'),
@@ -485,22 +645,22 @@ class SaleController extends Controller
                 'message' => 'Payment added successfully',
             ], Response::HTTP_CREATED);
         } catch (\Exception $e) {
-            Log::error('Error adding single payment to sale: ' . $e->getMessage(), [
+            Log::error('Error adding single payment to sale: '.$e->getMessage(), [
                 'sale_id' => $sale->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to add payment. Please try again.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     public function updateDiscount(Request $request, Sale $sale)
     {
-        if (!Auth::user()->can('تخفيض')) {
+        if (! Auth::user()->can('تخفيض')) {
             abort(403, 'This action is unauthorized.');
         }
 
@@ -520,7 +680,7 @@ class SaleController extends Controller
                     // Cap percentage to 100
                     if ($validated['discount_amount'] > 100) {
                         throw ValidationException::withMessages([
-                            'discount_amount' => ['Discount percentage cannot exceed 100%']
+                            'discount_amount' => ['Discount percentage cannot exceed 100%'],
                         ]);
                     }
                     $discountValue = $subtotal * ((float) $validated['discount_amount'] / 100);
@@ -534,8 +694,8 @@ class SaleController extends Controller
                 if ($discountValue > $maxDiscountAllowed) {
                     throw ValidationException::withMessages([
                         'discount_amount' => [
-                            "Discount cannot exceed remaining due. Max allowed: {$maxDiscountAllowed}"
-                        ]
+                            "Discount cannot exceed remaining due. Max allowed: {$maxDiscountAllowed}",
+                        ],
                     ]);
                 }
 
@@ -554,33 +714,34 @@ class SaleController extends Controller
                 'items.product.warehouses',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
-                'payments.user:id,name'
+                'payments.user:id,name',
             ]);
 
             return response()->json([
                 'message' => 'Discount updated successfully',
-                'sale' => new SaleResource($sale)
+                'sale' => new SaleResource($sale),
             ], Response::HTTP_OK);
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
             Log::error('Failed to update sale discount', [
                 'sale_id' => $sale->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
+
             return response()->json([
-                'message' => 'Failed to update discount. Please try again.'
+                'message' => 'Failed to update discount. Please try again.',
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     public function deleteSinglePayment(Sale $sale, $paymentId)
     {
-        if (!Auth::user()->can('الغاء سداد')) {
+        if (! Auth::user()->can('الغاء سداد')) {
             abort(403, 'This action is unauthorized.');
         }
 
@@ -595,16 +756,16 @@ class SaleController extends Controller
                 'message' => 'Payment deleted successfully',
             ], Response::HTTP_OK);
         } catch (\Exception $e) {
-            Log::error('Error deleting single payment from sale: ' . $e->getMessage(), [
+            Log::error('Error deleting single payment from sale: '.$e->getMessage(), [
                 'sale_id' => $sale->id,
                 'payment_id' => $paymentId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to delete payment. Please try again.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -633,7 +794,7 @@ class SaleController extends Controller
                     $additionalQuantity = $validatedData['quantity'];
                     $newQuantity = $oldQuantity + $additionalQuantity;
 
-                    if (!$sale->is_quote) {
+                    if (! $sale->is_quote) {
                         // Check stock availability for the additional quantity
                         $availableInWarehouse = $product->countStock($warehouseId);
                         $currentInOtherItems = $sale->items()
@@ -644,7 +805,7 @@ class SaleController extends Controller
 
                         if ($availableForThisItem < $additionalQuantity) {
                             throw ValidationException::withMessages([
-                                'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested total: {$newQuantity}"
+                                'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForThisItem}, requested total: {$newQuantity}",
                             ]);
                         }
 
@@ -673,24 +834,24 @@ class SaleController extends Controller
                         'sale_items' => [$existingSaleItem],
                         'new_total' => $newTotal,
                         'new_due_amount' => $newDueAmount,
-                        'quantity_increased' => true
+                        'quantity_increased' => true,
                     ];
                 }
 
                 $warehouseId = $sale->warehouse_id ?? 1;
-                if (!$sale->is_quote) {
+                if (! $sale->is_quote) {
                     $availableInWarehouse = $product->countStock($warehouseId);
                     $currentQuantityInThisSale = $sale->items()->where('product_id', $product->id)->sum('quantity');
                     $availableForThisAdd = $availableInWarehouse - $currentQuantityInThisSale;
 
                     if ($availableForThisAdd <= 0) {
                         throw ValidationException::withMessages([
-                            'product_id' => "Product '{$product->name}' is out of stock in warehouse. Available: 0"
+                            'product_id' => "Product '{$product->name}' is out of stock in warehouse. Available: 0",
                         ]);
                     }
                     if ($validatedData['quantity'] > $availableForThisAdd) {
                         throw ValidationException::withMessages([
-                            'quantity' => "Insufficient stock. Available: {$availableForThisAdd}, Requested: {$validatedData['quantity']}"
+                            'quantity' => "Insufficient stock. Available: {$availableForThisAdd}, Requested: {$validatedData['quantity']}",
                         ]);
                     }
                 }
@@ -713,7 +874,7 @@ class SaleController extends Controller
                 ]);
                 $saleItems = [$saleItem];
 
-                if (!$sale->is_quote) {
+                if (! $sale->is_quote) {
                     $product->decrementWarehouseStock($warehouseId, $validatedData['quantity']);
                 }
 
@@ -724,7 +885,7 @@ class SaleController extends Controller
                 return [
                     'sale_items' => $saleItems,
                     'new_total' => $newTotal,
-                    'new_due_amount' => $newDueAmount
+                    'new_due_amount' => $newDueAmount,
                 ];
             });
 
@@ -737,7 +898,7 @@ class SaleController extends Controller
                 'items.product.warehouses',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
-                'payments.user:id,name'
+                'payments.user:id,name',
             ]);
 
             // Check if quantity was increased for existing item
@@ -745,30 +906,31 @@ class SaleController extends Controller
                 return response()->json([
                     'message' => 'Sale item quantity increased successfully',
                     'sale' => new SaleResource($sale),
-                    'added_items' => SaleItemResource::collection($result['sale_items'])
+                    'added_items' => SaleItemResource::collection($result['sale_items']),
                 ], Response::HTTP_OK);
             }
 
             return response()->json([
                 'message' => 'Sale item added successfully',
                 'sale' => new SaleResource($sale),
-                'added_items' => SaleItemResource::collection($result['sale_items'])
+                'added_items' => SaleItemResource::collection($result['sale_items']),
             ], Response::HTTP_CREATED);
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
 
             $payload = [
                 'message' => 'Failed to add sale item. Please try again.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ];
             if (config('app.debug')) {
                 $payload['file'] = $e->getFile();
                 $payload['line'] = $e->getLine();
             }
+
             return response()->json($payload, Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -792,13 +954,13 @@ class SaleController extends Controller
                 $quantityDifference = $newQuantity - $oldQuantity;
 
                 $warehouseId = $sale->warehouse_id ?? 1;
-                if (!$sale->is_quote) {
+                if (! $sale->is_quote) {
                     if ($quantityDifference > 0) {
                         // Business rule: each sale must have at most ONE item per product.
                         // We only need stock for the INCREASE (quantityDifference), not the whole new quantity.
                         $availableInWarehouse = $product->countStock($warehouseId);
-                        Log::info('Available in warehouse: ' . $availableInWarehouse);
-                        Log::info('Quantity difference: ' . $quantityDifference);
+                        Log::info('Available in warehouse: '.$availableInWarehouse);
+                        Log::info('Quantity difference: '.$quantityDifference);
 
                         // In a valid state there should be no other items with the same product,
                         // but we still exclude the current     row defensively in case of legacy data.
@@ -811,7 +973,7 @@ class SaleController extends Controller
 
                         if ($availableForIncrease < $quantityDifference) {
                             throw ValidationException::withMessages([
-                                'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForIncrease}, additional requested: {$quantityDifference}"
+                                'quantity' => "Insufficient stock for '{$product->name}'. Available in warehouse: {$availableForIncrease}, additional requested: {$quantityDifference}",
                             ]);
                         }
                     }
@@ -831,7 +993,7 @@ class SaleController extends Controller
                     if ($newBatchId) {
                         $newBatch = PurchaseItem::whereKey($newBatchId)
                             ->where('product_id', $product->id)
-                            ->whereHas('purchase', fn($q) => $q->where('warehouse_id', $warehouseId))
+                            ->whereHas('purchase', fn ($q) => $q->where('warehouse_id', $warehouseId))
                             ->first();
                         if ($newBatch) {
                             $saleItem->purchase_item_id = $newBatch->id;
@@ -860,7 +1022,7 @@ class SaleController extends Controller
                 return [
                     'updated_item' => $saleItem,
                     'new_total' => $newSubtotal,
-                    'new_due_amount' => $newDueAmount
+                    'new_due_amount' => $newDueAmount,
                 ];
             });
 
@@ -873,36 +1035,35 @@ class SaleController extends Controller
                 'items.product.warehouses',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
-                'payments.user:id,name'
+                'payments.user:id,name',
             ]);
 
             return response()->json([
                 'message' => 'Sale item updated successfully',
-                'sale' => new SaleResource($sale)
+                'sale' => new SaleResource($sale),
             ], Response::HTTP_OK);
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
 
             return response()->json([
-                'message' => 'Failed to update sale item. Please try again.'
+                'message' => 'Failed to update sale item. Please try again.',
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     public function deleteSaleItem(Request $request, Sale $sale, $saleItemId)
     {
-        if (!Auth::user()->can('حذف منتج مضاف في عمليه بيع')) {
+        if (! Auth::user()->can('حذف منتج مضاف في عمليه بيع')) {
             abort(403, 'This action is unauthorized.');
         }
 
         try {
             // Find the sale item
             $saleItem = $sale->items()->findOrFail($saleItemId);
-
 
             // Start transaction
             DB::beginTransaction();
@@ -914,7 +1075,7 @@ class SaleController extends Controller
 
                 // Return quantity to warehouse (SSOT) — skip for quote mode
                 $warehouseId = $sale->warehouse_id ?? 1;
-                if (!$sale->is_quote) {
+                if (! $sale->is_quote) {
                     $product->incrementWarehouseStock($warehouseId, $saleItem->quantity);
                 }
 
@@ -922,15 +1083,11 @@ class SaleController extends Controller
                 $deletedQuantity = $saleItem->quantity;
                 $productName = $product ? $product->name : 'Unknown Product';
 
-
-
                 $saleItem->delete();
 
                 // Recalculate sale totals after deletion
                 $sale->refresh(); // Refresh to get updated items
                 $remainingItems = $sale->items()->get(); // Always fresh from DB
-
-
 
                 $newSubtotal = $remainingItems->sum('total_price');
                 $newTotalAmount = $newSubtotal; // No tax calculation for now
@@ -943,15 +1100,13 @@ class SaleController extends Controller
 
                 DB::commit();
 
-
-
                 return response()->json([
                     'message' => "Sale item deleted successfully. {$deletedQuantity} units of {$productName} returned to inventory.",
                     'deleted_quantity' => $deletedQuantity,
                     'product_name' => $productName,
                     'returned_to_batch' => $purchaseItem ? $purchaseItem->batch_number : null,
                     'new_sale_total' => $newTotalAmount,
-                    'remaining_items_count' => $remainingItems->count()
+                    'remaining_items_count' => $remainingItems->count(),
                 ], Response::HTTP_OK);
             } catch (\Exception $e) {
                 DB::rollBack();
@@ -960,19 +1115,19 @@ class SaleController extends Controller
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
                 'message' => 'Sale item not found.',
-                'error' => 'Sale item does not exist'
+                'error' => 'Sale item does not exist',
             ], Response::HTTP_NOT_FOUND);
         } catch (\Exception $e) {
             Log::error('Failed to delete sale item', [
                 'sale_id' => $sale->id,
                 'sale_item_id' => $saleItemId,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'message' => 'Failed to delete sale item. Please try again.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -980,8 +1135,7 @@ class SaleController extends Controller
     /**
      * Generate and download a PDF invoice for a specific sale.
      *
-     * @param Request $request
-     * @param Sale $sale (Route Model Binding)
+     * @param  Sale  $sale  (Route Model Binding)
      * @return \Illuminate\Http\Response
      */
     public function downloadInvoicePDF(Request $request, Sale $sale)
@@ -998,13 +1152,13 @@ class SaleController extends Controller
             'warehouse:id,name',
             'items.product:id,name,sku,scientific_name,image_url', // Product details for each item
             'items.purchaseItemBatch:id,batch_number', // Batch number sold from
-            'payments' // Load payments made against this invoice
+            'payments', // Load payments made against this invoice
         ]);
 
         $renderer = new PdfHeaderRenderer('invoice');
 
         // --- Company & Invoice Info (from config and Sale) ---
-        $settings = (new \App\Services\SettingsService())->getAll();
+        $settings = (new \App\Services\SettingsService)->getAll();
         $invoicePrefix = $settings['invoice_prefix'] ?? 'INV-';
 
         $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
@@ -1014,7 +1168,7 @@ class SaleController extends Controller
         $pdf->SetAutoPageBreak(true, 15);
 
         // --- Set PDF Metadata ---
-        $pdf->SetTitle('فاتورة مبيعات - ' . $sale->id);
+        $pdf->SetTitle('فاتورة مبيعات - '.$sale->id);
         $pdf->SetSubject('فاتورة مبيعات');
 
         $pdf->AddPage();
@@ -1025,10 +1179,9 @@ class SaleController extends Controller
         $pdf->SetFont('arial', 'B', 16);
         $pdf->Cell(0, 8, 'فاتورة مبيعات', 0, 1, 'C');
         $pdf->SetFont('arial', '', 9);
-        $pdf->Cell(0, 6, 'رقم الفاتورة: ' . ($invoicePrefix . $sale->id), 0, 1, 'C');
-        $pdf->Cell(0, 5, 'تاريخ الفاتورة: ' . Carbon::parse($sale->sale_date)->format('Y-m-d'), 0, 1, 'C');
+        $pdf->Cell(0, 6, 'رقم الفاتورة: '.($invoicePrefix.$sale->id), 0, 1, 'C');
+        $pdf->Cell(0, 5, 'تاريخ الفاتورة: '.Carbon::parse($sale->sale_date)->format('Y-m-d'), 0, 1, 'C');
         $pdf->Ln(5);
-
 
         // --- Bill To (Client Details) ---
         $pdf->SetFont('arial', 'B', 10);
@@ -1040,10 +1193,10 @@ class SaleController extends Controller
                 $pdf->MultiCell(0, 5, $sale->client->address, 0, 'R', 0, 1, null, null, true, 0, false, true, 0, 'T');
             }
             if ($sale->client->phone) {
-                $pdf->Cell(0, 5, 'الهاتف: ' . $sale->client->phone, 0, 1, 'R');
+                $pdf->Cell(0, 5, 'الهاتف: '.$sale->client->phone, 0, 1, 'R');
             }
             if ($sale->client->email) {
-                $pdf->Cell(0, 5, 'البريد الإلكتروني: ' . $sale->client->email, 0, 1, '');
+                $pdf->Cell(0, 5, 'البريد الإلكتروني: '.$sale->client->email, 0, 1, '');
             }
         } else {
             $pdf->Cell(0, 5, 'عميل نقدي / غير محدد', 0, 1, 'R');
@@ -1062,7 +1215,7 @@ class SaleController extends Controller
         $w_items = [35, 20, 30, 100];
         $header_items = ['الإجمالي', 'سعر الوحدة', 'الكمية', 'الوصف / المنتج']; // Reversed for RTL
 
-        for ($i = 0; $i < count($header_items); ++$i) {
+        for ($i = 0; $i < count($header_items); $i++) {
             $pdf->Cell($w_items[$i], 7, $header_items[$i], 1, 0, 'C', true);
         }
         $pdf->Ln();
@@ -1074,10 +1227,10 @@ class SaleController extends Controller
             // Product Name & SKU & Batch
             $productDescription = $item->product?->name ?: 'منتج غير معروف';
             if ($item->product?->sku) {
-                $productDescription .= "\n" . ' (SKU: ' . $item->product->sku . ')';
+                $productDescription .= "\n".' (SKU: '.$item->product->sku.')';
             }
             if ($item->batch_number_sold) {
-                $productDescription .= "\n" . 'دفعة: ' . $item->batch_number_sold;
+                $productDescription .= "\n".'دفعة: '.$item->batch_number_sold;
             }
 
             $lineHeight = $pdf->getStringHeight($w_items[3], $productDescription); // Calculate height needed for description
@@ -1092,7 +1245,7 @@ class SaleController extends Controller
             $pdf->MultiCell($w_items[3], $lineHeight, $productDescription, 'LRB', 'R', $fill, 1, $x, $y, true, 0, false, true, $lineHeight, 'M');
             // $pdf->Ln($lineHeight); // MultiCell with ln=1 already adds line break
 
-            $fill = !$fill;
+            $fill = ! $fill;
         }
         // $pdf->Cell(array_sum($w_items), 0, '', 'T'); // Top border for summary
         $pdf->Ln(0.1); // Tiny break to ensure totals are visually distinct
@@ -1124,7 +1277,6 @@ class SaleController extends Controller
         $pdf->Cell($col1Width, 7, 'المبلغ المتبقي:', 'LTRB', 0, 'L', false);
         $pdf->Cell($col2Width, 7, number_format($due, 0), 'TRB', 1, 'R', false);
 
-
         // --- Payments Information ---
         if ($sale->payments && $sale->payments->count() > 0) {
             $pdf->Ln(6);
@@ -1132,15 +1284,15 @@ class SaleController extends Controller
             $pdf->Cell(0, 7, 'تفاصيل الدفع:', 0, 1, 'R');
             $pdf->SetFont('arial', '', 8);
             foreach ($sale->payments as $payment) {
-                $paymentText = "طريقة الدفع: " . config('app_settings.payment_methods.' . $payment->method, $payment->method); // Assuming payment_methods in config
-                $paymentText .= "  |  المبلغ: " . number_format((float) $payment->amount, 0);
-                $paymentText .= "  |  التاريخ: " . Carbon::parse($payment->payment_date)->format('Y-m-d');
-                if ($payment->reference_number)
-                    $paymentText .= "  |  مرجع: " . $payment->reference_number;
+                $paymentText = 'طريقة الدفع: '.config('app_settings.payment_methods.'.$payment->method, $payment->method); // Assuming payment_methods in config
+                $paymentText .= '  |  المبلغ: '.number_format((float) $payment->amount, 0);
+                $paymentText .= '  |  التاريخ: '.Carbon::parse($payment->payment_date)->format('Y-m-d');
+                if ($payment->reference_number) {
+                    $paymentText .= '  |  مرجع: '.$payment->reference_number;
+                }
                 $pdf->MultiCell(0, 5, $paymentText, 0, 'R', 0, 1);
             }
         }
-
 
         // --- Notes / Terms & Conditions ---
         if ($sale->notes) {
@@ -1156,7 +1308,7 @@ class SaleController extends Controller
         $pdf->MultiCell(0, 5, $terms, 0, 'C', 0, 1);
 
         // --- Output PDF ---
-        $pdfFileName = 'invoice_' . $sale->id . '_' . now()->format('Ymd') . '.pdf';
+        $pdfFileName = 'invoice_'.$sale->id.'_'.now()->format('Ymd').'.pdf';
         $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
 
         return response($pdfContent, 200)
@@ -1164,6 +1316,7 @@ class SaleController extends Controller
             ->header('Content-Disposition', "inline; filename=\"{$pdfFileName}\""); // inline to display in browser
         //  ->header('Content-Disposition', "attachment; filename=\"{$pdfFileName}\""); // to force download
     }
+
     public function downloadThermalInvoicePDF(Request $request, Sale $sale)
     {
         try {
@@ -1192,19 +1345,19 @@ class SaleController extends Controller
             $pdf->setPrintHeader(false);
             $pdf->setPrintFooter(false);
             $pdf->SetMargins(4, 5, 4); // L, T, R
-            $pdf->SetAutoPageBreak(TRUE, 5); // Bottom margin
+            $pdf->SetAutoPageBreak(true, 5); // Bottom margin
             $pdf->AddPage();
             $pdf->setRTL(false); // Ensure RTL for Arabic content
 
             // --- Company Info (Simplified for Thermal) ---
-            $settingsThermal = (new \App\Services\SettingsService())->getAll();
+            $settingsThermal = (new \App\Services\SettingsService)->getAll();
             $companyName = $settingsThermal['company_name'] ?? 'Your Company';
             $companyPhone = $settingsThermal['company_phone'] ?? '';
             $companyLogoUrl = $settingsThermal['company_logo_url'] ?? null;
             // $vatNumber = config('app_settings.vat_number', ''); // If applicable
 
             // Draw logo if exists
-            if (!empty($companyLogoUrl) && is_string($companyLogoUrl)) {
+            if (! empty($companyLogoUrl) && is_string($companyLogoUrl)) {
                 try {
                     $path = parse_url($companyLogoUrl, PHP_URL_PATH) ?: '';
                     $logoPath = $companyLogoUrl;
@@ -1212,7 +1365,7 @@ class SaleController extends Controller
                         $storagePos = strpos($path, '/storage/');
                         if ($storagePos !== false) {
                             $relative = substr($path, $storagePos + strlen('/storage/'));
-                            $candidate = public_path('storage/' . ltrim($relative, '/'));
+                            $candidate = public_path('storage/'.ltrim($relative, '/'));
                             if (file_exists($candidate)) {
                                 $logoPath = $candidate;
                             }
@@ -1232,7 +1385,7 @@ class SaleController extends Controller
             $pdf->MultiCell(0, 5, $companyName, 0, 'C', 0, 1);
             if ($companyPhone) {
                 $pdf->SetFont('arial', '', 8);
-                $pdf->MultiCell(0, 4, 'الهاتف: ' . $companyPhone, 0, 'C', 0, 1);
+                $pdf->MultiCell(0, 4, 'الهاتف: '.$companyPhone, 0, 'C', 0, 1);
             }
             // if ($vatNumber) {
             //     $pdf->MultiCell(0, 4, 'الرقم الضريبي: ' . $vatNumber, 0, 'C', 0, 1);
@@ -1241,16 +1394,16 @@ class SaleController extends Controller
 
             // --- Invoice Info ---
             $pdf->SetFont('arial', '', 9);
-            $pdf->Cell(0, 4, 'فاتورة رقم: S-' . $sale->id, 0, 1, 'R');
-            $pdf->Cell(0, 4, 'التاريخ: ' . Carbon::parse($sale->sale_date)->format('Y/m/d') . ' ' . Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
+            $pdf->Cell(0, 4, 'فاتورة رقم: S-'.$sale->id, 0, 1, 'R');
+            $pdf->Cell(0, 4, 'التاريخ: '.Carbon::parse($sale->sale_date)->format('Y/m/d').' '.Carbon::parse($sale->created_at)->format('H:i'), 0, 1, 'R');
             if ($sale->client) {
-                $pdf->Cell(0, 4, 'العميل: ' . $sale->client->name, 0, 1, 'R');
+                $pdf->Cell(0, 4, 'العميل: '.$sale->client->name, 0, 1, 'R');
             }
             if ($sale->user) {
-                $pdf->Cell(0, 4, 'البائع: ' . $sale->user->name, 0, 1, 'R');
+                $pdf->Cell(0, 4, 'البائع: '.$sale->user->name, 0, 1, 'R');
             }
             if ($sale->warehouse) {
-                $pdf->Cell(0, 4, 'الفرع: ' . $sale->warehouse->name, 0, 1, 'R');
+                $pdf->Cell(0, 4, 'الفرع: '.$sale->warehouse->name, 0, 1, 'R');
             }
             $pdf->Ln(1);
             $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
@@ -1274,7 +1427,7 @@ class SaleController extends Controller
                 $productName = $item->product?->name ?: 'Product N/A';
                 // Truncate or wrap product name if too long for thermal width
                 if (mb_strlen($productName) > 20) { // Example length check
-                    $productName = mb_substr($productName, 0, 18) . '..';
+                    $productName = mb_substr($productName, 0, 18).'..';
                 }
 
                 $itemTotal = number_format((float) $item->total_price, 0);
@@ -1323,14 +1476,13 @@ class SaleController extends Controller
                 foreach ($sale->payments as $payment) {
                     $methodLabel = $payment->method;
                     if (function_exists('config')) {
-                        $methodLabel = config('app_settings.payment_methods_ar.' . $payment->method, $payment->method);
+                        $methodLabel = config('app_settings.payment_methods_ar.'.$payment->method, $payment->method);
                     }
-                    $pdf->Cell(46, 4, $methodLabel . ':', 0, 0, 'R');
+                    $pdf->Cell(46, 4, $methodLabel.':', 0, 0, 'R');
                     $pdf->Cell(26, 4, number_format((float) $payment->amount, 0), 0, 1, 'R');
                 }
                 $pdf->Ln(1);
             }
-
 
             // --- Footer Message ---
             $pdf->SetFont('arial', '', 7);
@@ -1351,7 +1503,7 @@ class SaleController extends Controller
             $pdf->Cell(0, 3, $barcodeCode, 0, 1, 'C');
 
             // --- Output PDF ---
-            $pdfFileName = 'thermal_invoice_' . $sale->id . '.pdf';
+            $pdfFileName = 'thermal_invoice_'.$sale->id.'.pdf';
             $pdfContent = $pdf->Output($pdfFileName, 'S'); // 'S' returns as string
 
             return response($pdfContent, 200)
@@ -1359,7 +1511,8 @@ class SaleController extends Controller
             // No 'Content-Disposition: attachment' - frontend will handle display
 
         } catch (\Throwable $e) {
-            Log::error("Error generating thermal invoice PDF for sale {$sale->id}: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            Log::error("Error generating thermal invoice PDF for sale {$sale->id}: ".$e->getMessage()."\n".$e->getTraceAsString());
+
             return response()->json([
                 'message' => 'Failed to generate thermal invoice PDF.',
                 'error' => $e->getMessage(), // Show error in dev
@@ -1396,15 +1549,16 @@ class SaleController extends Controller
             'total_sales_found' => $sales->count(),
             'sales_details' => $sales->map(function ($sale) {
                 $totalAmount = (float) ($sale->items?->sum('total_price') ?? 0);
+
                 return [
                     'id' => $sale->id,
                     'total_amount' => $totalAmount,
                     'user_id' => $sale->user_id,
                     'user_name' => $sale->user?->name,
                     'payments_count' => $sale->payments->count(),
-                    'payments_sum' => $sale->payments->sum('amount')
+                    'payments_sum' => $sale->payments->sum('amount'),
                 ];
-            })
+            }),
         ]);
 
         // Calculate total income based on actual payments received
@@ -1428,6 +1582,7 @@ class SaleController extends Controller
         // User breakdown
         $userPayments = $sales->groupBy('user_id')->map(function ($userSales, $userId) {
             $user = $userSales->first()->user;
+
             return [
                 'user_id' => (int) $userId,
                 'user_name' => $user ? $user->name : 'Unknown User',
@@ -1448,9 +1603,7 @@ class SaleController extends Controller
 
     /**
      * Add multiple items to an existing sale.
-     * 
-     * @param Request $request
-     * @param Sale $sale
+     *
      * @return \Illuminate\Http\JsonResponse
      */
     public function addMultipleSaleItems(Request $request, Sale $sale)
@@ -1479,6 +1632,7 @@ class SaleController extends Controller
 
                         if ($existingSaleItem) {
                             $errors[] = "Product '{$product->name}' already exists in sale";
+
                             continue;
                         }
 
@@ -1489,10 +1643,12 @@ class SaleController extends Controller
 
                         if ($availableForThisAdd <= 0) {
                             $errors[] = "Product '{$product->name}' is out of stock in warehouse. Available: 0";
+
                             continue;
                         }
                         if ($itemData['quantity'] > $availableForThisAdd) {
                             $errors[] = "Insufficient stock for '{$product->name}'. Available: {$availableForThisAdd}, Requested: {$itemData['quantity']}";
+
                             continue;
                         }
 
@@ -1517,7 +1673,7 @@ class SaleController extends Controller
 
                         $product->decrementWarehouseStock($warehouseId, $itemData['quantity']);
                     } catch (\Exception $e) {
-                        $errors[] = "Failed to add product at index {$index}: " . $e->getMessage();
+                        $errors[] = "Failed to add product at index {$index}: ".$e->getMessage();
                     }
                 }
 
@@ -1530,7 +1686,7 @@ class SaleController extends Controller
                     'total_added' => $totalAdded,
                     'errors' => $errors,
                     'new_total' => $newTotal,
-                    'new_due_amount' => $newDueAmount
+                    'new_due_amount' => $newDueAmount,
                 ];
             });
 
@@ -1542,15 +1698,15 @@ class SaleController extends Controller
                 'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
                 'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
                 'items.purchaseItemBatch:id,batch_number,unit_cost',
-                'payments.user:id,name'
+                'payments.user:id,name',
             ]);
 
             $message = $result['total_added'] > 0
                 ? "Successfully added {$result['total_added']} item(s)"
-                : "No items were added";
+                : 'No items were added';
 
-            if (!empty($result['errors'])) {
-                $message .= ". Errors: " . implode(', ', $result['errors']);
+            if (! empty($result['errors'])) {
+                $message .= '. Errors: '.implode(', ', $result['errors']);
             }
 
             return response()->json([
@@ -1558,22 +1714,23 @@ class SaleController extends Controller
                 'sale' => new SaleResource($sale),
                 'added_items' => SaleItemResource::collection($result['added_items']),
                 'total_added' => $result['total_added'],
-                'errors' => $result['errors']
+                'errors' => $result['errors'],
             ], Response::HTTP_CREATED);
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
             Log::error('Failed to add multiple sale items', [
                 'sale_id' => $sale->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
+
             return response()->json([
                 'message' => 'Failed to add sale items. Please try again.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
@@ -1584,6 +1741,7 @@ class SaleController extends Controller
     public function downloadA4InvoicePdf(Sale $sale)
     {
         $invoiceService = app(\App\Services\InvoicePdfService::class);
+
         return $invoiceService->downloadInvoice($sale);
     }
 
@@ -1593,6 +1751,7 @@ class SaleController extends Controller
     public function viewA4InvoicePdf(Sale $sale)
     {
         $invoiceService = app(\App\Services\InvoicePdfService::class);
+
         return $invoiceService->viewInvoice($sale);
     }
 
@@ -1603,7 +1762,7 @@ class SaleController extends Controller
      */
     public function toggleQuote(Sale $sale)
     {
-        $newIsQuote = !$sale->is_quote;
+        $newIsQuote = ! $sale->is_quote;
         $sale->load('items.product');
 
         try {
@@ -1622,7 +1781,7 @@ class SaleController extends Controller
                             $available = $item->product->countStock($sale->warehouse_id);
                             if ($available < $item->quantity) {
                                 throw ValidationException::withMessages([
-                                    'stock' => 'مخزون غير كافٍ للمنتج: ' . $item->product->name
+                                    'stock' => 'مخزون غير كافٍ للمنتج: '.$item->product->name,
                                 ]);
                             }
                         }
@@ -1639,12 +1798,12 @@ class SaleController extends Controller
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (\Throwable $e) {
             return response()->json([
                 'message' => 'Failed to toggle quote mode.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
 
@@ -1655,7 +1814,40 @@ class SaleController extends Controller
             'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
             'items.product.warehouses',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
-            'payments.user:id,name'
+            'payments.user:id,name',
+        ]);
+
+        return response()->json(new SaleResource($sale));
+    }
+
+    /**
+     * Manually export a sale as a journal entry to finance-api, via Firestore.
+     * User-triggered only — no automatic hook on sale creation. Idempotent:
+     * the Firestore doc id is derived from the sale id, so re-triggering just
+     * overwrites the pending document rather than creating a duplicate.
+     */
+    public function exportToFinance(Sale $sale, FinanceBridgeService $financeBridge)
+    {
+        try {
+            $financeBridge->exportSale($sale);
+        } catch (\Throwable $e) {
+            $sale->update(['finance_export_error' => $e->getMessage()]);
+
+            return response()->json([
+                'message' => $e->getMessage(),
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $sale->update(['finance_exported_at' => now(), 'finance_export_error' => null]);
+
+        $sale->load([
+            'client:id,name',
+            'user:id,name',
+            'warehouse:id,name',
+            'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url',
+            'items.product.warehouses',
+            'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date',
+            'payments.user:id,name',
         ]);
 
         return response()->json(new SaleResource($sale));

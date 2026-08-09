@@ -2,12 +2,12 @@
 
 namespace Database\Seeders;
 
+use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
-use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
-use App\Models\User;
 
 class RolesAndPermissionsSeeder extends Seeder
 {
@@ -92,8 +92,13 @@ class RolesAndPermissionsSeeder extends Seeder
         }
 
         $this->command->info('New roles created.');
-    }
 
+        // Grant the admin role every permission that exists.
+        $adminRole = Role::where('name', 'ادمن')->first();
+        $adminRole?->givePermissionTo(Permission::all());
+
+        $this->command->info('Granted all permissions to "ادمن" role.');
+    }
 
     /**
      * Assign the admin role to the superadmin user.

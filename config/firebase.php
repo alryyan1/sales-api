@@ -30,5 +30,17 @@ return [
     | Set FIREBASE_STORAGE_BUCKET in .env.
     |
     */
-    'storage_bucket' => env('FIREBASE_STORAGE_BUCKET', env('FIREBASE_PROJECT_ID', 'one-care-628d0') . '.appspot.com'),
+    'storage_bucket' => env('FIREBASE_STORAGE_BUCKET', env('FIREBASE_PROJECT_ID', 'one-care-628d0').'.appspot.com'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Finance Bridge Firestore Collection
+    |--------------------------------------------------------------------------
+    |
+    | The tenant segment of the shared path finance-api's "Firebase" import
+    | button reads from: finance/{collection_name}/journal_entries/{docId}.
+    | Must match finance-api's own "firebase_collection_name" Setting.
+    |
+    */
+    'finance_bridge_collection' => env('FINANCE_BRIDGE_COLLECTION_NAME', 'jawda'),
 ];
