@@ -167,7 +167,7 @@ class SalesReportPdfService
         }
         $pdf->Ln();
 
-        // Calculations (totals include 'other' amounts even though it has no dedicated column)
+        // Calculations
         $revCash    = (float)($paymentMethods['cash']          ?? 0);
         $revBank    = (float)($paymentMethods['bank_transfer'] ?? 0);
         $revVisa    = (float)($paymentMethods['visa']          ?? 0);
@@ -311,7 +311,7 @@ class SalesReportPdfService
 
     private function fmt(float $v): string
     {
-        return number_format($v, 2);
+        return number_format($v, 3);
     }
 
     private function buildPeriodText(?Carbon $s, ?Carbon $e): string
@@ -348,7 +348,7 @@ class SalesReportPdfService
     private function methodLabel(string $m): string
     {
         return ['cash' => 'نقدي', 'bank_transfer' => 'تحويل بنكي',
-                'visa' => 'فيزا', 'other' => 'أخرى'][$m] ?? $m;
+                'visa' => 'فيزا'][$m] ?? $m;
     }
 
     private function getSaleTotalAmount(Sale $sale): float

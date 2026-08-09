@@ -257,11 +257,11 @@ class DailySalesPdfService
         $pdf->SetFont('arial', 'B', 12);
         $pdf->SetFillColor(255, 255, 255);
         $pdf->Cell($colWidths[0], 10, (string)$summary['totalSales'], 1, 0, 'C', true);
-        $pdf->Cell($colWidths[1], 10, number_format($summary['totalAmount'], 0), 1, 0, 'C', true);
-        $pdf->Cell($colWidths[2], 10, number_format($summary['totalPaid'], 0), 1, 0, 'C', true);
-        $pdf->Cell($colWidths[3], 10, number_format($summary['totalDiscount'], 0), 1, 0, 'C', true);
+        $pdf->Cell($colWidths[1], 10, number_format($summary['totalAmount'], 3), 1, 0, 'C', true);
+        $pdf->Cell($colWidths[2], 10, number_format($summary['totalPaid'], 3), 1, 0, 'C', true);
+        $pdf->Cell($colWidths[3], 10, number_format($summary['totalDiscount'], 3), 1, 0, 'C', true);
         $pdf->Cell($colWidths[4], 10, (string)$summary['totalItems'], 1, 0, 'C', true);
-        $pdf->Cell($colWidths[5], 10, number_format($summary['averageSale'], 0), 1, 1, 'C', true);
+        $pdf->Cell($colWidths[5], 10, number_format($summary['averageSale'], 3), 1, 1, 'C', true);
         
         // Reset colors
         $pdf->SetTextColor(0, 0, 0);
@@ -331,7 +331,7 @@ class DailySalesPdfService
         foreach ($summary['paymentMethods'] as $method => $amount) {
             $percentage = $summary['totalAmount'] > 0 ? ($amount / $summary['totalAmount']) * 100 : 0;
             $pdf->Cell(65, 8, $this->getPaymentMethodName($method), 1, 0, 'C', true);
-            $pdf->Cell(45, 8, number_format($amount, 0), 1, 0, 'C', true);
+            $pdf->Cell(45, 8, number_format($amount, 3), 1, 0, 'C', true);
             $pdf->Cell(40, 8, number_format($percentage, 1) . '%', 1, 1, 'C', true);
         }
         
@@ -391,7 +391,7 @@ class DailySalesPdfService
                 $pdf->Cell($column_width, 8, ($sale->user ? $sale->user->name : 'غير محدد'), 'TB', 0, 'C', true);
             }
             $pdf->Cell($column_width, 8, $sale->items->sum('quantity'), 'TB', 0, 'C', true);
-            $pdf->Cell($column_width, 8, number_format($sale->total_amount, 0), 'TB', 0, 'C', true);
+            $pdf->Cell($column_width, 8, number_format($sale->total_amount, 3), 'TB', 0, 'C', true);
             $pdf->Cell($column_width, 8, $this->formatPaymentMethods($sale->payments), 'TB', 1, 'C', true);
             $rowCount++;
         }
@@ -412,7 +412,6 @@ class DailySalesPdfService
             'cash' => 'نقداً',
             'bank_transfer' => 'تحويل بنكي',
             'visa' => 'فيزا',
-            'other' => 'أخرى'
         ];
 
         return $methods[$method] ?? $method;
@@ -429,7 +428,7 @@ class DailySalesPdfService
         $formatted = [];
         foreach ($payments as $payment) {
             $methodName = $this->getPaymentMethodName($payment->method);
-            $formatted[] = $methodName . ' (' . number_format($payment->amount, 0) . ')';
+            $formatted[] = $methodName . ' (' . number_format($payment->amount, 3) . ')';
         }
         return implode(', ', $formatted);
     }

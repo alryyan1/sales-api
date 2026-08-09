@@ -225,9 +225,9 @@ class ProductPdfService
             $pdf->SetFillColor($r, $g, $b);
 
             $cost  = $product->latest_cost_per_sellable_unit
-                ? number_format((float) $product->latest_cost_per_sellable_unit, 2) : '-';
+                ? number_format((float) $product->latest_cost_per_sellable_unit, 3) : '-';
             $sale  = $product->last_sale_price_per_sellable_unit
-                ? number_format((float) $product->last_sale_price_per_sellable_unit, 2) : '-';
+                ? number_format((float) $product->last_sale_price_per_sellable_unit, 3) : '-';
             $alert = $product->stock_alert_level
                 ? number_format((int) $product->stock_alert_level) : '-';
 
@@ -276,7 +276,7 @@ class ProductPdfService
 
         $pdf->Cell($spacer, self::ROW_H, '', 0, 0);
         $pdf->Cell($labelW, self::ROW_H, 'إجمالي تكلفة المخزون:', 1, 0, 'R', true);
-        $pdf->Cell($valueW, self::ROW_H, number_format($totalCost, 2), 1, 1, 'C', true);
+        $pdf->Cell($valueW, self::ROW_H, number_format($totalCost, 3), 1, 1, 'C', true);
 
         // Footer rule + page info
         $pdf->Ln(3);

@@ -836,7 +836,7 @@ class MigrateMirganiDatabase extends Command
                             'sale_price' => !empty($oldItem->sell_price) ? (float)$oldItem->sell_price : null,
                             'expiry_date' => $expiryDate,
                             'cost_per_sellable_unit' => $product->units_per_stocking_unit > 0 
-                                ? round($unitCost / $product->units_per_stocking_unit, 2) 
+                                ? round($unitCost / $product->units_per_stocking_unit, 3)
                                 : $unitCost,
                             'created_at' => isset($oldItem->created_at) ? Carbon::parse($oldItem->created_at) : now(),
                             'updated_at' => isset($oldItem->updated_at) ? Carbon::parse($oldItem->updated_at) : now(),

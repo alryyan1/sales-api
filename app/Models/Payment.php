@@ -37,7 +37,7 @@ class Payment extends Model {
     protected $fillable = [
         'sale_id', 'shift_id', 'user_id', 'method', 'amount', 'payment_date', 'reference_number', 'notes'
     ];
-    protected $casts = ['amount' => 'decimal:2', 'payment_date' => 'date'];
+    protected $casts = ['amount' => 'decimal:3', 'payment_date' => 'date'];
     public function sale(): BelongsTo { return $this->belongsTo(Sale::class); }
     public function shift(): BelongsTo { return $this->belongsTo(Shift::class); }
     public function user(): BelongsTo { return $this->belongsTo(User::class); }

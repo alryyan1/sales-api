@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Supplier;
 use App\Services\Pdf\PdfHeaderRenderer;
+use App\Services\Pdf\PdfLocale;
 use TCPDF;
 use Exception;
 use Illuminate\Support\Facades\Log;
@@ -12,6 +13,16 @@ class SupplierLedgerPdfService
 {
     private TCPDF $pdf;
     private PdfHeaderRenderer $renderer;
+    private array $settings = [];
+    private string $locale = 'ar';
+
+    /**
+     * Return the Arabic or English string depending on the detected report locale.
+     */
+    private function t(string $ar, string $en): string
+    {
+        return $this->locale === 'en' ? $en : $ar;
+    }
 
     // ── Palette (black & white only) ─────────────────────────────────────────
     private const BLACK  = [0,   0,   0];
@@ -30,6 +41,7 @@ class SupplierLedgerPdfService
     public function generate(Supplier $supplier): string
     {
         try {
+            $this->locale = PdfLocale::detect();
             $data = $this->buildLedgerData($supplier);
             $this->renderer = new PdfHeaderRenderer('supplier_ledger');
             $this->initPdf($supplier);
@@ -83,7 +95,7 @@ class SupplierLedgerPdfService
 
             $entries->push([
                 'date'        => $purchase->purchase_date->format('Y-m-d'),
-                'description' => 'مشتريات #' . str_pad($purchase->id, 5, '0', STR_PAD_LEFT)
+                'description' => $this->t('مشتريات #', 'Purchase #') . str_pad($purchase->id, 5, '0', STR_PAD_LEFT)
                                  . ($purchase->reference_number ? '  (' . $purchase->reference_number . ')' : ''),
                 'debit'       => $purchase->total_amount,
                 'credit'      => $paid,
@@ -94,7 +106,7 @@ class SupplierLedgerPdfService
         if ($directPayments->isNotEmpty()) {
             $entries->push([
                 'date'        => now()->format('Y-m-d'),
-                'description' => 'مدفوعات مباشرة (غير مرتبطة بمشتريات)',
+                'description' => $this->t('مدفوعات مباشرة (غير مرتبطة بمشتريات)', 'Direct payments (not linked to purchases)'),
                 'debit'       => 0,
                 'credit'      => $totalDirectPayments,
                 'balance'     => -$totalDirectPayments,
@@ -113,11 +125,13 @@ class SupplierLedgerPdfService
 
     private function initPdf(Supplier $supplier): void
     {
+        $this->settings = app(\App\Services\SettingsService::class)->getAll();
+
         $this->pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
         $this->pdf->setPrintHeader(false);
         $this->pdf->SetCreator('Sales Management System');
         $this->pdf->SetAuthor('Sales Management System');
-        $this->pdf->SetTitle('كشف حساب مورد — ' . $supplier->name);
+        $this->pdf->SetTitle($this->t('كشف حساب مورد — ', 'Statement — ') . $supplier->name);
         $this->pdf->SetSubject('Supplier Account Statement');
         $this->pdf->setPrintFooter(false);
         $this->pdf->SetMargins(self::M, $this->renderer->getTopMargin(), self::M);
@@ -133,35 +147,40 @@ class SupplierLedgerPdfService
     private function drawHeader(Supplier $supplier): void
     {
         $W = $this->W();
+        // Anchor to wherever the company branding block (logo/name/address,
+        // drawn by PdfHeaderRenderer just before this call) actually left the
+        // cursor — never assume it ends at the page margin.
+        $y = $this->pdf->GetY();
 
         // Heavy top rule
         $this->pdf->SetDrawColor(...self::BLACK);
         $this->pdf->SetLineWidth(1.2);
-        $this->pdf->Line(self::M, self::M, self::M + $W, self::M);
+        $this->pdf->Line(self::M, $y, self::M + $W, $y);
 
         // Thin rule 2 mm below
         $this->pdf->SetLineWidth(0.3);
-        $this->pdf->Line(self::M, self::M + 2.5, self::M + $W, self::M + 2.5);
+        $this->pdf->Line(self::M, $y + 2.5, self::M + $W, $y + 2.5);
 
-        $this->pdf->SetY(self::M + 7);
+        $this->pdf->SetY($y + 7);
 
         // Main title
         $this->pdf->SetFont(self::F, 'B', 16);
         $this->pdf->SetTextColor(...self::BLACK);
-        $this->pdf->Cell($W, 10, 'كشف حساب مورّد', 0, 1, 'C');
+        $this->pdf->Cell($W, 10, $this->t('كشف حساب مورّد', 'Supplier Account Statement'), 0, 1, 'C');
 
         // System sub-title
         $this->pdf->SetFont(self::F, '', 9);
         $this->pdf->SetTextColor(...self::MID);
-        $this->pdf->Cell($W, 5, 'نظام إدارة المبيعات', 0, 1, 'C');
+        $this->pdf->Cell($W, 5, $this->t('نظام إدارة المبيعات', 'Sales Management System'), 0, 1, 'C');
 
         $this->pdf->Ln(3);
 
         // Meta line: supplier ref  |  issue date
         $this->pdf->SetFont(self::F, '', 8);
         $this->pdf->SetTextColor(...self::TEXT);
-        $this->pdf->Cell($W / 2, 5, 'رقم المورّد: #' . str_pad($supplier->id, 5, '0', STR_PAD_LEFT), 0, 0, 'L');
-        $this->pdf->Cell($W / 2, 5, 'تاريخ الإصدار: ' . now()->format('Y-m-d'), 0, 1, 'R');
+        $currency = $this->settings['currency_symbol'] ?? 'OMR';
+        $this->pdf->Cell($W / 2, 5, $this->t('رقم المورّد: #', 'Supplier No: #') . str_pad($supplier->id, 5, '0', STR_PAD_LEFT) . $this->t('   |   العملة: ', '   |   Currency: ') . $currency, 0, 0, 'L');
+        $this->pdf->Cell($W / 2, 5, $this->t('تاريخ الإصدار: ', 'Issue Date: ') . now()->format('Y-m-d'), 0, 1, 'R');
 
         $this->pdf->Ln(3);
 
@@ -183,9 +202,8 @@ class SupplierLedgerPdfService
     private function drawSupplierBox(Supplier $supplier): void
     {
         $W      = $this->W();
-        $colW   = $W / 2;
-        $labelW = $colW * 0.40;
-        $valW   = $colW * 0.60;
+        $labelW = $W * 0.25;
+        $valW   = $W * 0.75;
         $rowH   = 7;
 
         // Section heading — white fill, bold underline
@@ -194,24 +212,21 @@ class SupplierLedgerPdfService
         $this->pdf->SetTextColor(...self::BLACK);
         $this->pdf->SetDrawColor(...self::BORDER);
         $this->pdf->SetLineWidth(0.3);
-        $this->pdf->Cell($W, 7, 'بيانات المورّد', 1, 1, 'C', true);
+        $this->pdf->Cell($W, 7, $this->t('بيانات المورّد', 'Supplier Information'), 1, 1, 'C', true);
 
         $rows = [
-            ['اسم المورّد',  $supplier->name,                  'رقم الهاتف',        $supplier->phone ?? '—'],
-            ['المسؤول',      $supplier->contact_person ?? '—', 'البريد الإلكتروني', $supplier->email ?? '—'],
+            [$this->t('اسم المورّد', 'Supplier Name'),        $supplier->name],
+            [$this->t('رقم الهاتف', 'Phone'),                  $supplier->phone ?? '—'],
+            [$this->t('المسؤول', 'Contact Person'),            $supplier->contact_person ?? '—'],
+            [$this->t('البريد الإلكتروني', 'Email'),           $supplier->email ?? '—'],
         ];
 
         $this->pdf->SetFillColor(...self::WHITE);
-        foreach ($rows as [$l1, $v1, $l2, $v2]) {
+        foreach ($rows as [$label, $value]) {
             $this->pdf->SetFont(self::F, 'B', 10);
-            // $this->pdf->SetTextColor(...self::MID);
-            $this->pdf->Cell($labelW, $rowH, $l1 . ':', 1, 0, 'R', true);
+            $this->pdf->Cell($labelW, $rowH, $label . ':', 1, 0, 'R', true);
 
-            $this->pdf->Cell($valW, $rowH, $v1, 1, 0, 'R', true);
-
-            $this->pdf->Cell($labelW, $rowH, $l2 . ':', 1, 0, 'R', true);
-
-            $this->pdf->Cell($valW, $rowH, $v2, 1, 1, 'R', true);
+            $this->pdf->Cell($valW, $rowH, $value, 1, 1, 'R', true);
         }
 
         $this->pdf->Ln(6);
@@ -225,9 +240,10 @@ class SupplierLedgerPdfService
     {
         $W      = $this->W();
         $colW   = $W / 3;
-        $labelW = $colW * 0.55;
-        $valW   = $colW * 0.45;
+        $labelW = $colW * 0.45;
+        $valW   = $colW * 0.55;
         $rowH   = 8;
+        $currency = $this->settings['currency_symbol'] ?? 'OMR';
 
         // Section heading
         $this->pdf->SetFont(self::F, 'B', 9);
@@ -235,18 +251,20 @@ class SupplierLedgerPdfService
         $this->pdf->SetTextColor(...self::BLACK);
         $this->pdf->SetDrawColor(...self::BORDER);
         $this->pdf->SetLineWidth(0.3);
-        $this->pdf->Cell($W, 7, 'الملخص المالي', 1, 1, 'C', true);
+        $this->pdf->Cell($W, 7, $this->t('الملخص المالي', 'Financial Summary'), 1, 1, 'C', true);
 
         $pairs = [
-            ['إجمالي المشتريات', number_format($summary['totalPurchases'], 2)],
-            ['إجمالي المدفوعات', number_format($summary['totalPayments'],  2)],
-            ['الرصيد المستحق',   number_format($summary['balance'],        2)],
+            [$this->t('إجمالي المشتريات', 'Total Purchases'), number_format($summary['totalPurchases'], 3) . ' ' . $currency],
+            [$this->t('إجمالي المدفوعات', 'Total Payments'),  number_format($summary['totalPayments'],  3) . ' ' . $currency],
+            [$this->t('الرصيد المستحق', 'Balance Due'),       number_format($summary['balance'],        3) . ' ' . $currency],
         ];
 
         $this->pdf->SetFillColor(...self::WHITE);
         foreach ($pairs as [$label, $value]) {
+            $this->pdf->SetFont(self::F, 'B', 9);
             $this->pdf->Cell($labelW, $rowH, $label . ':', 1, 0, 'R', true);
 
+            $this->pdf->SetFont(self::F, 'B', 7.5);
             $this->pdf->Cell($valW, $rowH, $value, 1, 0, 'C', true);
         }
 
@@ -278,7 +296,7 @@ class SupplierLedgerPdfService
             $this->pdf->SetFillColor(...self::WHITE);
             $this->pdf->SetTextColor(...self::MID);
             $this->pdf->SetDrawColor(...self::BORDER);
-            $this->pdf->Cell($W, 12, 'لا توجد معاملات مسجّلة', 1, 1, 'C', true);
+            $this->pdf->Cell($W, 12, $this->t('لا توجد معاملات مسجّلة', 'No transactions recorded'), 1, 1, 'C', true);
             return;
         }
 
@@ -311,9 +329,9 @@ class SupplierLedgerPdfService
             // Debit / Credit / Balance
             $this->pdf->SetFont(self::F, 'B', 8.5);
             $this->pdf->SetTextColor(...self::BLACK);
-            $this->pdf->Cell($w['debit'],  self::RH, $entry['debit']  > 0 ? number_format($entry['debit'],  2) : '—', 'LRB', 0, 'C', true);
-            $this->pdf->Cell($w['credit'], self::RH, $entry['credit'] > 0 ? number_format($entry['credit'], 2) : '—', 'LRB', 0, 'C', true);
-            $this->pdf->Cell($w['bal'],    self::RH, number_format($entry['balance'], 2), 'LRB', 1, 'C', true);
+            $this->pdf->Cell($w['debit'],  self::RH, $entry['debit']  > 0 ? number_format($entry['debit'],  3) : '—', 'LRB', 0, 'C', true);
+            $this->pdf->Cell($w['credit'], self::RH, $entry['credit'] > 0 ? number_format($entry['credit'], 3) : '—', 'LRB', 0, 'C', true);
+            $this->pdf->Cell($w['bal'],    self::RH, number_format($entry['balance'], 3), 'LRB', 1, 'C', true);
         }
 
         // Totals row — white fill, bold, full border
@@ -323,10 +341,10 @@ class SupplierLedgerPdfService
         $this->pdf->SetDrawColor(...self::BORDER);
         $this->pdf->SetLineWidth(0.4);
 
-        $this->pdf->Cell($w['no'] + $w['date'] + $w['desc'], self::RH, 'الإجمالي', 1, 0, 'R', true);
-        $this->pdf->Cell($w['debit'],  self::RH, number_format($summary['totalPurchases'], 2), 1, 0, 'C', true);
-        $this->pdf->Cell($w['credit'], self::RH, number_format($summary['totalPayments'],  2), 1, 0, 'C', true);
-        $this->pdf->Cell($w['bal'],    self::RH, number_format($summary['balance'],        2), 1, 1, 'C', true);
+        $this->pdf->Cell($w['no'] + $w['date'] + $w['desc'], self::RH, $this->t('الإجمالي', 'Total'), 1, 0, 'R', true);
+        $this->pdf->Cell($w['debit'],  self::RH, number_format($summary['totalPurchases'], 3), 1, 0, 'C', true);
+        $this->pdf->Cell($w['credit'], self::RH, number_format($summary['totalPayments'],  3), 1, 0, 'C', true);
+        $this->pdf->Cell($w['bal'],    self::RH, number_format($summary['balance'],        3), 1, 1, 'C', true);
 
         $this->pdf->SetTextColor(...self::TEXT);
     }
@@ -339,12 +357,12 @@ class SupplierLedgerPdfService
         $this->pdf->SetDrawColor(...self::BORDER);
         $this->pdf->SetLineWidth(0.3);
 
-        $this->pdf->Cell($w['no'],     8, '#',       1, 0, 'C', true);
-        $this->pdf->Cell($w['date'],   8, 'التاريخ', 1, 0, 'C', true);
-        $this->pdf->Cell($w['desc'],   8, 'البيان',  1, 0, 'C', true);
-        $this->pdf->Cell($w['debit'],  8, 'مدين',    1, 0, 'C', true);
-        $this->pdf->Cell($w['credit'], 8, 'دائن',    1, 0, 'C', true);
-        $this->pdf->Cell($w['bal'],    8, 'الرصيد',  1, 1, 'C', true);
+        $this->pdf->Cell($w['no'],     8, '#',                                    1, 0, 'C', true);
+        $this->pdf->Cell($w['date'],   8, $this->t('التاريخ', 'Date'),            1, 0, 'C', true);
+        $this->pdf->Cell($w['desc'],   8, $this->t('البيان', 'Description'),      1, 0, 'C', true);
+        $this->pdf->Cell($w['debit'],  8, $this->t('مدين', 'Debit'),              1, 0, 'C', true);
+        $this->pdf->Cell($w['credit'], 8, $this->t('دائن', 'Credit'),             1, 0, 'C', true);
+        $this->pdf->Cell($w['bal'],    8, $this->t('الرصيد', 'Balance'),          1, 1, 'C', true);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -369,8 +387,8 @@ class SupplierLedgerPdfService
         $this->pdf->SetFont(self::F, '', 7.5);
         $this->pdf->SetTextColor(...self::MID);
 
-        $this->pdf->Cell($W / 2, 5, 'نظام إدارة المبيعات  ·  طُبع: ' . now()->format('Y-m-d  H:i'), 0, 0, 'R');
-        $this->pdf->Cell($W / 2, 5, 'صفحة ' . $this->pdf->getAliasNumPage() . ' / ' . $this->pdf->getAliasNbPages(), 0, 1, 'L');
+        $this->pdf->Cell($W / 2, 5, $this->t('نظام إدارة المبيعات  ·  طُبع: ', 'Sales Management System  ·  Printed: ') . now()->format('Y-m-d  H:i'), 0, 0, 'R');
+        $this->pdf->Cell($W / 2, 5, $this->t('صفحة ', 'Page ') . $this->pdf->getAliasNumPage() . ' / ' . $this->pdf->getAliasNbPages(), 0, 1, 'L');
     }
 
     // ─────────────────────────────────────────────────────────────────────────

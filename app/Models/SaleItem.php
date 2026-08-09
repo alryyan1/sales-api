@@ -56,9 +56,9 @@ class SaleItem extends Model
 
     protected $casts = [
         'quantity' => 'integer',
-        'unit_price' => 'decimal:2',
-        'total_price' => 'decimal:2',
-        'cost_price_at_sale' => 'decimal:2', // Optional, can be set at point of sale
+        'unit_price' => 'decimal:3',
+        'total_price' => 'decimal:3',
+        'cost_price_at_sale' => 'decimal:3', // Optional, can be set at point of sale
     ];
 
     /**

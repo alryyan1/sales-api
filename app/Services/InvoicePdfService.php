@@ -6,9 +6,20 @@ use TCPDF;
 use Illuminate\Support\Facades\Log;
 use App\Models\Sale;
 use Illuminate\Support\Facades\Storage;
+use App\Services\Pdf\PdfLocale;
 
 class InvoicePdfService
 {
+    private string $locale = 'ar';
+
+    /**
+     * Return the Arabic or English string depending on the detected report locale.
+     */
+    private function t(string $ar, string $en): string
+    {
+        return $this->locale === 'en' ? $en : $ar;
+    }
+
     /**
      * Generate invoice PDF for a sale
      *
@@ -17,6 +28,8 @@ class InvoicePdfService
      */
     public function generateInvoicePdf(Sale $sale): string
     {
+        $this->locale = PdfLocale::detect();
+
         // Get settings
         $settings = app(\App\Services\SettingsService::class)->getAll();
 
@@ -28,11 +41,11 @@ class InvoicePdfService
 
         // Determine invoice title
         if ($sale->is_quote) {
-            $title = 'تسعيره';
+            $title = $this->t('تسعيره', 'Quotation');
             $isFinal = false;
         } else {
             $isFinal = $paidAmount > 0;
-            $title = $isFinal ? 'فاتورة نهائية' : 'فاتورة مبدئية';
+            $title = $isFinal ? $this->t('فاتورة نهائية', 'Final Invoice') : $this->t('فاتورة مبدئية', 'Preliminary Invoice');
         }
 
         return $this->generateArabicProformaPdf($sale, $settings, $title, $isFinal);
@@ -139,8 +152,8 @@ class InvoicePdfService
             $pdf->Cell($colWidths['index'], 7, ($index + 1), 1, 0, 'C', false);
             $pdf->Cell($colWidths['item'], 7, $item->product->name ?? 'Product', 1, 0, 'L', false);
             $pdf->Cell($colWidths['qty'], 7, $item->quantity, 1, 0, 'C', false);
-            $pdf->Cell($colWidths['price'], 7, number_format($item->unit_price, 0, '.', ','), 1, 0, 'C', false);
-            $pdf->Cell($colWidths['total'], 7, number_format($itemTotal, 0, '.', ','), 1, 1, 'C', false);
+            $pdf->Cell($colWidths['price'], 7, number_format($item->unit_price, 3, '.', ','), 1, 0, 'C', false);
+            $pdf->Cell($colWidths['total'], 7, number_format($itemTotal, 3, '.', ','), 1, 1, 'C', false);
         }
 
         $pdf->SetY($pdf->GetY() + 10);
@@ -168,7 +181,7 @@ class InvoicePdfService
         if ($discountAmount > 0) {
             $pdf->SetXY($rightX, $y);
             $pdf->Cell($boxWidth - 30, 5, 'Subtotal', 0, 0, 'L');
-            $pdf->Cell(30, 5, number_format($itemsTotal, 0, '.', ','), 0, 1, 'R');
+            $pdf->Cell(30, 5, number_format($itemsTotal, 3, '.', ','), 0, 1, 'R');
 
             $y = $pdf->GetY() + 1;
             $pdf->Line($rightX, $y, $rightX + $boxWidth, $y);
@@ -176,7 +189,7 @@ class InvoicePdfService
 
             $pdf->SetXY($rightX, $y);
             $pdf->Cell($boxWidth - 30, 5, 'Discount', 0, 0, 'L');
-            $pdf->Cell(30, 5, number_format($discountAmount, 0, '.', ','), 0, 1, 'R');
+            $pdf->Cell(30, 5, number_format($discountAmount, 3, '.', ','), 0, 1, 'R');
 
             $y = $pdf->GetY() + 1;
             $pdf->Line($rightX, $y, $rightX + $boxWidth, $y);
@@ -186,7 +199,7 @@ class InvoicePdfService
         // Total
         $pdf->SetXY($rightX, $y);
         $pdf->Cell($boxWidth - 30, 5, 'Total', 0, 0, 'L');
-        $pdf->Cell(30, 5, number_format($totalAmount, 0, '.', ','), 0, 1, 'R');
+        $pdf->Cell(30, 5, number_format($totalAmount, 3, '.', ','), 0, 1, 'R');
 
         // Line
         $y = $pdf->GetY() + 1;
@@ -196,7 +209,7 @@ class InvoicePdfService
         // Paid
         $pdf->SetXY($rightX, $y);
         $pdf->Cell($boxWidth - 30, 5, 'Paid', 0, 0, 'L');
-        $pdf->Cell(30, 5, number_format($paidAmount, 0, '.', ','), 0, 1, 'R');
+        $pdf->Cell(30, 5, number_format($paidAmount, 3, '.', ','), 0, 1, 'R');
 
         // Line
         $y = $pdf->GetY() + 1;
@@ -210,7 +223,7 @@ class InvoicePdfService
         // Green box for due amount
         $pdf->SetFillColor(167, 243, 208); // Light green #a7f3d0
         $pdf->SetTextColor(0, 0, 255); // Blue text
-        $pdf->Cell(30, 5, number_format($currentDue, 0, '.', ','), 1, 1, 'C', true);
+        $pdf->Cell(30, 5, number_format($currentDue, 3, '.', ','), 1, 1, 'C', true);
         $pdf->SetTextColor(0, 0, 0); // Reset to black
 
         // Line
@@ -248,9 +261,11 @@ class InvoicePdfService
 
         $pdf->AddPage();
 
+        $currency = $settings['currency_symbol'] ?? 'OMR';
+
         $this->generateArabicProformaHeader($pdf, $renderer, $sale, $title, $settings);
-        $this->generateArabicProformaTable($pdf, $sale);
-        $this->generateArabicProformaSummary($pdf, $sale, $isFinal);
+        $this->generateArabicProformaTable($pdf, $sale, $currency);
+        $this->generateArabicProformaSummary($pdf, $sale, $isFinal, $currency);
         $this->generateArabicProformaTerms($pdf, $sale);
         $this->generateStampAndSignature($pdf, $settings);
 
@@ -316,26 +331,26 @@ class InvoicePdfService
         $pdf->SetFont('arial', 'B', 9); // Reduced from 10
         $pdf->Cell($colW * 0.55, $rowH, date('Y/m/d', strtotime($sale->sale_date)), 0, 0, 'R');
         $pdf->SetFont('arial', '', 9); // Reduced from 10
-        $pdf->Cell($colW * 0.45, $rowH, 'تاريخ الفاتورة:', 0, 0, 'C');
+        $pdf->Cell($colW * 0.45, $rowH, $this->t('تاريخ الفاتورة:', 'Invoice Date:'), 0, 0, 'C');
 
         $pdf->SetXY($leftM, $infoY);
         $pdf->SetFont('arial', 'B', 9); // Reduced from 10
-        $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? $sale->client->name : 'عميل نقدي'), 0, 0, 'R');
+        $pdf->Cell($colW * 0.6, $rowH, ($sale->client ? $sale->client->name : $this->t('عميل نقدي', 'Cash Customer')), 0, 0, 'R');
         $pdf->SetFont('arial', '', 9); // Reduced from 10
-        $pdf->Cell($colW * 0.4, $rowH, 'اسم العميل:', 0, 0, 'C');
+        $pdf->Cell($colW * 0.4, $rowH, $this->t('اسم العميل:', 'Client Name:'), 0, 0, 'C');
 
         // Row 2 — right column: invoice number | left column: phone
         $pdf->SetXY($leftM + $colW, $infoY + $rowH);
         $pdf->SetFont('arial', 'B', 9); // Reduced from 10
         $pdf->Cell($colW * 0.55, $rowH, (string) $sale->id, 0, 0, 'R');
         $pdf->SetFont('arial', '', 9); // Reduced from 10
-        $pdf->Cell($colW * 0.45, $rowH, 'رقم الفاتورة:', 0, 0, 'C');
+        $pdf->Cell($colW * 0.45, $rowH, $this->t('رقم الفاتورة:', 'Invoice No:'), 0, 0, 'C');
 
         $pdf->SetXY($leftM, $infoY + $rowH);
         $pdf->SetFont('arial', 'B', 9); // Reduced from 10
         $pdf->Cell($colW * 0.6, $rowH, $settings['tax_number'] ?? null, 0, 0, 'R');
         $pdf->SetFont('arial', '', 9); // Reduced from 10
-        $pdf->Cell($colW * 0.4, $rowH, 'الرقم التعريفي:', 0, 0, 'C');
+        $pdf->Cell($colW * 0.4, $rowH, $this->t('الرقم التعريفي:', 'Tax ID:'), 0, 0, 'C');
 
         // Row 3 — Branch Name
         if ($sale->warehouse) {
@@ -343,13 +358,13 @@ class InvoicePdfService
             $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell($colW * 0.55, $rowH, $sale->warehouse->name, 0, 0, 'R');
             $pdf->SetFont('arial', '', 9);
-            $pdf->Cell($colW * 0.45, $rowH, 'الفرع:', 0, 0, 'C');
+            $pdf->Cell($colW * 0.45, $rowH, $this->t('الفرع:', 'Branch:'), 0, 0, 'C');
         }
 
         $pdf->SetY($infoY + $rowH * 3 + 2); // Reduced from 5
     }
 
-    private function generateArabicProformaTable(TCPDF $pdf, Sale $sale): void
+    private function generateArabicProformaTable(TCPDF $pdf, Sale $sale, string $currency = 'OMR'): void
     {
         $pdf->SetFillColor(240, 240, 240);
         $pdf->SetFont('arial', 'B', 9); // Reduced from 10
@@ -357,12 +372,12 @@ class InvoicePdfService
         // Column widths
         $w = [10, 80, 15, 15, 25, 45]; // م, البيان, الوحده, العدد, السعر, المبلغ
 
-        $pdf->Cell($w[0], 7, 'م', 1, 0, 'C', true);
-        $pdf->Cell($w[1], 7, 'البيان', 1, 0, 'C', true);
-        $pdf->Cell($w[2], 7, 'الوحده', 1, 0, 'C', true);
-        $pdf->Cell($w[3], 7, 'العدد', 1, 0, 'C', true);
-        $pdf->Cell($w[4], 7, 'السعر', 1, 0, 'C', true);
-        $pdf->Cell($w[5], 7, 'المبلغ', 1, 1, 'C', true);
+        $pdf->Cell($w[0], 7, $this->t('م', '#'), 1, 0, 'C', true);
+        $pdf->Cell($w[1], 7, $this->t('البيان', 'Description'), 1, 0, 'C', true);
+        $pdf->Cell($w[2], 7, $this->t('الوحده', 'Unit'), 1, 0, 'C', true);
+        $pdf->Cell($w[3], 7, $this->t('العدد', 'Qty'), 1, 0, 'C', true);
+        $pdf->Cell($w[4], 7, $this->t('السعر', 'Price'), 1, 0, 'C', true);
+        $pdf->Cell($w[5], 7, $this->t('المبلغ', 'Amount'), 1, 1, 'C', true);
 
         $pdf->SetFont('arial', '', 8); // Reduced from 10
         foreach ($sale->items as $idx => $item) {
@@ -382,14 +397,14 @@ class InvoicePdfService
 
             $pdf->Cell($w[0], 6, ($idx + 1), 1, 0, 'C'); // Reduced height from 8 to 6
             $pdf->Cell($w[1], 6, $productName, 1, 0, 'C');
-            $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
+            $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? $this->t('حبة', 'pc')), 1, 0, 'C');
             $pdf->Cell($w[3], 6, $item->quantity, 1, 0, 'C');
-            $pdf->Cell($w[4], 6, number_format($item->unit_price, 2), 1, 0, 'C');
-            $pdf->Cell($w[5], 6, number_format($item->total_price, 2), 1, 1, 'C');
+            $pdf->Cell($w[4], 6, number_format($item->unit_price, 3) . ' ' . $currency, 1, 0, 'C');
+            $pdf->Cell($w[5], 6, number_format($item->total_price, 3) . ' ' . $currency, 1, 1, 'C');
         }
     }
 
-    private function generateArabicProformaSummary(TCPDF $pdf, Sale $sale, bool $isFinal = false): void
+    private function generateArabicProformaSummary(TCPDF $pdf, Sale $sale, bool $isFinal = false, string $currency = 'OMR'): void
     {
         $total = $sale->items->sum('total_price');
         $discount = $sale->discount_amount ?? 0;
@@ -399,30 +414,35 @@ class InvoicePdfService
 
         // Total row
         $pdf->SetFont('arial', 'B', 11);
-        $pdf->Cell(145, 10, 'الإجمالي الكلي', 1, 0, 'C');
-        $pdf->Cell(45, 10, number_format($net, 2), 1, 1, 'C');
+        $pdf->Cell(145, 10, $this->t('الإجمالي الكلي', 'Grand Total'), 1, 0, 'C');
+        $pdf->Cell(45, 10, number_format($net, 3) . ' ' . $currency, 1, 1, 'C');
 
         if ($isFinal) {
             $paid = (float) ($sale->payments?->sum('amount') ?? 0);
             $due = max(0, $net - $paid);
 
-            $pdf->Cell(145, 10, 'المدفوع', 1, 0, 'C');
-            $pdf->Cell(45, 10, number_format($paid, 2), 1, 1, 'C');
+            $pdf->Cell(145, 10, $this->t('المدفوع', 'Paid'), 1, 0, 'C');
+            $pdf->Cell(45, 10, number_format($paid, 3) . ' ' . $currency, 1, 1, 'C');
 
-            $pdf->Cell(145, 10, 'المتبقي', 1, 0, 'C');
-            $pdf->Cell(45, 10, number_format($due, 2), 1, 1, 'C');
+            $pdf->Cell(145, 10, $this->t('المتبقي', 'Remaining'), 1, 0, 'C');
+            $pdf->Cell(45, 10, number_format($due, 3) . ' ' . $currency, 1, 1, 'C');
         }
 
         // Sum in words
         $pdf->SetFont('arial', '', 11);
-        $wordAmount = $this->numberToArabicWords($net);
-        $pdf->Cell(0, 10, 'فقط وقدره: ' . $wordAmount . ' جنية   لا غير', 0, 1, 'R');
+        if ($this->locale === 'en') {
+            $wordAmount = $this->numberToEnglishWords($net);
+            $pdf->Cell(0, 10, 'Amount in words: ' . $wordAmount . ' Omani Rial only', 0, 1, 'L');
+        } else {
+            $wordAmount = $this->numberToArabicWords($net);
+            $pdf->Cell(0, 10, 'فقط وقدره: ' . $wordAmount . ' ريال عماني   لا غير', 0, 1, 'R');
+        }
         $pdf->Ln(2); // Reduced from 5
     }
 
     private function numberToArabicWords($number): string
     {
-        $number = round($number, 2);
+        $number = round($number, 3);
         if ($number == 0)
             return 'صفر';
 
@@ -480,7 +500,7 @@ class InvoicePdfService
 
         $parts = explode('.', (string) $number);
         $integerPart = (int) $parts[0];
-        $decimalPart = isset($parts[1]) ? (int) substr($parts[1], 0, 2) : 0;
+        $decimalPart = isset($parts[1]) ? (int) substr($parts[1], 0, 3) : 0;
 
         $convertInteger = function ($num) use ($dictionary, $conjunction, &$convertInteger) {
             if ($num <= 20)
@@ -524,6 +544,58 @@ class InvoicePdfService
         return $result;
     }
 
+    private function numberToEnglishWords($number): string
+    {
+        $number = round($number, 3);
+        if ($number == 0) {
+            return 'Zero';
+        }
+
+        $ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+            'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+        $tensWords = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+        $convertInteger = function (int $num) use ($ones, $tensWords, &$convertInteger): string {
+            if ($num < 20) {
+                return $ones[$num];
+            }
+            if ($num < 100) {
+                $ten = (int) ($num / 10);
+                $rest = $num % 10;
+                return trim($tensWords[$ten] . ($rest > 0 ? ' ' . $ones[$rest] : ''));
+            }
+            if ($num < 1000) {
+                $hundreds = (int) ($num / 100);
+                $rest = $num % 100;
+                return trim($ones[$hundreds] . ' Hundred' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+            }
+            if ($num < 1000000) {
+                $thousands = (int) ($num / 1000);
+                $rest = $num % 1000;
+                return trim($convertInteger($thousands) . ' Thousand' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+            }
+            if ($num < 1000000000) {
+                $millions = (int) ($num / 1000000);
+                $rest = $num % 1000000;
+                return trim($convertInteger($millions) . ' Million' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+            }
+            $billions = (int) ($num / 1000000000);
+            $rest = $num % 1000000000;
+            return trim($convertInteger($billions) . ' Billion' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+        };
+
+        $parts = explode('.', (string) $number);
+        $integerPart = (int) $parts[0];
+        $decimalPart = isset($parts[1]) ? (int) substr($parts[1], 0, 3) : 0;
+
+        $result = $convertInteger($integerPart);
+        if ($decimalPart > 0) {
+            $result .= ' and ' . $convertInteger($decimalPart) . ' Baisa';
+        }
+
+        return $result;
+    }
+
     private function generateStampAndSignature(TCPDF $pdf, array $settings): void
     {
         $reportSettings = \App\Models\PdfReportSetting::where('report_key', 'invoice')->first();
@@ -553,7 +625,7 @@ class InvoicePdfService
             // Right side
             $x = $pageW - $rightM - $imgW - 20; // 20mm total padding for label + image
             $pdf->SetXY($x, $y +50);
-            $pdf->Cell($imgW, 5, 'الختم', 0, 0, 'C');
+            $pdf->Cell($imgW, 5, $this->t('الختم', 'Stamp'), 0, 0, 'C');
             try {
                 @$pdf->Image($stampPath, $x, $y + 64, $imgW+20, $imgH+20, '', '', '', false, 300, '', false, false, 0);
             } catch (\Throwable $e) {}
@@ -563,7 +635,7 @@ class InvoicePdfService
             // Left side
             $x = $leftM;
             $pdf->SetXY($x, $y +60);
-            $pdf->Cell($imgW, 5, 'التوقيع', 0, 0, 'C');
+            $pdf->Cell($imgW, 5, $this->t('التوقيع', 'Signature'), 0, 0, 'C');
             try {
                 @$pdf->Image($signaturePath, $x, $y + 65, $imgW, $imgH, '', '', '', false, 300, '', false, false, 0);
             } catch (\Throwable $e) {}

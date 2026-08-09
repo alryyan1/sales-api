@@ -127,8 +127,8 @@ class SaleDetailPdfService
                 $productName = $item->product_name ?? $item->product?->name ?? 'منتج غير معروف';
                 $pdf->Cell(80, 6, mb_substr($productName, 0, 35), 1, 0, 'R', $fill);
                 $pdf->Cell(25, 6, number_format($item->quantity, 2), 1, 0, 'C', $fill);
-                $pdf->Cell(30, 6, number_format($item->unit_price, 2), 1, 0, 'L', $fill);
-                $pdf->Cell(35, 6, number_format($itemTotal, 2), 1, 1, 'L', $fill);
+                $pdf->Cell(30, 6, number_format($item->unit_price, 3), 1, 0, 'L', $fill);
+                $pdf->Cell(35, 6, number_format($itemTotal, 3), 1, 1, 'L', $fill);
                 
                 $rowCount++;
             }
@@ -150,25 +150,25 @@ class SaleDetailPdfService
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(90, 7, 'المجموع الفرعي:', 'B', 0, 'R');
         $pdf->SetFont('arial', '', 10);
-        $pdf->Cell(50, 7, number_format($subtotal, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
+        $pdf->Cell(50, 7, number_format($subtotal, 3) . ' ' . $currencySymbol, 'B', 1, 'L');
         
         $itemsTotal = (float) $sale->items->sum('total_price');
         $paidTotal = (float) $sale->payments->sum('amount');
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(90, 7, 'المبلغ الإجمالي:', 'B', 0, 'R');
         $pdf->SetFont('arial', '', 10);
-        $pdf->Cell(50, 7, number_format($itemsTotal, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
+        $pdf->Cell(50, 7, number_format($itemsTotal, 3) . ' ' . $currencySymbol, 'B', 1, 'L');
         
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(90, 7, 'المدفوع:', 'B', 0, 'R');
         $pdf->SetFont('arial', '', 10);
-        $pdf->Cell(50, 7, number_format($paidTotal, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
+        $pdf->Cell(50, 7, number_format($paidTotal, 3) . ' ' . $currencySymbol, 'B', 1, 'L');
         
         $dueAmount = max(0, $itemsTotal - $paidTotal);
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell(90, 7, 'المستحق:', 'B', 0, 'R');
         $pdf->SetFont('arial', '', 10);
-        $pdf->Cell(50, 7, number_format($dueAmount, 2) . ' ' . $currencySymbol, 'B', 1, 'L');
+        $pdf->Cell(50, 7, number_format($dueAmount, 3) . ' ' . $currencySymbol, 'B', 1, 'L');
         
         $pdf->Ln(5);
 
@@ -198,7 +198,7 @@ class SaleDetailPdfService
                 
                 $methodLabel = $this->getPaymentMethodLabel($payment->method ?? 'cash');
                 $pdf->Cell(50, 6, $methodLabel, 1, 0, 'C', $fill);
-                $pdf->Cell(40, 6, number_format($payment->amount, 2), 1, 0, 'L', $fill);
+                $pdf->Cell(40, 6, number_format($payment->amount, 3), 1, 0, 'L', $fill);
                 
                 $paymentDate = $payment->payment_date 
                     ? (strpos($payment->payment_date, 'T') !== false 
@@ -249,7 +249,6 @@ class SaleDetailPdfService
             'cash' => 'نقدي',
             'bank_transfer' => 'تحويل بنكي',
             'visa' => 'فيزا',
-            'other' => 'أخرى',
         ];
         
         return $labels[$method] ?? $method;

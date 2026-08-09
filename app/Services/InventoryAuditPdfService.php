@@ -271,7 +271,7 @@ class InventoryAuditPdfService
             $pdf->Cell($colWidths[2], 8, $product->sku ?: '-', 1, 0, 'C', true);
             $pdf->Cell($colWidths[3], 8, $product->category?->name ?: '-', 1, 0, 'C', true);
             $pdf->Cell($colWidths[4], 8, number_format($quantity), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[5], 8, number_format($product->latest_cost_per_sellable_unit ?: 0, 2), 1, 1, 'R', true);
+            $pdf->Cell($colWidths[5], 8, number_format($product->latest_cost_per_sellable_unit ?: 0, 3), 1, 1, 'R', true);
         }
 
         // Summary

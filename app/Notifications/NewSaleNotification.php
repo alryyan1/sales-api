@@ -40,7 +40,7 @@ class NewSaleNotification extends Notification
     public function toArray(object $notifiable): array
     {
         $clientName = $this->sale->client?->name ?? 'عميل غير محدد';
-        $totalAmount = number_format((float) $this->sale->items->sum('total_price'), 2);
+        $totalAmount = number_format((float) $this->sale->items->sum('total_price'), 3);
         
         return [
             'type' => 'new_sale',

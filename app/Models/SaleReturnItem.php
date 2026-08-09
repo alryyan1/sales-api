@@ -19,7 +19,7 @@ class SaleReturnItem extends Model
 
     protected $casts = [
         'quantity' => 'integer',
-        'price' => 'decimal:2',
+        'price' => 'decimal:3',
     ];
 
     public function saleReturn(): BelongsTo

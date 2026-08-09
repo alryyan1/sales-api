@@ -138,7 +138,7 @@ class ShiftCostPdfService
             $pdf->Cell($cols[1]['w'], 8, $dateFormatted, 1, 0, 'C');
             $pdf->Cell($cols[2]['w'], 8, $userName, 1, 0, 'C');
             $pdf->Cell($cols[3]['w'], 8, $categoryName, 1, 0, 'C');
-            $pdf->Cell($cols[4]['w'], 8, number_format($amount, 2), 1, 0, 'C');
+            $pdf->Cell($cols[4]['w'], 8, number_format($amount, 3), 1, 0, 'C');
             $pdf->Cell($cols[5]['w'], 8, $methodLabel, 1, 1, 'C');
         }
 
@@ -147,7 +147,7 @@ class ShiftCostPdfService
         $pdf->SetFillColor(240, 248, 255);
 
         $pdf->Cell($cols[0]['w'] + $cols[1]['w'] + $cols[2]['w'] + $cols[3]['w'], 9, 'الإجمالي', 1, 0, 'C', true);
-        $pdf->Cell($cols[4]['w'], 9, number_format($totalAmount, 2), 1, 0, 'C', true);
+        $pdf->Cell($cols[4]['w'], 9, number_format($totalAmount, 3), 1, 0, 'C', true);
         $pdf->Cell($cols[5]['w'], 9, '', 1, 1, 'C', true);
     }
 
@@ -157,7 +157,6 @@ class ShiftCostPdfService
             'cash' => 'نقدي',
             'bank_transfer' => 'تحويل بنكي',
             'visa' => 'فيزا',
-            'other' => 'أخرى',
         ];
         return $labels[$method] ?? $method;
     }

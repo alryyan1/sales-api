@@ -76,11 +76,11 @@ class PurchaseItem extends Model
 
     protected $casts = [
         'quantity' => 'integer',
-        'unit_cost' => 'decimal:2',
-        'total_cost' => 'decimal:2',
-        'sale_price' => 'decimal:2',
-        'sale_price_stocking_unit' => 'decimal:2',
-        'cost_per_sellable_unit' => 'decimal:2',
+        'unit_cost' => 'decimal:3',
+        'total_cost' => 'decimal:3',
+        'sale_price' => 'decimal:3',
+        'sale_price_stocking_unit' => 'decimal:3',
+        'cost_per_sellable_unit' => 'decimal:3',
     ];
     /**
      * Get the parent purchase record.
@@ -101,7 +101,7 @@ class PurchaseItem extends Model
     public function getCostPerSellableUnitAttribute(): ?float
     {
         if ($this->product && $this->product->units_per_stocking_unit > 0) {
-            return round((float) $this->unit_cost / $this->product->units_per_stocking_unit, 2);
+            return round((float) $this->unit_cost / $this->product->units_per_stocking_unit, 3);
         }
         // If units_per_stocking_unit is 1 or product not loaded (should not happen)
         return (float) $this->unit_cost;

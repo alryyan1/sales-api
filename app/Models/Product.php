@@ -380,7 +380,7 @@ class Product extends Model
         if (array_key_exists('latest_purchase_cost_raw', $this->attributes)) {
             $cost = $this->attributes['latest_purchase_cost_raw'];
             if ($cost !== null && $this->units_per_stocking_unit > 0) {
-                return round((float) $cost / $this->units_per_stocking_unit, 2);
+                return round((float) $cost / $this->units_per_stocking_unit, 3);
             }
             return null;
         }
@@ -395,7 +395,7 @@ class Product extends Model
 
         if ($latestBatch && $this->units_per_stocking_unit > 0) {
             // Assuming latestBatch->unit_cost is the cost of the 'stocking_unit_name'
-            return round((float) $latestBatch->unit_cost / $this->units_per_stocking_unit, 2);
+            return round((float) $latestBatch->unit_cost / $this->units_per_stocking_unit, 3);
         }
         return null;
     }
@@ -414,7 +414,7 @@ class Product extends Model
         $latestCostPerSellable = $this->latest_cost_per_sellable_unit;
 
         if ($latestCostPerSellable !== null) {
-            return round((float) $latestCostPerSellable * (1 + ($markupToUse / 100)), 2);
+            return round((float) $latestCostPerSellable * (1 + ($markupToUse / 100)), 3);
         }
         return null;
     }

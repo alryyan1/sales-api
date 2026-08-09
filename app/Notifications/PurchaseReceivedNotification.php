@@ -40,7 +40,7 @@ class PurchaseReceivedNotification extends Notification
     public function toArray(object $notifiable): array
     {
         $supplierName = $this->purchase->supplier?->name ?? 'مورد غير محدد';
-        $totalCost = number_format((float) $this->purchase->total_cost, 2);
+        $totalCost = number_format((float) $this->purchase->total_cost, 3);
         
         return [
             'type' => 'purchase_received',

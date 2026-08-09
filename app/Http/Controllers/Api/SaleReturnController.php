@@ -65,7 +65,7 @@ class SaleReturnController extends Controller
             'returned_payment_method' => [
                 'required',
                 'string',
-                Rule::in(['cash', 'bank_transfer', 'visa', 'other']),
+                Rule::in(['cash', 'bank_transfer', 'visa']),
             ],
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
@@ -78,7 +78,7 @@ class SaleReturnController extends Controller
         // Check if sale is fully paid
         $totalPaid = \Illuminate\Support\Facades\DB::table('payments')->where('sale_id', $sale->id)->sum('amount');
         $totalAmount = \Illuminate\Support\Facades\DB::table('sale_items')->where('sale_id', $sale->id)->sum('total_price') - ($sale->discount_amount ?? 0);
-        if (round($totalPaid, 2) < round($totalAmount, 2)) {
+        if (round($totalPaid, 3) < round($totalAmount, 3)) {
             throw ValidationException::withMessages([
                 'sale_id' => ['لا يمكن إرجاع أصناف من فاتورة غير مسددة بالكامل.']
             ]);

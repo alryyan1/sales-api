@@ -192,7 +192,7 @@ class ImportOpeningStockFromExcel extends Command
             $this->grouped[$key]['price_qty_sum'] += max($qty, 1);
             $this->grouped[$key]['price'] = round(
                 $this->grouped[$key]['price_weighted_sum'] / $this->grouped[$key]['price_qty_sum'],
-                2
+                3
             );
         }
     }

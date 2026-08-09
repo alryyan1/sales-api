@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Client;
 use App\Services\Pdf\PdfHeaderRenderer;
+use App\Services\Pdf\PdfLocale;
 use Carbon\Carbon;
 use TCPDF;
 use Exception;
@@ -13,6 +14,15 @@ class ClientLedgerPdfService extends TCPDF
 {
     private array $settings = [];
     private PdfHeaderRenderer $renderer;
+    private string $locale = 'ar';
+
+    /**
+     * Return the Arabic or English string depending on the detected report locale.
+     */
+    private function t(string $ar, string $en): string
+    {
+        return $this->locale === 'en' ? $en : $ar;
+    }
     // ── Palette ───────────────────────────────────────────────────────────────
     private const BLACK  = [0,   0,   0];
     private const DARK   = [30,  30,  30];
@@ -32,13 +42,14 @@ class ClientLedgerPdfService extends TCPDF
     public function generate(Client $client): string
     {
         try {
+            $this->locale = PdfLocale::detect();
             $data = $this->buildLedgerData($client);
             $this->init($client);
 
             // ── Page 1: cover with client info + summary ──
             $this->AddPage();
             $this->renderer->render($this);
-            $this->drawPageHeader('كشف حساب عميل');
+            $this->drawPageHeader($this->t('كشف حساب عميل', 'Client Account Statement'));
             $this->drawIssueLine($client);
             $this->drawClientSection($client);
             $this->drawSummarySection($data['summary'], count($data['entries']));
@@ -47,7 +58,7 @@ class ClientLedgerPdfService extends TCPDF
             // ── Page 2+: invoices table ──
             $this->AddPage();
             $this->renderer->render($this);
-            $this->drawPageHeader('تفاصيل الفواتير');
+            $this->drawPageHeader($this->t('تفاصيل الفواتير', 'Invoice Details'));
             $this->drawInvoicesTable($data['entries'], $data['summary']);
             $this->drawPageFooter();
 
@@ -115,7 +126,7 @@ class ClientLedgerPdfService extends TCPDF
         $this->setPrintHeader(false);
         $this->SetCreator('Sales Management System');
         $this->SetAuthor($this->settings['company_name'] ?? 'Sales Management System');
-        $this->SetTitle('كشف حساب — ' . $client->name);
+        $this->SetTitle($this->t('كشف حساب — ', 'Statement — ') . $client->name);
         $this->SetSubject('Client Account Statement');
         $this->setPrintFooter(false);
         $this->SetMargins(self::M, $this->renderer->getTopMargin(), self::M);
@@ -172,9 +183,11 @@ class ClientLedgerPdfService extends TCPDF
 
         $this->SetFont(self::F, '', 8);
         $this->SetTextColor(...self::MID);
-        $this->Cell($W / 2, 5, 'نظام إدارة المبيعات', 0, 0, 'R');
+        $this->Cell($W / 2, 5, $this->t('نظام إدارة المبيعات', 'Sales Management System'), 0, 0, 'R');
         $this->Cell($W / 2, 5,
-            'صفحة ' . $this->getAliasNumPage() . ' من ' . $this->getAliasNbPages(),
+            $this->locale === 'en'
+                ? 'Page ' . $this->getAliasNumPage() . ' of ' . $this->getAliasNbPages()
+                : 'صفحة ' . $this->getAliasNumPage() . ' من ' . $this->getAliasNbPages(),
             0, 1, 'L');
 
         $this->SetAutoPageBreak(true, 25);
@@ -186,8 +199,8 @@ class ClientLedgerPdfService extends TCPDF
         $W = $this->W();
         $this->SetFont(self::F, '', 8.5);
         $this->SetTextColor(...self::MID);
-        $this->Cell($W / 2, 5, 'رقم العميل: #' . str_pad($client->id, 5, '0', STR_PAD_LEFT), 0, 0, 'R');
-        $this->Cell($W / 2, 5, 'تاريخ الإصدار: ' . now()->format('Y-m-d'), 0, 1, 'L');
+        $this->Cell($W / 2, 5, $this->t('رقم العميل: #', 'Client No: #') . str_pad($client->id, 5, '0', STR_PAD_LEFT), 0, 0, 'R');
+        $this->Cell($W / 2, 5, $this->t('تاريخ الإصدار: ', 'Issue Date: ') . now()->format('Y-m-d'), 0, 1, 'L');
         $this->Ln(3);
         $this->SetTextColor(...self::DARK);
     }
@@ -200,13 +213,13 @@ class ClientLedgerPdfService extends TCPDF
     {
         $W = $this->W();
 
-        $this->sectionTitle('بيانات العميل');
+        $this->sectionTitle($this->t('بيانات العميل', 'Client Information'));
 
         $rows = [
-            ['الاسم',             $client->name],
-            ['رقم الهاتف',        $client->phone   ?? '—'],
-            ['البريد الإلكتروني', $client->email   ?? '—'],
-            ['العنوان',           $client->address ?? '—'],
+            [$this->t('الاسم', 'Name'),                     $client->name],
+            [$this->t('رقم الهاتف', 'Phone'),                $client->phone   ?? '—'],
+            [$this->t('البريد الإلكتروني', 'Email'),         $client->email   ?? '—'],
+            [$this->t('العنوان', 'Address'),                 $client->address ?? '—'],
         ];
 
         $labelW = $W * 0.30;
@@ -236,14 +249,15 @@ class ClientLedgerPdfService extends TCPDF
     private function drawSummarySection(array $summary, int $invoiceCount): void
     {
         $W = $this->W();
+        $currency = $this->settings['currency_symbol'] ?? 'OMR';
 
-        $this->sectionTitle('الملخص المالي');
+        $this->sectionTitle($this->t('الملخص المالي', 'Financial Summary'));
 
         $rows = [
-            ['عدد الفواتير',       (string) $invoiceCount],
-            ['إجمالي المبيعات',   number_format($summary['totalSales'],    2) . ' ج.س'],
-            ['إجمالي المدفوعات',  number_format($summary['totalPayments'], 2) . ' ج.س'],
-            ['الرصيد المستحق',    number_format($summary['balance'],       2) . ' ج.س'],
+            [$this->t('عدد الفواتير', 'Invoice Count'),        (string) $invoiceCount],
+            [$this->t('إجمالي المبيعات', 'Total Sales'),        number_format($summary['totalSales'],    3) . ' ' . $currency],
+            [$this->t('إجمالي المدفوعات', 'Total Payments'),    number_format($summary['totalPayments'], 3) . ' ' . $currency],
+            [$this->t('الرصيد المستحق', 'Balance Due'),         number_format($summary['balance'],       3) . ' ' . $currency],
         ];
 
         $labelW = $W * 0.40;
@@ -264,16 +278,23 @@ class ClientLedgerPdfService extends TCPDF
             $this->Cell($valW, 10, $value, $isLast ? 'TB' : 'B', 1, 'R');
         }
 
-        // Balance in Arabic words
-        $wordAmount = $this->numberToArabicWords($summary['balance']);
+        // Balance in words
         $this->Ln(6);
         $this->SetDrawColor(...self::LIGHT);
         $this->SetLineWidth(0.3);
         $this->SetFillColor(...self::FILL);
         $W = $this->W();
-        $this->Cell($W, 9,
-            'الرصيد المستحق كتابةً:   ' . $wordAmount . ' جنيهاً سودانياً',
-            'TB', 1, 'R', true);
+        if ($this->locale === 'en') {
+            $wordAmount = $this->numberToEnglishWords($summary['balance']);
+            $this->Cell($W, 9,
+                'Balance Due in Words:   ' . $wordAmount . ' Omani Rial',
+                'TB', 1, 'L', true);
+        } else {
+            $wordAmount = $this->numberToArabicWords($summary['balance']);
+            $this->Cell($W, 9,
+                'الرصيد المستحق كتابةً:   ' . $wordAmount . ' ريال عماني',
+                'TB', 1, 'R', true);
+        }
 
         // Signature line
         $this->Ln(14);
@@ -286,7 +307,7 @@ class ClientLedgerPdfService extends TCPDF
         $this->Ln(3);
         $this->SetFont(self::F, '', 9);
         $this->SetTextColor(...self::MID);
-        $this->Cell($lineW, 5, 'توقيع المسؤول', 0, 1, 'C');
+        $this->Cell($lineW, 5, $this->t('توقيع المسؤول', 'Authorized Signature'), 0, 1, 'C');
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -313,7 +334,7 @@ class ClientLedgerPdfService extends TCPDF
         if (empty($entries)) {
             $this->SetFont(self::F, '', 9);
             $this->SetTextColor(...self::MID);
-            $this->Cell($W, 12, 'لا توجد فواتير مسجّلة لهذا العميل', 'B', 1, 'C');
+            $this->Cell($W, 12, $this->t('لا توجد فواتير مسجّلة لهذا العميل', 'No invoices recorded for this client'), 'B', 1, 'C');
             $this->drawInvoiceTotalsRow($w, $summary);
             return;
         }
@@ -326,7 +347,7 @@ class ClientLedgerPdfService extends TCPDF
                 $this->drawPageFooter();
                 $this->AddPage();
                 $this->renderer->render($this);
-                $this->drawPageHeader('تفاصيل الفواتير (تابع)');
+                $this->drawPageHeader($this->t('تفاصيل الفواتير (تابع)', 'Invoice Details (continued)'));
                 $this->drawInvoiceTableHeader($w);
             }
 
@@ -346,17 +367,17 @@ class ClientLedgerPdfService extends TCPDF
             $this->Cell($w['items'], self::RH, $entry['items_count'], 'B', 0, 'C', $even ? false : true);
 
             $this->SetFont(self::F, 'B', 9);
-            $this->Cell($w['total'], self::RH, number_format($entry['total'], 2), 'B', 0, 'C', $even ? false : true);
+            $this->Cell($w['total'], self::RH, number_format($entry['total'], 3), 'B', 0, 'C', $even ? false : true);
 
             $this->SetFont(self::F, '', 9);
             $this->Cell($w['paid'],  self::RH,
-                $entry['paid'] > 0 ? number_format($entry['paid'], 2) : '—',
+                $entry['paid'] > 0 ? number_format($entry['paid'], 3) : '—',
                 'B', 0, 'C', $even ? false : true);
 
             $this->SetFont(self::F, 'B', 9);
             $this->SetTextColor($entry['due'] > 0 ? 150 : 100, $entry['due'] > 0 ? 0 : 100, 0);
             $this->Cell($w['due'], self::RH,
-                $entry['due'] > 0 ? number_format($entry['due'], 2) : 'مسدّد',
+                $entry['due'] > 0 ? number_format($entry['due'], 3) : $this->t('مسدّد', 'Paid'),
                 'B', 1, 'C', $even ? false : true);
         }
 
@@ -371,13 +392,13 @@ class ClientLedgerPdfService extends TCPDF
         $this->SetDrawColor(...self::HEADER_BG);
         $this->SetLineWidth(0);
 
-        $this->Cell($w['no'],    9, '#',         0, 0, 'C', true);
-        $this->Cell($w['date'],  9, 'التاريخ',   0, 0, 'C', true);
-        $this->Cell($w['sale'],  9, 'رقم الفاتورة', 0, 0, 'C', true);
-        $this->Cell($w['items'], 9, 'الأصناف',   0, 0, 'C', true);
-        $this->Cell($w['total'], 9, 'الإجمالي',  0, 0, 'C', true);
-        $this->Cell($w['paid'],  9, 'المدفوع',   0, 0, 'C', true);
-        $this->Cell($w['due'],   9, 'المتبقي',   0, 1, 'C', true);
+        $this->Cell($w['no'],    9, '#',                                     0, 0, 'C', true);
+        $this->Cell($w['date'],  9, $this->t('التاريخ', 'Date'),             0, 0, 'C', true);
+        $this->Cell($w['sale'],  9, $this->t('رقم الفاتورة', 'Invoice No'),  0, 0, 'C', true);
+        $this->Cell($w['items'], 9, $this->t('الأصناف', 'Items'),            0, 0, 'C', true);
+        $this->Cell($w['total'], 9, $this->t('الإجمالي', 'Total'),           0, 0, 'C', true);
+        $this->Cell($w['paid'],  9, $this->t('المدفوع', 'Paid'),             0, 0, 'C', true);
+        $this->Cell($w['due'],   9, $this->t('المتبقي', 'Due'),              0, 1, 'C', true);
 
         $this->SetTextColor(...self::DARK);
         $this->SetDrawColor(...self::LIGHT);
@@ -402,10 +423,10 @@ class ClientLedgerPdfService extends TCPDF
         $this->SetDrawColor(...self::LIGHT);
         $this->SetLineWidth(0.3);
 
-        $this->Cell($spanW,      self::RH, 'الإجمالي',                              'B', 0, 'R', true);
-        $this->Cell($w['total'], self::RH, number_format($summary['totalSales'],    2), 'B', 0, 'C', true);
-        $this->Cell($w['paid'],  self::RH, number_format($summary['totalPayments'], 2), 'B', 0, 'C', true);
-        $this->Cell($w['due'],   self::RH, number_format($summary['balance'],       2), 'B', 1, 'C', true);
+        $this->Cell($spanW,      self::RH, $this->t('الإجمالي', 'Total'),           'B', 0, 'R', true);
+        $this->Cell($w['total'], self::RH, number_format($summary['totalSales'],    3), 'B', 0, 'C', true);
+        $this->Cell($w['paid'],  self::RH, number_format($summary['totalPayments'], 3), 'B', 0, 'C', true);
+        $this->Cell($w['due'],   self::RH, number_format($summary['balance'],       3), 'B', 1, 'C', true);
 
         $this->SetTextColor(...self::DARK);
     }
@@ -434,7 +455,7 @@ class ClientLedgerPdfService extends TCPDF
 
     private function numberToArabicWords(float $number): string
     {
-        $number = round($number, 2);
+        $number = round($number, 3);
         if ($number == 0) return 'صفر';
 
         $conjunction = ' و ';
@@ -459,7 +480,7 @@ class ClientLedgerPdfService extends TCPDF
 
         $parts       = explode('.', (string) $number);
         $integerPart = (int) $parts[0];
-        $decimalPart = isset($parts[1]) ? (int) substr($parts[1], 0, 2) : 0;
+        $decimalPart = isset($parts[1]) ? (int) substr($parts[1], 0, 3) : 0;
 
         $convert = function (int $num) use ($dictionary, $conjunction, &$convert): string {
             if ($num <= 20)  return $dictionary[$num];
@@ -503,6 +524,62 @@ class ClientLedgerPdfService extends TCPDF
         $result = $convert($integerPart);
         if ($decimalPart > 0) {
             $result .= $conjunction . $convert($decimalPart) . ' قرشاً';
+        }
+
+        return $result;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // English number-to-words
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function numberToEnglishWords(float $number): string
+    {
+        $number = round($number, 3);
+        if ($number == 0) {
+            return 'Zero';
+        }
+
+        $ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+            'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+        $tensWords = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+        $convertInteger = function (int $num) use ($ones, $tensWords, &$convertInteger): string {
+            if ($num < 20) {
+                return $ones[$num];
+            }
+            if ($num < 100) {
+                $ten = (int) ($num / 10);
+                $rest = $num % 10;
+                return trim($tensWords[$ten] . ($rest > 0 ? ' ' . $ones[$rest] : ''));
+            }
+            if ($num < 1000) {
+                $hundreds = (int) ($num / 100);
+                $rest = $num % 100;
+                return trim($ones[$hundreds] . ' Hundred' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+            }
+            if ($num < 1000000) {
+                $thousands = (int) ($num / 1000);
+                $rest = $num % 1000;
+                return trim($convertInteger($thousands) . ' Thousand' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+            }
+            if ($num < 1000000000) {
+                $millions = (int) ($num / 1000000);
+                $rest = $num % 1000000;
+                return trim($convertInteger($millions) . ' Million' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+            }
+            $billions = (int) ($num / 1000000000);
+            $rest = $num % 1000000000;
+            return trim($convertInteger($billions) . ' Billion' . ($rest > 0 ? ' ' . $convertInteger($rest) : ''));
+        };
+
+        $parts = explode('.', (string) $number);
+        $integerPart = (int) $parts[0];
+        $decimalPart = isset($parts[1]) ? (int) substr($parts[1], 0, 3) : 0;
+
+        $result = $convertInteger($integerPart);
+        if ($decimalPart > 0) {
+            $result .= ' and ' . $convertInteger($decimalPart) . ' Baisa';
         }
 
         return $result;

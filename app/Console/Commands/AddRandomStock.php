@@ -104,8 +104,8 @@ class AddRandomStock extends Command
                         return [
                             $product->name,
                             $qty,
-                            number_format($unitCost, 2),
-                            number_format($salePrice, 2),
+                            number_format($unitCost, 3),
+                            number_format($salePrice, 3),
                         ];
                     })->toArray()
                 );
@@ -191,7 +191,7 @@ class AddRandomStock extends Command
             $purchase->save();
 
             $this->info("✓ Created {$itemsCreated} purchase items");
-            $this->info("✓ Total purchase amount: " . number_format($calculatedTotalAmount, 2));
+            $this->info("✓ Total purchase amount: " . number_format($calculatedTotalAmount, 3));
 
             // Step 6: Update Purchase Status to "received"
             $this->info("✓ Updating purchase status to 'received'...");

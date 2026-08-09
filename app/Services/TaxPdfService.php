@@ -114,13 +114,13 @@ class TaxPdfService
         // Taxes Row
         $this->pdf->Cell($pageWidth * 0.4, 10, 'إجمالي الضرائب:', 1, 0, 'C', true);
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->tax_amount, 2) . ' OMR', 1, 1, 'R');
+        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->tax_amount, 3) . ' OMR', 1, 1, 'R');
 
         // Customs Row
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_BODY);
         $this->pdf->Cell($pageWidth * 0.4, 10, 'إجمالي الجمارك:', 1, 0, 'C', true);
         $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->customs_amount, 2) . ' OMR', 1, 1, 'R');
+        $this->pdf->Cell($pageWidth * 0.6, 10, number_format((float)$purchase->customs_amount, 3) . ' OMR', 1, 1, 'R');
 
         // Combined Total
         $total = (float)$purchase->tax_amount + (float)$purchase->customs_amount;
@@ -128,7 +128,7 @@ class TaxPdfService
         $this->pdf->SetFillColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
         $this->pdf->SetTextColor(255, 255, 255);
         $this->pdf->Cell($pageWidth * 0.4, 10, 'الإجمالي الكلي:', 1, 0, 'C', true);
-        $this->pdf->Cell($pageWidth * 0.6, 10, number_format($total, 2) . ' OMR', 1, 1, 'R', true);
+        $this->pdf->Cell($pageWidth * 0.6, 10, number_format($total, 3) . ' OMR', 1, 1, 'R', true);
 
         $this->pdf->SetTextColor(0, 0, 0);
         $this->pdf->Ln(10);
@@ -163,7 +163,7 @@ class TaxPdfService
             $this->pdf->Cell($widths['no'], 8, $index + 1, 1, 0, 'C');
             $this->pdf->Cell($widths['name'], 8, $item->product?->name ?? '---', 1, 0, 'R');
             $this->pdf->Cell($widths['qty'], 8, number_format($item->quantity), 1, 0, 'C');
-            $this->pdf->Cell($widths['total'], 8, number_format($item->total_cost, 2), 1, 1, 'C');
+            $this->pdf->Cell($widths['total'], 8, number_format($item->total_cost, 3), 1, 1, 'C');
         }
 
         // If there are detailed tax/customs breakdown in JSON, we could add them here
@@ -175,7 +175,7 @@ class TaxPdfService
             foreach ($purchase->tax_details as $detail) {
                 if (isset($detail['label']) && isset($detail['amount'])) {
                     $this->pdf->Cell($pageWidth * 0.7, 8, $detail['label'], 1, 0, 'R');
-                    $this->pdf->Cell($pageWidth * 0.3, 8, number_format($detail['amount'], 2), 1, 1, 'C');
+                    $this->pdf->Cell($pageWidth * 0.3, 8, number_format($detail['amount'], 3), 1, 1, 'C');
                 }
             }
         }
@@ -188,7 +188,7 @@ class TaxPdfService
             foreach ($purchase->customs_details as $detail) {
                 if (isset($detail['label']) && isset($detail['amount'])) {
                     $this->pdf->Cell($pageWidth * 0.7, 8, $detail['label'], 1, 0, 'R');
-                    $this->pdf->Cell($pageWidth * 0.3, 8, number_format($detail['amount'], 2), 1, 1, 'C');
+                    $this->pdf->Cell($pageWidth * 0.3, 8, number_format($detail['amount'], 3), 1, 1, 'C');
                 }
             }
         }

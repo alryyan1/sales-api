@@ -1113,7 +1113,7 @@ class PurchaseController extends Controller
     {
         $validatedData = $request->validate([
             'amount' => 'required|numeric|min:0.01',
-            'method' => 'required|string|in:cash,bank_transfer,visa,other',
+            'method' => 'required|string|in:cash,bank_transfer,visa',
             'payment_date' => 'required|date',
             'reference_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string',

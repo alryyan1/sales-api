@@ -80,7 +80,7 @@ class Purchase extends Model
 
     protected $casts = [
         'purchase_date' => 'date',       // Cast to Carbon date object
-        'total_amount' => 'decimal:2', // Cast to decimal with 2 places
+        'total_amount' => 'decimal:3', // Cast to decimal with 3 places (OMR baisa)
         'tax_amount' => 'decimal:2',
         'customs_amount' => 'decimal:2',
         'tax_details' => 'array',

@@ -366,11 +366,11 @@ class ShiftController extends Controller
                             ['type' => 'text', 'text' => (string)$shift->id],                          // 1 - shift number
                             ['type' => 'text', 'text' => $shift->opened_at?->format('Y-m-d') ?? now()->format('Y-m-d')], // 2 - date
                             ['type' => 'text', 'text' => $shift->user?->name ?? '—'],                  // 3 - user name
-                            ['type' => 'text', 'text' => number_format($totalSalesAmount, 2)],         // 4 - total sales (items value)
-                            ['type' => 'text', 'text' => number_format($totalSales, 2)],               // 5 - total revenues (payments collected)
-                            ['type' => 'text', 'text' => number_format($totalReturns, 2)],             // 6 - total returns
-                            ['type' => 'text', 'text' => number_format($netCash, 2)],                  // 7 - net cash
-                            ['type' => 'text', 'text' => number_format($netBank, 2)],                  // 8 - net bank
+                            ['type' => 'text', 'text' => number_format($totalSalesAmount, 3)],         // 4 - total sales (items value)
+                            ['type' => 'text', 'text' => number_format($totalSales, 3)],               // 5 - total revenues (payments collected)
+                            ['type' => 'text', 'text' => number_format($totalReturns, 3)],             // 6 - total returns
+                            ['type' => 'text', 'text' => number_format($netCash, 3)],                  // 7 - net cash
+                            ['type' => 'text', 'text' => number_format($netBank, 3)],                  // 8 - net bank
                         ]
                     ],
                     // Embed shift_id in each button payload so the webhook can extract it
@@ -446,10 +446,10 @@ class ShiftController extends Controller
 
             if (!empty($smsNumbers)) {
                 $smsText = "تقرير الوردية #{$shift->id}\n"
-                    . "المبيعات: " . number_format($totalSales, 2) . "\n"
-                    . "المردودات: " . number_format($totalReturns, 2) . "\n"
-                    . "صافي كاش: " . number_format($netCash, 2) . "\n"
-                    . "صافي بنك: " . number_format($netBank, 2);
+                    . "المبيعات: " . number_format($totalSales, 3) . "\n"
+                    . "المردودات: " . number_format($totalReturns, 3) . "\n"
+                    . "صافي كاش: " . number_format($netCash, 3) . "\n"
+                    . "صافي بنك: " . number_format($netBank, 3);
 
                 $smsResults = $sms->sendToMany(array_values($smsNumbers), $smsText);
                 \Illuminate\Support\Facades\Log::info("Shift {$shift->id} SMS results", $smsResults);

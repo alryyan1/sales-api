@@ -101,7 +101,7 @@ class PriceListPdfService
             $pdf->SetFillColor($fill ? 245 : 255, $fill ? 245 : 255, $fill ? 245 : 255);
 
             $price = $product->last_sale_price_per_sellable_unit !== null
-                ? number_format($product->last_sale_price_per_sellable_unit, 2)
+                ? number_format($product->last_sale_price_per_sellable_unit, 3)
                 : '-';
 
             $pdf->Cell($colWidths[0], 6, $rowNum,                                          1, 0, 'C', true);

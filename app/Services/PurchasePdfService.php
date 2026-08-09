@@ -458,12 +458,12 @@ class PurchasePdfService
             $this->pdf->Cell($widths['product'], $rowH, $productName,                                                              1, 0, 'R', true);
             $this->pdf->Cell($widths['batch'],   $rowH, $item->batch_number ?: '---',                                             1, 0, 'C', true);
             $this->pdf->Cell($widths['qty'],     $rowH, number_format($item->quantity) . ($unit ? " $unit" : ''),                  1, 0, 'C', true);
-            $this->pdf->Cell($widths['cost'],    $rowH, number_format($item->unit_cost, 2),                                        1, 0, 'C', true);
-            $this->pdf->Cell($widths['sale'],    $rowH, $item->sale_price ? number_format($item->sale_price, 2) : '---',           1, 0, 'C', true);
+            $this->pdf->Cell($widths['cost'],    $rowH, number_format($item->unit_cost, 3),                                        1, 0, 'C', true);
+            $this->pdf->Cell($widths['sale'],    $rowH, $item->sale_price ? number_format($item->sale_price, 3) : '---',           1, 0, 'C', true);
 
             // Total with bold font
             $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL);
-            $this->pdf->Cell($widths['total'],   $rowH, number_format($itemTotal, 2),                                              1, 1, 'C', true);
+            $this->pdf->Cell($widths['total'],   $rowH, number_format($itemTotal, 3),                                              1, 1, 'C', true);
             $this->pdf->SetFont('arial', '', self::FONT_SIZE_SMALL);
 
             // Now render the product image inside the image cell
@@ -545,7 +545,7 @@ class PurchasePdfService
         $this->pdf->SetTextColor(255, 255, 255);
         $this->pdf->Cell($labelWidth, 9, 'المبلغ الإجمالي:', 1, 0, 'R', true);
         $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_HEADING - 1);
-        $this->pdf->Cell($valueWidth, 9, number_format($totalAmount, 2) . ' OMR', 1, 1, 'C', true);
+        $this->pdf->Cell($valueWidth, 9, number_format($totalAmount, 3) . ' OMR', 1, 1, 'C', true);
         $this->pdf->SetTextColor(0, 0, 0);
     }
 

@@ -541,17 +541,17 @@ class ReportController extends Controller
             $col = 'A';
             $sheet->setCellValue($col . $row, $dayData['date']);
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_sales'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['total_sales'], 3));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_paid'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['total_paid'], 3));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_cash'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['total_cash'], 3));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_bank'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['total_bank'], 3));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total_expense'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['total_expense'], 3));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['net'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['net'], 3));
             $row++;
         }
 
@@ -560,17 +560,17 @@ class ReportController extends Controller
         $col = 'A';
         $sheet->setCellValue($col . $totalRow, 'الإجمالي');
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_sales'], 2));
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_sales'], 3));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_paid'], 2));
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_paid'], 3));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_cash'], 2));
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_cash'], 3));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_bank'], 2));
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_bank'], 3));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_expense'], 2));
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['total_expense'], 3));
         $col++;
-        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['net'], 2));
+        $sheet->setCellValue($col . $totalRow, number_format($monthSummary['net'], 3));
 
         // Style total row
         $totalStyle = [
@@ -1230,7 +1230,7 @@ class ReportController extends Controller
         // Large prominent total income display
         $pdf->SetFont($pdf->getDefaultFontFamily(), 'B', 16);
         $pdf->SetFillColor(240, 248, 255); // Light blue background
-        $pdf->Cell(0, 12, 'Total Revenue: ' . number_format($summaryStats['total_amount'], 0), 1, 1, 'C', true);
+        $pdf->Cell(0, 12, 'Total Revenue: ' . number_format($summaryStats['total_amount'], 3), 1, 1, 'C', true);
         $pdf->Ln(5);
 
         // Income breakdown in a table format
@@ -1240,11 +1240,11 @@ class ReportController extends Controller
 
         $pdf->SetFont($pdf->getDefaultFontFamily(), '', 10);
         $incomeData = [
-            'Total Sales Amount' => number_format($summaryStats['total_amount'], 0),
-            'Total Paid Amount' => number_format($summaryStats['total_paid'], 0),
-            'Total Due Amount' => number_format($summaryStats['total_due'], 0),
+            'Total Sales Amount' => number_format($summaryStats['total_amount'], 3),
+            'Total Paid Amount' => number_format($summaryStats['total_paid'], 3),
+            'Total Due Amount' => number_format($summaryStats['total_due'], 3),
             'Number of Sales' => $summaryStats['total_sales'],
-            'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 0) : '0'
+            'Average Sale Value' => $summaryStats['total_sales'] > 0 ? number_format($summaryStats['total_amount'] / $summaryStats['total_sales'], 3) : '0'
         ];
 
         $pdf->addSummaryBox('Income Details', $incomeData, 2);
@@ -1265,7 +1265,7 @@ class ReportController extends Controller
             $paymentData = [];
             foreach ($summaryStats['payment_methods'] as $method => $amount) {
                 $percentage = $summaryStats['total_paid'] > 0 ? ($amount / $summaryStats['total_paid']) * 100 : 0;
-                $paymentData[ucfirst($method)] = number_format($amount, 0) . ' (' . number_format($percentage, 1) . '%)';
+                $paymentData[ucfirst($method)] = number_format($amount, 3) . ' (' . number_format($percentage, 1) . '%)';
             }
             $pdf->addSummaryBox('Payment Methods', $paymentData, 1);
         }
@@ -1299,7 +1299,7 @@ class ReportController extends Controller
 
             $clientData = [];
             foreach ($summaryStats['top_clients'] as $client) {
-                $clientData[$client['name']] = number_format($client['total'], 0) . ' (' . $client['count'] . ' sales)';
+                $clientData[$client['name']] = number_format($client['total'], 3) . ' (' . $client['count'] . ' sales)';
             }
             $pdf->addSummaryBox('Top Clients', $clientData, 1);
         }
@@ -1360,8 +1360,8 @@ class ReportController extends Controller
 
             $statusColor = $this->getStatusColor('completed');
 
-            $totalAmount = number_format($saleTotal, 0);
-            $paidAmount = number_format($salePaid, 0);
+            $totalAmount = number_format($saleTotal, 3);
+            $paidAmount = number_format($salePaid, 3);
             $discountAmount = '0';
 
             $saleDate = Carbon::parse($sale->sale_date)->format('M d, H:i');
@@ -1408,9 +1408,9 @@ class ReportController extends Controller
 
         $summaryData = [
             'TOTAL',
-            number_format($totalAmount, 0),
-            number_format($totalPaid, 0),
-            number_format($totalDiscount, 0),
+            number_format($totalAmount, 3),
+            number_format($totalPaid, 3),
+            number_format($totalDiscount, 3),
             $sales->count() . ' sales',
             'All Users',
             'All Items'
@@ -1444,9 +1444,9 @@ class ReportController extends Controller
 
         // Create statistics in a professional format
         $statsData = [
-            'Average Transaction Value' => number_format($avgSaleValue, 0),
+            'Average Transaction Value' => number_format($avgSaleValue, 3),
             'Payment Collection Rate' => number_format($paymentRate, 1) . '%',
-            'Outstanding Amount' => number_format($totalDue, 0),
+            'Outstanding Amount' => number_format($totalDue, 3),
             'Completed Transactions' => $completedCount,
             'Pending Transactions' => $pendingCount,
             'Total Products Sold' => $sales->flatMap->items->sum('quantity')
@@ -1748,20 +1748,20 @@ class ReportController extends Controller
             $col = 'A';
             $sheet->setCellValue($col . $row, $dayData['date']);
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['total'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['total'], 3));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['cash_total'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['cash_total'], 3));
             $col++;
-            $sheet->setCellValue($col . $row, number_format($dayData['bank_total'], 2));
+            $sheet->setCellValue($col . $row, number_format($dayData['bank_total'], 3));
             $row++;
         }
 
         // Summary row
         $row++;
         $sheet->setCellValue('A' . $row, 'الإجمالي');
-        $sheet->setCellValue('B' . $row, number_format($monthSummary['total'], 2));
-        $sheet->setCellValue('C' . $row, number_format($monthSummary['cash_total'], 2));
-        $sheet->setCellValue('D' . $row, number_format($monthSummary['bank_total'], 2));
+        $sheet->setCellValue('B' . $row, number_format($monthSummary['total'], 3));
+        $sheet->setCellValue('C' . $row, number_format($monthSummary['cash_total'], 3));
+        $sheet->setCellValue('D' . $row, number_format($monthSummary['bank_total'], 3));
 
         // Style summary row
         $summaryStyle = [

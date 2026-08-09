@@ -176,7 +176,7 @@ class DashboardController extends Controller
             ->value('total_value');
 
         // --- Purchases Summary by Payment Method (filtered period) ---
-        $bankMethods = ['bank_transfer', 'visa', 'other'];
+        $bankMethods = ['bank_transfer', 'visa'];
 
         $purchPaymentsQ = DB::table('purchase_payments')
             ->join('purchases', 'purchases.id', '=', 'purchase_payments.purchase_id')
@@ -632,7 +632,7 @@ class DashboardController extends Controller
             ->selectRaw('SUM(sale_return_items.quantity * sale_return_items.price) as total')
             ->value('total') ?? 0);
         $totalProfit   = $totalSales - $totalReturns;
-        $avgInvoice    = $invoicesCount > 0 ? round($totalSales / $invoicesCount, 2) : 0;
+        $avgInvoice    = $invoicesCount > 0 ? round($totalSales / $invoicesCount, 3) : 0;
 
         // ── Employees performance ──────────────────────────────────────────────
         $empInvQ = DB::table('sales')
@@ -717,7 +717,7 @@ class DashboardController extends Controller
             ->value('debt') ?? 0);
 
         // ── Purchases for this branch ─────────────────────────────────────────
-        $bankMethods = ['bank_transfer', 'visa', 'other'];
+        $bankMethods = ['bank_transfer', 'visa'];
 
         $purchTotalQ = DB::table('purchases')->where('warehouse_id', $warehouseId);
         $purchPaymentsQ = DB::table('purchase_payments')

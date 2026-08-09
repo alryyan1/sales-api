@@ -152,7 +152,7 @@ class SupplierPaymentController extends Controller
     {
         $validated = $request->validate([
             'amount'           => 'required|numeric|min:0.01',
-            'method'           => ['required', Rule::in(['cash', 'bank_transfer', 'visa', 'other'])],
+            'method'           => ['required', Rule::in(['cash', 'bank_transfer', 'visa'])],
             'payment_date'     => 'required|date_format:Y-m-d',
             'reference_number' => 'nullable|string|max:255',
         ]);
@@ -225,7 +225,7 @@ class SupplierPaymentController extends Controller
     {
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
-            'method' => ['required', Rule::in(['cash', 'bank_transfer', 'visa', 'other'])],
+            'method' => ['required', Rule::in(['cash', 'bank_transfer', 'visa'])],
             'reference_number' => 'nullable|string|max:255',
             'payment_date' => 'required|date',
             'purchase_id' => 'nullable|exists:purchases,id', // Optional purchase linking
@@ -276,7 +276,7 @@ class SupplierPaymentController extends Controller
 
         $request->validate([
             'amount' => 'required|numeric|min:0.01',
-            'method' => ['required', Rule::in(['cash', 'bank_transfer', 'visa', 'other'])],
+            'method' => ['required', Rule::in(['cash', 'bank_transfer', 'visa'])],
             'reference_number' => 'nullable|string|max:255',
             'payment_date' => 'required|date',
             'purchase_id' => 'nullable|exists:purchases,id',
@@ -360,7 +360,6 @@ class SupplierPaymentController extends Controller
                 ['value' => 'cash', 'label' => 'Cash'],
                 ['value' => 'bank_transfer', 'label' => 'Bank Transfer'],
                 ['value' => 'visa', 'label' => 'Visa'],
-                ['value' => 'other', 'label' => 'Other'],
             ]
         ]);
     }

@@ -22,7 +22,7 @@ class Expense extends Model
     ];
 
     protected $casts = [
-        'amount' => 'decimal:2',
+        'amount' => 'decimal:3',
         'expense_date' => 'date',
     ];
 

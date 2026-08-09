@@ -616,7 +616,7 @@ class ProductController extends Controller
         Product::all()->each(function (Product $product) use ($multiplier, &$updatedCount) {
             $lastPrice = $product->last_sale_price_per_sellable_unit;
             if ($lastPrice !== null && $lastPrice > 0) {
-                $product->sale_price = round($lastPrice * $multiplier, 2);
+                $product->sale_price = round($lastPrice * $multiplier, 3);
                 $product->save();
                 $updatedCount++;
             }
@@ -766,7 +766,7 @@ class ProductController extends Controller
 
             // SKU / price line (bottom)
             $pdf->SetFont('helvetica', '', 6);
-            $price = number_format((float)($product->sale_price ?? 0), 2);
+            $price = number_format((float)($product->sale_price ?? 0), 3);
             $pdf->Cell(0, 3, $barcodeValue . '   ' . $price, 0, 1, 'C');
         }
 

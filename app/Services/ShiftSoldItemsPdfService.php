@@ -143,9 +143,9 @@ class ShiftSoldItemsPdfService
 
             $pdf->Cell($cols[0]['w'], 8, $rowNum++, 1, 0, 'C');
             $pdf->Cell($cols[1]['w'], 8, $item['name'], 1, 0, 'R');
-            $pdf->Cell($cols[2]['w'], 8, number_format($item['price'], 2), 1, 0, 'C');
+            $pdf->Cell($cols[2]['w'], 8, number_format($item['price'], 3), 1, 0, 'C');
             $pdf->Cell($cols[3]['w'], 8, number_format($item['quantity'], 2), 1, 0, 'C');
-            $pdf->Cell($cols[4]['w'], 8, number_format($item['total'], 2), 1, 1, 'C');
+            $pdf->Cell($cols[4]['w'], 8, number_format($item['total'], 3), 1, 1, 'C');
 
             $grandTotal += $item['total'];
         }
@@ -154,6 +154,6 @@ class ShiftSoldItemsPdfService
         $pdf->SetFont(self::FONT_MAIN, 'B', 10);
         $pdf->SetFillColor(240, 248, 255);
         $pdf->Cell($cols[0]['w'] + $cols[1]['w'] + $cols[2]['w'] + $cols[3]['w'], 9, 'الإجمالي الكلي', 1, 0, 'C', true);
-        $pdf->Cell($cols[4]['w'], 9, number_format($grandTotal, 2), 1, 1, 'C', true);
+        $pdf->Cell($cols[4]['w'], 9, number_format($grandTotal, 3), 1, 1, 'C', true);
     }
 }
