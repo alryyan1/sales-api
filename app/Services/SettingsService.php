@@ -3,14 +3,13 @@
 namespace App\Services;
 
 use App\Models\AppSetting;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class SettingsService
 {
-    private const CACHE_KEY = 'app_settings_cache_v1';
-    private const CACHE_TTL_SECONDS = 60;
+    /** Memoized for the lifetime of the request — avoids re-querying app_settings when getAll() is called more than once per request (common: most PDF services call it independently). Reset by update(). */
+    private static ?array $cached = null;
 
     private const IMAGE_KEYS = [
         'company_logo_url',
@@ -33,17 +32,9 @@ class SettingsService
             'company_email' => 'string',
             'company_logo_url' => 'string',
             'currency_symbol' => 'string',
-            'date_format' => 'string',
             'global_low_stock_threshold' => 'int',
-            'invoice_prefix' => 'string',
-            'purchase_order_prefix' => 'string',
             'default_profit_rate' => 'float',
             'timezone' => 'string',
-            'whatsapp_enabled' => 'bool',
-            'whatsapp_api_url' => 'string',
-            'whatsapp_api_token' => 'string',
-            'whatsapp_instance_id' => 'string',
-            'whatsapp_default_phone' => 'string',
             'company_header_url' => 'string',
             'company_stamp_url' => 'string',
             'company_signature_url' => 'string',
@@ -70,6 +61,16 @@ class SettingsService
             'purchase_use_batch_number' => 'bool',
             'purchase_use_expiry_date' => 'bool',
             'default_purchase_currency' => 'string',
+            'currency_code' => 'string',
+            'usd_conversion_enabled' => 'bool',
+
+            // Sales Behavior
+            'sales_allow_zero_stock' => 'bool',
+            'sales_allow_negative_stock' => 'bool',
+            'sales_require_customer' => 'bool',
+            'sales_default_customer_id' => 'int',
+            'sales_allow_price_edit' => 'bool',
+            'sales_allow_invoice_date_edit' => 'bool',
         ];
     }
 
@@ -80,25 +81,16 @@ class SettingsService
     {
         $c = config('app_settings', []);
         return [
-            'company_name' => $c['company_name'] ?? 'My Awesome Company',
-            'company_address' => $c['company_address'] ?? '123 Main St, Anytown, USA',
-            'company_phone' => $c['company_phone'] ?? '+1-555-123-4567',
+            'company_name' => $c['company_name'] ?? '',
+            'company_address' => $c['company_address'] ?? '',
+            'company_phone' => $c['company_phone'] ?? '',
             'company_phone_2' => $c['company_phone_2'] ?? null,
-            'company_email' => $c['company_email'] ?? 'contact@example.com',
+            'company_email' => $c['company_email'] ?? '',
             'company_logo_url' => $c['company_logo_url'] ?? null,
             'currency_symbol' => $c['currency_symbol'] ?? 'SDG',
-            'date_format' => $c['date_format'] ?? 'YYYY-MM-DD',
             'global_low_stock_threshold' => $c['global_low_stock_threshold'] ?? 10,
-            'invoice_prefix' => $c['invoice_prefix'] ?? 'INV-',
-            'purchase_order_prefix' => $c['purchase_order_prefix'] ?? 'PO-',
             'default_profit_rate' => $c['default_profit_rate'] ?? 20.0,
             'timezone' => config('app.timezone', 'Africa/Khartoum'),
-            'whatsapp_enabled' => $c['whatsapp_enabled'] ?? false,
-            // Default to WaClient API values as requested
-            'whatsapp_api_url' => 'https://waclient.com/api',
-            'whatsapp_api_token' => '68968ae964aac',
-            'whatsapp_instance_id' => '68968AFE5FF3D',
-            'whatsapp_default_phone' => $c['whatsapp_default_phone'] ?? '',
             'company_header_url' => $c['company_header_url'] ?? null,
             'company_stamp_url' => $c['company_stamp_url'] ?? null,
             'company_signature_url' => $c['company_signature_url'] ?? null,
@@ -125,35 +117,59 @@ class SettingsService
             'purchase_use_batch_number' => $c['purchase_use_batch_number'] ?? true,
             'purchase_use_expiry_date' => $c['purchase_use_expiry_date'] ?? true,
             'default_purchase_currency' => $c['default_purchase_currency'] ?? 'SDG',
+            // Drives decimal-place display everywhere money amounts are shown (see useFormatCurrency
+            // in sales-ui): SDG=0, OMR=3, USD=2.
+            'currency_code' => $c['currency_code'] ?? 'SDG',
+            // Master switch for USD→local-currency price conversion (POS/product pricing).
+            // When false, the TopAppBar rate widget is hidden and USD-priced products are
+            // shown/sold at face value (no multiplication by usd_to_sdg_factor).
+            'usd_conversion_enabled' => $c['usd_conversion_enabled'] ?? true,
+
+            // Sales Behavior
+            'sales_allow_zero_stock' => $c['sales_allow_zero_stock'] ?? true,
+            'sales_allow_negative_stock' => $c['sales_allow_negative_stock'] ?? false,
+            'sales_require_customer' => $c['sales_require_customer'] ?? false,
+            'sales_default_customer_id' => $c['sales_default_customer_id'] ?? null,
+            'sales_allow_price_edit' => $c['sales_allow_price_edit'] ?? true,
+            'sales_allow_invoice_date_edit' => $c['sales_allow_invoice_date_edit'] ?? true,
         ];
     }
 
     public function getAll(): array
     {
-        return Cache::remember(self::CACHE_KEY, self::CACHE_TTL_SECONDS, function () {
-            $defaults = $this->defaultValues();
-            $types = $this->managedKeysWithTypes();
-            $stored = AppSetting::query()->pluck('value', 'key')->toArray();
+        if (self::$cached !== null) {
+            return self::$cached;
+        }
 
-            $result = $defaults;
-            foreach ($stored as $key => $raw) {
-                if (!array_key_exists($key, $types)) {
-                    continue;
-                }
-                $result[$key] = $this->castFromStorage($raw, $types[$key]);
+        $defaults = $this->defaultValues();
+        $types = $this->managedKeysWithTypes();
+        $stored = AppSetting::query()->pluck('value', 'key')->toArray();
+
+        $result = $defaults;
+        foreach ($stored as $key => $raw) {
+            if (!array_key_exists($key, $types)) {
+                continue;
             }
+            $result[$key] = $this->castFromStorage($raw, $types[$key]);
+        }
 
-            // Expand relative image paths to full public URLs.
-            // Values that are already full URLs (legacy) are left as-is.
-            foreach (self::IMAGE_KEYS as $key) {
-                $value = $result[$key] ?? null;
-                if ($value && !str_starts_with($value, 'http')) {
-                    $result[$key] = Storage::disk('public')->url($value);
-                }
+        // Expand relative image paths to full public URLs.
+        // Values that are already full URLs (legacy) are left as-is.
+        foreach (self::IMAGE_KEYS as $key) {
+            $value = $result[$key] ?? null;
+            if ($value && !str_starts_with($value, 'http')) {
+                $result[$key] = Storage::disk('public')->url($value);
             }
+        }
 
-            return $result;
-        });
+        // There's no UI to set `currency_symbol` independently of `currency_code` — the
+        // settings screen only exposes one "system currency" dropdown. Force the display
+        // symbol to always match the selected code so PDFs and every screen that reads
+        // either value stay consistent (also self-heals any stale symbol left over from
+        // before this was enforced).
+        $result['currency_symbol'] = $result['currency_code'] ?? 'SDG';
+
+        return self::$cached = $result;
     }
 
     public function update(array $data): array
@@ -166,7 +182,7 @@ class SettingsService
             $storedValue = $this->castToStorage($value, $types[$key]);
             AppSetting::updateOrCreate(['key' => $key], ['value' => $storedValue]);
         }
-        Cache::forget(self::CACHE_KEY);
+        self::$cached = null;
         return $this->getAll();
     }
 
@@ -195,6 +211,8 @@ class SettingsService
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
         $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'USD'])];
+        $rules['currency_code'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
+        $rules['sales_default_customer_id'] = ['nullable', 'integer', 'exists:clients,id'];
         return $rules;
     }
 

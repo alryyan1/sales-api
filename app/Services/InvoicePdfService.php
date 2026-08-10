@@ -6,9 +6,12 @@ use TCPDF;
 use Illuminate\Support\Facades\Log;
 use App\Models\Sale;
 use Illuminate\Support\Facades\Storage;
+use App\Services\Pdf\FormatsMoneyForPdf;
 
 class InvoicePdfService
 {
+    use FormatsMoneyForPdf;
+
     /**
      * Generate invoice PDF for a sale
      *
@@ -384,8 +387,8 @@ class InvoicePdfService
             $pdf->Cell($w[1], 6, $productName, 1, 0, 'C');
             $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
             $pdf->Cell($w[3], 6, $item->quantity, 1, 0, 'C');
-            $pdf->Cell($w[4], 6, number_format($item->unit_price, 2), 1, 0, 'C');
-            $pdf->Cell($w[5], 6, number_format($item->total_price, 2), 1, 1, 'C');
+            $pdf->Cell($w[4], 6, $this->formatMoney($item->unit_price), 1, 0, 'C');
+            $pdf->Cell($w[5], 6, $this->formatMoney($item->total_price), 1, 1, 'C');
         }
     }
 
@@ -400,17 +403,17 @@ class InvoicePdfService
         // Total row
         $pdf->SetFont('arial', 'B', 11);
         $pdf->Cell(145, 10, 'الإجمالي الكلي', 1, 0, 'C');
-        $pdf->Cell(45, 10, number_format($net, 2), 1, 1, 'C');
+        $pdf->Cell(45, 10, $this->formatMoney($net), 1, 1, 'C');
 
         if ($isFinal) {
             $paid = (float) ($sale->payments?->sum('amount') ?? 0);
             $due = max(0, $net - $paid);
 
             $pdf->Cell(145, 10, 'المدفوع', 1, 0, 'C');
-            $pdf->Cell(45, 10, number_format($paid, 2), 1, 1, 'C');
+            $pdf->Cell(45, 10, $this->formatMoney($paid), 1, 1, 'C');
 
             $pdf->Cell(145, 10, 'المتبقي', 1, 0, 'C');
-            $pdf->Cell(45, 10, number_format($due, 2), 1, 1, 'C');
+            $pdf->Cell(45, 10, $this->formatMoney($due), 1, 1, 'C');
         }
 
         // Sum in words

@@ -8,20 +8,10 @@ return [
     'company_logo_url' => env('APP_SETTINGS_COMPANY_LOGO_URL', null), // URL to a logo image
 
     'currency_symbol' => env('APP_SETTINGS_CURRENCY_SYMBOL', 'SDG'),
-    'date_format' => env('APP_SETTINGS_DATE_FORMAT', 'YYYY-MM-DD'), // Example: 'MM/DD/YYYY', 'DD.MM.YYYY'
     'global_low_stock_threshold' => (int) env('APP_SETTINGS_LOW_STOCK_THRESHOLD', 10),
 
-    'invoice_prefix' => env('APP_SETTINGS_INVOICE_PREFIX', 'INV-'),
-    'purchase_order_prefix' => env('APP_SETTINGS_PO_PREFIX', 'PO-'),
     'default_profit_rate' => (float) env('APP_SETTINGS_DEFAULT_PROFIT_RATE', 20.0), // Default profit rate percentage
     'pdf_font' => env('APP_SETTINGS_PDF_FONT', 'Amiri'),
-
-    // WhatsApp API Configuration
-    'whatsapp_enabled' => env('APP_SETTINGS_WHATSAPP_ENABLED', false),
-    'whatsapp_api_url' => env('APP_SETTINGS_WHATSAPP_API_URL', 'https://waapi.app/api/v1'),
-    'whatsapp_api_token' => env('APP_SETTINGS_WHATSAPP_API_TOKEN', ''),
-    'whatsapp_instance_id' => env('APP_SETTINGS_WHATSAPP_INSTANCE_ID', ''),
-    'whatsapp_default_phone' => env('APP_SETTINGS_WHATSAPP_DEFAULT_PHONE', ''),
 
     // Add more settings as needed
     // 'timezone' => env('APP_TIMEZONE', 'UTC'),
@@ -35,5 +25,13 @@ return [
         'other' => 'أخرى',
     ],
     'invoice_thermal_footer' => 'شكراً لزيارتكم!زورونا مرة أخرى!',
+
+    // Sales Behavior
+    'sales_allow_zero_stock' => env('APP_SETTINGS_SALES_ALLOW_ZERO_STOCK', true),
+    'sales_allow_negative_stock' => env('APP_SETTINGS_SALES_ALLOW_NEGATIVE_STOCK', false),
+    'sales_require_customer' => env('APP_SETTINGS_SALES_REQUIRE_CUSTOMER', false),
+    'sales_default_customer_id' => env('APP_SETTINGS_SALES_DEFAULT_CUSTOMER_ID', null),
+    'sales_allow_price_edit' => env('APP_SETTINGS_SALES_ALLOW_PRICE_EDIT', true),
+    'sales_allow_invoice_date_edit' => env('APP_SETTINGS_SALES_ALLOW_INVOICE_DATE_EDIT', true),
 
 ];

@@ -352,6 +352,26 @@ class SupplierController extends Controller
     }
 
     /**
+     * Export the suppliers summary statement as a PDF (web route — inline display).
+     */
+    public function summaryPdf()
+    {
+        try {
+            $service    = new \App\Services\SupplierSummaryPdfService();
+            $pdfContent = $service->generate();
+
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="suppliers_summary.pdf"');
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error'   => $e->getMessage(),
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
      * Sync all suppliers (with financial balances) to Firestore.
      *
      * POST /api/suppliers/sync-to-firestore

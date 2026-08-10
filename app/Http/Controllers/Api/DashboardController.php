@@ -260,6 +260,70 @@ class DashboardController extends Controller
     }
 
     /**
+     * Provide a focused profit summary: paid sales, expenses, cost of sales and net profit
+     * for a date range. Defaults to the start of the current month through its end.
+     */
+    public function profitSummary(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+        ]);
+
+        $startDate = isset($validated['start_date'])
+            ? Carbon::parse($validated['start_date'])
+            : Carbon::now()->startOfMonth();
+        $endDate = isset($validated['end_date'])
+            ? Carbon::parse($validated['end_date'])
+            : Carbon::now()->endOfMonth();
+
+        // Total sales amount: full invoiced value of non-quote sales made in the period
+        // (includes unpaid/deferred amounts — not the same as paid_sales_amount below).
+        $totalSalesAmount = (float) DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.is_quote', false)
+            ->whereDate('sales.sale_date', '>=', $startDate)
+            ->whereDate('sales.sale_date', '<=', $endDate)
+            ->sum('sale_items.total_price');
+
+        // Paid sales amount: payments actually collected against non-quote sales made in the period.
+        $paidSalesAmount = (float) DB::table('payments')
+            ->join('sales', 'sales.id', '=', 'payments.sale_id')
+            ->where('sales.is_quote', false)
+            ->whereDate('sales.sale_date', '>=', $startDate)
+            ->whereDate('sales.sale_date', '<=', $endDate)
+            ->sum('payments.amount');
+
+        // Cost of sales (COGS): cost price at time of sale, for non-returned non-quote sales in the period.
+        $costOfSalesAmount = (float) DB::table('sale_items')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.is_quote', false)
+            ->where('sales.is_returned', false)
+            ->whereDate('sales.sale_date', '>=', $startDate)
+            ->whereDate('sales.sale_date', '<=', $endDate)
+            ->selectRaw('COALESCE(SUM(sale_items.cost_price_at_sale * sale_items.quantity), 0) as total')
+            ->value('total');
+
+        // Expenses recorded in the period.
+        $expensesAmount = (float) DB::table('expenses')
+            ->whereDate('expense_date', '>=', $startDate)
+            ->whereDate('expense_date', '<=', $endDate)
+            ->sum('amount');
+
+        $profit = $paidSalesAmount - $expensesAmount - $costOfSalesAmount;
+
+        return response()->json(['data' => [
+            'start_date' => $startDate->toDateString(),
+            'end_date' => $endDate->toDateString(),
+            'total_sales_amount' => $totalSalesAmount,
+            'paid_sales_amount' => $paidSalesAmount,
+            'expenses_amount' => $expensesAmount,
+            'cost_of_sales_amount' => $costOfSalesAmount,
+            'profit' => $profit,
+        ]]);
+    }
+
+    /**
      * Provide a lightweight summary for the sales terminal (e.g., today's sales for current user).
      */
     public function salesTerminalSummary(Request $request)

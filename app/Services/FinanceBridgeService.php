@@ -59,14 +59,14 @@ class FinanceBridgeService
                 'party_name' => $sale->client?->name,
                 'party_phone' => $sale->client?->phone,
                 'party_email' => $sale->client?->email,
-                'description' => "ذمم/نقدية — فاتورة رقم {$sale->number}",
+                'description' => "ذمم/نقدية — فاتورة رقم {$sale->id}",
                 'debit' => $revenueAmount,
                 'credit' => 0,
             ],
             [
                 'account_role' => 'sales_revenue',
                 'party_id' => null,
-                'description' => "إيراد فاتورة رقم {$sale->number}",
+                'description' => "إيراد فاتورة رقم {$sale->id}",
                 'debit' => 0,
                 'credit' => $revenueAmount,
             ],
@@ -76,14 +76,14 @@ class FinanceBridgeService
             $lines[] = [
                 'account_role' => 'sales_cogs',
                 'party_id' => null,
-                'description' => "تكلفة فاتورة رقم {$sale->number}",
+                'description' => "تكلفة فاتورة رقم {$sale->id}",
                 'debit' => $costAmount,
                 'credit' => 0,
             ];
             $lines[] = [
                 'account_role' => 'sales_inventory',
                 'party_id' => null,
-                'description' => "مخزون فاتورة رقم {$sale->number}",
+                'description' => "مخزون فاتورة رقم {$sale->id}",
                 'debit' => 0,
                 'credit' => $costAmount,
             ];
@@ -91,8 +91,8 @@ class FinanceBridgeService
 
         $this->putDocument("sale_{$sale->id}", [
             'date' => $sale->sale_date->toDateString(),
-            'reference' => (string) $sale->number,
-            'description' => "قيد مبيعات — فاتورة رقم {$sale->number}",
+            'reference' => (string) $sale->id,
+            'description' => "قيد مبيعات — فاتورة رقم {$sale->id}",
             'createdAt' => now()->toIso8601String(),
             'lines' => $lines,
         ]);
@@ -123,14 +123,14 @@ class FinanceBridgeService
 
         $this->putDocument("sale_{$sale->id}_payment_{$payment->id}", [
             'date' => $payment->payment_date->toDateString(),
-            'reference' => (string) $sale->number,
-            'description' => "دفعة على فاتورة رقم {$sale->number}",
+            'reference' => (string) $sale->id,
+            'description' => "دفعة على فاتورة رقم {$sale->id}",
             'createdAt' => now()->toIso8601String(),
             'lines' => [
                 [
                     'account_role' => $this->roleForMethod($payment->method),
                     'party_id' => null,
-                    'description' => "استلام دفعة — فاتورة رقم {$sale->number}",
+                    'description' => "استلام دفعة — فاتورة رقم {$sale->id}",
                     'debit' => $amount,
                     'credit' => 0,
                 ],
@@ -140,7 +140,7 @@ class FinanceBridgeService
                     'party_name' => $sale->client?->name,
                     'party_phone' => $sale->client?->phone,
                     'party_email' => $sale->client?->email,
-                    'description' => "تخفيض ذمم — فاتورة رقم {$sale->number}",
+                    'description' => "تخفيض ذمم — فاتورة رقم {$sale->id}",
                     'debit' => 0,
                     'credit' => $amount,
                 ],

@@ -120,22 +120,26 @@ class PdfHeaderRenderer
     {
         if ($this->logoPath) {
             try {
-                $pageWidth  = $pdf->getPageWidth();
-                $margins    = $pdf->getMargins();
-                $w          = $this->logoWidth;
+                $pageWidth = $pdf->getPageWidth();
+                $margins   = $pdf->getMargins();
+                $w         = $this->logoWidth;
+                $h         = $this->logoHeight > 0 ? $this->logoHeight : 0;
+                $leftX     = $margins['left'];
+                $rightX    = $pageWidth - $margins['right'] - $w;
 
-                $x = match ($this->logoPosition) {
-                    'left'   => $margins['left'],
-                    'center' => ($pageWidth - $w) / 2,
-                    default  => $pageWidth - $margins['right'] - $w, // right
+                $xPositions = match ($this->logoPosition) {
+                    'left'  => [$leftX],
+                    'both'  => [$leftX, $rightX],
+                    default => [$rightX], // right
                 };
 
-                @$pdf->Image(
-                    $this->logoPath,
-                    $x, 5, $w,
-                    $this->logoHeight > 0 ? $this->logoHeight : 0,
-                    '', '', 'T', false, 300, '', false, false, 0, false, false, false
-                );
+                foreach ($xPositions as $x) {
+                    @$pdf->Image(
+                        $this->logoPath,
+                        $x, 5, $w, $h,
+                        '', '', 'T', false, 300, '', false, false, 0, false, false, false
+                    );
+                }
             } catch (\Throwable $e) {
                 // logo error — fall through to text
             }

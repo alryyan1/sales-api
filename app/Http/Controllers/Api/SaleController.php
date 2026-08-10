@@ -11,6 +11,7 @@ use App\Models\PurchaseItem;
 use App\Models\Sale;
 use App\Models\Shift;
 use App\Services\FinanceBridgeService;
+use App\Services\Pdf\FormatsMoneyForPdf;
 use App\Services\Pdf\PdfHeaderRenderer;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -24,6 +25,8 @@ use TCPDF;
 
 class SaleController extends Controller
 {
+    use FormatsMoneyForPdf;
+
     public function index(Request $request)
     {
         $query = Sale::with(['client:id,name', 'user:id,name', 'warehouse:id,name', 'items.product:id,name,image_url', 'items.product.warehouses']);
@@ -1159,7 +1162,6 @@ class SaleController extends Controller
 
         // --- Company & Invoice Info (from config and Sale) ---
         $settings = (new \App\Services\SettingsService)->getAll();
-        $invoicePrefix = $settings['invoice_prefix'] ?? 'INV-';
 
         $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->setPrintHeader(false);
@@ -1179,7 +1181,7 @@ class SaleController extends Controller
         $pdf->SetFont('arial', 'B', 16);
         $pdf->Cell(0, 8, 'فاتورة مبيعات', 0, 1, 'C');
         $pdf->SetFont('arial', '', 9);
-        $pdf->Cell(0, 6, 'رقم الفاتورة: '.($invoicePrefix.$sale->id), 0, 1, 'C');
+        $pdf->Cell(0, 6, 'رقم الفاتورة: '.('INV-'.$sale->id), 0, 1, 'C');
         $pdf->Cell(0, 5, 'تاريخ الفاتورة: '.Carbon::parse($sale->sale_date)->format('Y-m-d'), 0, 1, 'C');
         $pdf->Ln(5);
 
@@ -1236,8 +1238,8 @@ class SaleController extends Controller
             $lineHeight = $pdf->getStringHeight($w_items[3], $productDescription); // Calculate height needed for description
             $lineHeight = max(6, $lineHeight); // Minimum height of 6
 
-            $pdf->Cell($w_items[0], $lineHeight, number_format((float) $item->total_price, 0), 'LRB', 0, 'R', $fill);
-            $pdf->Cell($w_items[1], $lineHeight, number_format((float) $item->unit_price, 0), 'LRB', 0, 'R', $fill);
+            $pdf->Cell($w_items[0], $lineHeight, $this->formatMoney($item->total_price), 'LRB', 0, 'R', $fill);
+            $pdf->Cell($w_items[1], $lineHeight, $this->formatMoney($item->unit_price), 'LRB', 0, 'R', $fill);
             $pdf->Cell($w_items[2], $lineHeight, $item->quantity, 'LRB', 0, 'C', $fill);
 
             $x = $pdf->GetX();
@@ -1262,20 +1264,20 @@ class SaleController extends Controller
 
         $pdf->SetFont('arial', '', 9);
         $pdf->Cell($col1Width, 6, 'المجموع الفرعي:', 'LTR', 0, 'L', false);
-        $pdf->Cell($col2Width, 6, number_format($subtotalValue, 0), 'TR', 1, 'R', false);
+        $pdf->Cell($col2Width, 6, $this->formatMoney($subtotalValue), 'TR', 1, 'R', false);
 
         $pdf->SetFont('arial', 'B', 10);
         $pdf->SetFillColor(220, 220, 220);
         $pdf->Cell($col1Width, 7, 'الإجمالي المستحق:', 'LTRB', 0, 'L', true);
-        $pdf->Cell($col2Width, 7, number_format($netTotal, 0), 'TRB', 1, 'R', true);
+        $pdf->Cell($col2Width, 7, $this->formatMoney($netTotal), 'TRB', 1, 'R', true);
 
         $pdf->SetFont('arial', '', 9);
         $pdf->Cell($col1Width, 6, 'المبلغ المدفوع:', 'LR', 0, 'L', false);
-        $pdf->Cell($col2Width, 6, number_format($paidValue, 0), 'R', 1, 'R', false);
+        $pdf->Cell($col2Width, 6, $this->formatMoney($paidValue), 'R', 1, 'R', false);
 
         $pdf->SetFont('arial', 'B', 10);
         $pdf->Cell($col1Width, 7, 'المبلغ المتبقي:', 'LTRB', 0, 'L', false);
-        $pdf->Cell($col2Width, 7, number_format($due, 0), 'TRB', 1, 'R', false);
+        $pdf->Cell($col2Width, 7, $this->formatMoney($due), 'TRB', 1, 'R', false);
 
         // --- Payments Information ---
         if ($sale->payments && $sale->payments->count() > 0) {
@@ -1285,7 +1287,7 @@ class SaleController extends Controller
             $pdf->SetFont('arial', '', 8);
             foreach ($sale->payments as $payment) {
                 $paymentText = 'طريقة الدفع: '.config('app_settings.payment_methods.'.$payment->method, $payment->method); // Assuming payment_methods in config
-                $paymentText .= '  |  المبلغ: '.number_format((float) $payment->amount, 0);
+                $paymentText .= '  |  المبلغ: '.$this->formatMoney($payment->amount);
                 $paymentText .= '  |  التاريخ: '.Carbon::parse($payment->payment_date)->format('Y-m-d');
                 if ($payment->reference_number) {
                     $paymentText .= '  |  مرجع: '.$payment->reference_number;
@@ -1430,8 +1432,8 @@ class SaleController extends Controller
                     $productName = mb_substr($productName, 0, 18).'..';
                 }
 
-                $itemTotal = number_format((float) $item->total_price, 0);
-                $itemPrice = number_format((float) $item->unit_price, 0);
+                $itemTotal = $this->formatMoney($item->total_price);
+                $itemPrice = $this->formatMoney($item->unit_price);
                 $itemQty = (string) $item->quantity;
 
                 // Using MultiCell for name to handle potential (though short) wrapping
@@ -1454,18 +1456,18 @@ class SaleController extends Controller
 
             $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
-            $pdf->Cell(26, 5, number_format($itemsSubtotal, 0), 0, 1, 'R');
+            $pdf->Cell(26, 5, $this->formatMoney($itemsSubtotal), 0, 1, 'R');
 
             $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
-            $pdf->Cell(26, 6, number_format($finalTotal, 0), 0, 1, 'R');
+            $pdf->Cell(26, 6, $this->formatMoney($finalTotal), 0, 1, 'R');
 
             $pdf->SetFont('arial', '', 8);
             $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
-            $pdf->Cell(26, 5, number_format($paidAmount, 0), 0, 1, 'R');
+            $pdf->Cell(26, 5, $this->formatMoney($paidAmount), 0, 1, 'R');
             $pdf->SetFont('arial', 'B', 8);
             $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
-            $pdf->Cell(26, 5, number_format($due, 0), 0, 1, 'R');
+            $pdf->Cell(26, 5, $this->formatMoney($due), 0, 1, 'R');
             $pdf->Ln(1);
 
             // --- Payment Methods Used ---
@@ -1479,7 +1481,7 @@ class SaleController extends Controller
                         $methodLabel = config('app_settings.payment_methods_ar.'.$payment->method, $payment->method);
                     }
                     $pdf->Cell(46, 4, $methodLabel.':', 0, 0, 'R');
-                    $pdf->Cell(26, 4, number_format((float) $payment->amount, 0), 0, 1, 'R');
+                    $pdf->Cell(26, 4, $this->formatMoney($payment->amount), 0, 1, 'R');
                 }
                 $pdf->Ln(1);
             }

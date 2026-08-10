@@ -202,15 +202,18 @@ class MyCustomTCPDF extends TCPDF
                 $margins   = $this->getMargins();
 
                 // Image() uses absolute page coordinates (RTL mode does NOT flip Image x)
-                if ($position === 'left') {
-                    $x = $margins['left'];
-                } elseif ($position === 'center') {
-                    $x = ($pageWidth - $w) / 2;
-                } else { // right (default)
-                    $x = $pageWidth - $margins['right'] - $w;
-                }
+                $leftX  = $margins['left'];
+                $rightX = $pageWidth - $margins['right'] - $w;
 
-                @$this->Image($logoPath, $x, 8, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+                $xPositions = match ($position) {
+                    'left'  => [$leftX],
+                    'both'  => [$leftX, $rightX],
+                    default => [$rightX], // right
+                };
+
+                foreach ($xPositions as $x) {
+                    @$this->Image($logoPath, $x, 8, $w, 0, '', '', 'T', false, 300, '', false, false, 0, false, false, false);
+                }
                 $logoPlaced = true;
             } catch (\Throwable $e) {
                 // ignore logo errors

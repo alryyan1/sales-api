@@ -134,6 +134,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/expiry-counts', [ReportController::class, 'expiryCountsSummary'])->name('expiry-counts');
         Route::get('/monthly-revenue', [ReportController::class, 'monthlyRevenueReport'])->name('monthly-revenue');
         Route::get('/monthly-revenue-excel', [ReportController::class, 'monthlyRevenueExcel'])->name('monthly-revenue-excel');
+        Route::get('/monthly-revenue-pdf', [ReportController::class, 'monthlyRevenuePdf'])->name('monthly-revenue-pdf');
         Route::get('/monthly-purchases', [ReportController::class, 'monthlyPurchasesReport'])->name('monthly-purchases');
         Route::get('/top-products', [ReportController::class, 'topSellingProducts'])->name('top-products');
 
@@ -156,6 +157,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/expenses-summary', [ReportController::class, 'expensesSummary'])->name('expenses-summary');
         Route::get('/monthly-expenses', [ReportController::class, 'monthlyExpenses'])->name('monthly-expenses');
         Route::get('/monthly-expenses-excel', [ReportController::class, 'monthlyExpensesExcel'])->name('monthly-expenses-excel');
+        Route::get('/monthly-expenses-pdf', [ReportController::class, 'monthlyExpensesPdf'])->name('monthly-expenses-pdf');
+        Route::get('/sales-with-discounts-pdf', [ReportController::class, 'salesWithDiscountsPdf'])->name('sales-with-discounts-pdf');
         Route::get('/inventory-audit-pdf', [ReportController::class, 'inventoryAuditPdf'])->name('inventory-audit-pdf');
         Route::get('/warehouse-products-pdf', [ReportController::class, 'warehouseProductsPdf'])->name('warehouse-products-pdf');
     });
@@ -296,6 +299,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/alerts', [DashboardController::class, 'alerts'])->name('api.dashboard.alerts');
     Route::get('/dashboard/branch-details/{warehouseId}', [DashboardController::class, 'branchDetails'])->name('api.dashboard.branchDetails');
     Route::get('/dashboard/sales-terminal-summary', [DashboardController::class, 'salesTerminalSummary'])->name('api.dashboard.salesTerminalSummary'); //
+    Route::get('/dashboard/profit-summary', [DashboardController::class, 'profitSummary'])->name('api.dashboard.profitSummary');
 
     // -- Public Users Route for Filters --
     Route::get('/users/list', [UserController::class, 'listForFilters'])->name('api.users.list');

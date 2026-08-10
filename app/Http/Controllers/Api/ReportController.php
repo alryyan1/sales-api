@@ -694,6 +694,31 @@ class ReportController extends Controller
     }
 
     /**
+     * Export Monthly Revenue Report to PDF (web route — inline display).
+     */
+    public function monthlyRevenuePdf(Request $request)
+    {
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+        ]);
+
+        try {
+            $service    = new \App\Services\MonthlyRevenuePdfService();
+            $pdfContent = $service->generate($validated['year'], $validated['month']);
+
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="monthly_revenue.pdf"');
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Export Monthly Revenue Report to Excel
      */
     public function monthlyRevenueExcel(Request $request)
@@ -1957,6 +1982,56 @@ class ReportController extends Controller
             'daily_breakdown' => $dailyBreakdown,
             'month_summary' => $monthSummary,
         ]);
+    }
+
+    /**
+     * Export Monthly Expenses Report to PDF (web route — inline display).
+     */
+    public function monthlyExpensesPdf(Request $request)
+    {
+        $validated = $request->validate([
+            'month' => 'required|integer|between:1,12',
+            'year' => 'required|integer|min:2000|max:' . (Carbon::now()->year + 1),
+        ]);
+
+        try {
+            $service    = new \App\Services\MonthlyExpensesPdfService();
+            $pdfContent = $service->generate($validated['year'], $validated['month']);
+
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="monthly_expenses.pdf"');
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Export the sales-with-discounts report to PDF (web route — inline display).
+     */
+    public function salesWithDiscountsPdf(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'required|date_format:Y-m-d',
+            'end_date' => 'required|date_format:Y-m-d|after_or_equal:start_date',
+        ]);
+
+        try {
+            $service    = new \App\Services\SalesWithDiscountsPdfService();
+            $pdfContent = $service->generate($validated['start_date'], $validated['end_date']);
+
+            return response($pdfContent)
+                ->header('Content-Type', 'application/pdf')
+                ->header('Content-Disposition', 'inline; filename="sales_with_discounts.pdf"');
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate PDF',
+                'error'   => $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**
