@@ -250,6 +250,7 @@ class SaleDetailPdfService
             'visa' => 'فيزا',
             'mastercard' => 'ماستركارد',
             'bank_transfer' => 'تحويل بنكي',
+            'card' => 'بطاقة',
             'mada' => 'مدى',
             'store_credit' => 'رصيد متجر',
             'other' => 'أخرى',

@@ -160,7 +160,8 @@ class ShiftCostPdfService
             'fawry' => 'فوري',
             'ocash' => 'أوكاش',
             'visa' => 'فيزا',
-            'bank_transfer' => 'بنك',
+            'bank_transfer' => 'تحويل بنكي',
+            'card' => 'بطاقة',
         ];
         return $labels[$method] ?? $method;
     }

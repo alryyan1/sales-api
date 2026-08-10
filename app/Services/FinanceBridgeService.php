@@ -27,8 +27,11 @@ class FinanceBridgeService
     /** Payment methods (see payments.method enum) that count as "paid in cash". */
     private const CASH_METHODS = ['cash'];
 
-    /** Payment methods that count as "paid electronically" (Bankak, Fawry, O-Cash — all settle to a bank account). */
-    private const BANK_METHODS = ['bankak', 'fawry', 'ocash'];
+    /** Payment methods that count as "paid electronically" (Bankak, Fawry, O-Cash, Bank Transfer, Card — all settle to a bank account). See config/payment_methods.php. */
+    private function bankMethods(): array
+    {
+        return \App\Support\PaymentMethods::bank();
+    }
 
     /**
      * Builds the journal entry payload for a sale and writes it to Firestore,
@@ -175,7 +178,7 @@ class FinanceBridgeService
             return 'sales_cash';
         }
 
-        if (in_array($method, self::BANK_METHODS, true)) {
+        if (in_array($method, $this->bankMethods(), true)) {
             return 'sales_bank';
         }
 

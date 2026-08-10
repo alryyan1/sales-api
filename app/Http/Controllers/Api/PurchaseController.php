@@ -210,7 +210,7 @@ class PurchaseController extends Controller
             'purchase_date' => 'required|date_format:Y-m-d',
             'reference_number' => 'nullable|string|max:255|unique:purchases,reference_number',
             'status' => ['required', Rule::in(['received', 'pending', 'ordered'])],
-            'currency' => ['nullable', Rule::in(['SDG', 'USD'])],
+            'currency' => ['nullable', Rule::in(['SDG', 'USD', 'OMR'])],
 
             'notes' => 'nullable|string|max:65535',
             'items' => 'nullable|array',

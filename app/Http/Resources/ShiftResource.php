@@ -46,7 +46,7 @@ class ShiftResource extends JsonResource
                     $amount = (float)$payment->amount;
                     if (isset($salesBreakdown[$method])) {
                         $salesBreakdown[$method] += $amount;
-                    } elseif (in_array($method, ['visa', 'bank', 'bank_transfer'])) {
+                    } elseif (in_array($method, ['visa', 'bank', 'bank_transfer', 'card'])) {
                         $salesBreakdown['bankak'] += $amount;
                     }
                     $salesBreakdown['total'] += $amount;
@@ -73,7 +73,7 @@ class ShiftResource extends JsonResource
 
                         $key = match ($method) {
                             'cash' => 'cash',
-                            'bank', 'bank_transfer', 'visa', 'bankak' => 'bankak',
+                            'bank', 'bank_transfer', 'visa', 'card', 'bankak' => 'bankak',
                             'fawry' => 'fawry',
                             'ocash' => 'ocash',
                             default => 'cash'
@@ -109,7 +109,7 @@ class ShiftResource extends JsonResource
 
                         $key = match ($method) {
                             'cash' => 'cash',
-                            'bank', 'bank_transfer', 'visa', 'bankak' => 'bankak',
+                            'bank', 'bank_transfer', 'visa', 'card', 'bankak' => 'bankak',
                             'fawry' => 'fawry',
                             'ocash' => 'ocash',
                             default => 'cash'

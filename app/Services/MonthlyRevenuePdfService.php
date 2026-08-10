@@ -100,7 +100,7 @@ class MonthlyRevenuePdfService
             ->get()
             ->keyBy('expense_day');
 
-        $bankMethods = ['bankak', 'fawry', 'ocash'];
+        $bankMethods = \App\Support\PaymentMethods::bank();
 
         $dailyBreakdown = [];
         $monthSummary   = [

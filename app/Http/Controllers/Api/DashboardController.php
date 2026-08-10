@@ -176,7 +176,7 @@ class DashboardController extends Controller
             ->value('total_value');
 
         // --- Purchases Summary by Payment Method (filtered period) ---
-        $bankMethods = ['bank_transfer', 'bankak', 'mada', 'visa', 'mastercard', 'fawry', 'ocash'];
+        $bankMethods = [...\App\Support\PaymentMethods::bank(), 'mada', 'visa', 'mastercard'];
 
         $purchPaymentsQ = DB::table('purchase_payments')
             ->join('purchases', 'purchases.id', '=', 'purchase_payments.purchase_id')
@@ -781,7 +781,7 @@ class DashboardController extends Controller
             ->value('debt') ?? 0);
 
         // ── Purchases for this branch ─────────────────────────────────────────
-        $bankMethods = ['bank_transfer', 'bankak', 'mada', 'visa', 'mastercard', 'fawry', 'ocash'];
+        $bankMethods = [...\App\Support\PaymentMethods::bank(), 'mada', 'visa', 'mastercard'];
 
         $purchTotalQ = DB::table('purchases')->where('warehouse_id', $warehouseId);
         $purchPaymentsQ = DB::table('purchase_payments')

@@ -654,7 +654,7 @@ class ReportController extends Controller
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
             // Calculate bank total from all bank-related payment methods
-            $bankMethods = ['bankak', 'fawry', 'ocash'];
+            $bankMethods = \App\Support\PaymentMethods::bank();
             $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
                 return in_array($method, $bankMethods);
             })->sum();
@@ -797,7 +797,7 @@ class ReportController extends Controller
             $dailyTotalPaid = (float) $paymentsForDay->sum();
             $dailyTotalCash = (float) ($paymentsForDay->get('cash') ?? 0);
             // Calculate bank total from all bank-related payment methods
-            $bankMethods = ['bankak', 'fawry', 'ocash'];
+            $bankMethods = \App\Support\PaymentMethods::bank();
             $dailyTotalBank = (float) $paymentsForDay->filter(function ($amount, $method) use ($bankMethods) {
                 return in_array($method, $bankMethods);
             })->sum();
@@ -1324,18 +1324,25 @@ class ReportController extends Controller
             $expensesForBreakdown->where('user_id', $validated['user_id']);
         }
         $expensesByMethodData = $expensesForBreakdown->get();
-        // Manually group to ensure all methods are covered
+        // Manually group to ensure all methods are covered — bank/electronic
+        // methods (bank, bank_transfer, visa, card, bankak) all roll into the
+        // 'bankak' bucket, matching ShiftResource's breakdown convention.
         $expensesByMethod = [
             'cash' => 0,
             'bankak' => 0,
             'fawry' => 0,
             'ocash' => 0,
-            'bank' => 0 // Generic bank/visa
         ];
         foreach ($expensesByMethodData as $exp) {
             $method = $exp->payment_method ?? 'cash';
-            if (!isset($expensesByMethod[$method])) $expensesByMethod[$method] = 0;
-            $expensesByMethod[$method] += (float)$exp->amount;
+            $key = match ($method) {
+                'cash' => 'cash',
+                'fawry' => 'fawry',
+                'ocash' => 'ocash',
+                'bank', 'bank_transfer', 'visa', 'card', 'bankak' => 'bankak',
+                default => 'cash',
+            };
+            $expensesByMethod[$key] += (float)$exp->amount;
         }
 
         // Sales Returns Breakdown
@@ -1367,9 +1374,15 @@ class ReportController extends Controller
             // Calculate total return amount from items
             $returnTotal = $ret->items->sum(fn($i) => $i->quantity * $i->price);
             $method = $ret->returned_payment_method ?? 'cash';
+            $key = match ($method) {
+                'cash' => 'cash',
+                'fawry' => 'fawry',
+                'ocash' => 'ocash',
+                'bank', 'bank_transfer', 'visa', 'card', 'bankak' => 'bankak',
+                default => 'cash',
+            };
 
-            if (!isset($returnsByMethod[$method])) $returnsByMethod[$method] = 0;
-            $returnsByMethod[$method] += $returnTotal;
+            $returnsByMethod[$key] += $returnTotal;
             $totalReturns += $returnTotal;
         }
 
@@ -1380,7 +1393,8 @@ class ReportController extends Controller
             'fawry' => 0,
             'ocash' => 0,
             'visa' => 0,
-            'bank_transfer' => 0
+            'bank_transfer' => 0,
+            'card' => 0
         ];
         foreach ($allPayments as $payment) {
             $method = $payment->method ?? 'cash';

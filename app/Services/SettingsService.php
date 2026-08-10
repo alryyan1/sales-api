@@ -18,6 +18,9 @@ class SettingsService
         'company_signature_url',
     ];
 
+    /** Mirrors PAYMENT_METHODS in sales-ui/src/lib/paymentMethods.ts — keep in sync. */
+    private const PAYMENT_METHOD_VALUES = ['cash', 'bankak', 'fawry', 'ocash', 'bank_transfer', 'card'];
+
     /**
      * Keys we manage in DB and their expected types.
      * Type can be: string, int, float, bool
@@ -46,6 +49,7 @@ class SettingsService
             'pdf_font' => 'string',
             'pos_mode' => 'string', // 'shift' or 'days'
             'pos_filter_sales_by_user' => 'bool',
+            'pos_active_payment_methods' => 'string', // comma-separated list, see PAYMENT_METHODS in sales-ui/src/lib/paymentMethods.ts
             'product_images_show_in_list' => 'bool',
             'product_images_show_in_pos' => 'bool',
             'product_images_show_in_invoices' => 'bool',
@@ -102,6 +106,7 @@ class SettingsService
             'pdf_font' => $c['pdf_font'] ?? 'Amiri',
             'pos_mode' => $c['pos_mode'] ?? 'shift',
             'pos_filter_sales_by_user' => $c['pos_filter_sales_by_user'] ?? false,
+            'pos_active_payment_methods' => $c['pos_active_payment_methods'] ?? implode(',', self::PAYMENT_METHOD_VALUES),
             'product_images_show_in_list' => $c['product_images_show_in_list'] ?? true,
             'product_images_show_in_pos' => $c['product_images_show_in_pos'] ?? true,
             'product_images_show_in_invoices' => $c['product_images_show_in_invoices'] ?? false,
@@ -210,9 +215,20 @@ class SettingsService
         $rules['company_email'] = ['nullable', 'email', 'max:255'];
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
-        $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'USD'])];
+        $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['currency_code'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['sales_default_customer_id'] = ['nullable', 'integer', 'exists:clients,id'];
+        $rules['pos_active_payment_methods'] = ['nullable', 'string', function ($attribute, $value, $fail) {
+            $methods = array_filter(array_map('trim', explode(',', (string) $value)));
+            if (empty($methods)) {
+                $fail('At least one payment method must be active.');
+                return;
+            }
+            $invalid = array_diff($methods, self::PAYMENT_METHOD_VALUES);
+            if (!empty($invalid)) {
+                $fail('Invalid payment method: ' . implode(', ', $invalid));
+            }
+        }];
         return $rules;
     }
 

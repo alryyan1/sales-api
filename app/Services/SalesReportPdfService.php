@@ -150,13 +150,13 @@ class SalesReportPdfService
     {
         $this->sectionTitle($pdf, 'ملخص مالي');
 
-        // RTL columns: الخصم | الإجمالي | أوكاش | فوري | بنكك | نقدي | البيان
+        // RTL columns: الخصم | الإجمالي | أوكاش | فوري | بنك/إلكتروني | نقدي | البيان
         $cols = [
             ['w' => 20, 't' => 'الخصم'],
             ['w' => 26, 't' => 'الإجمالي'],
             ['w' => 22, 't' => 'أوكاش'],
             ['w' => 22, 't' => 'فوري'],
-            ['w' => 22, 't' => 'بنكك'],
+            ['w' => 22, 't' => 'بنك/إلكتروني'],
             ['w' => 22, 't' => 'نقدي'],
             ['w' => 48, 't' => 'البيان'],
         ];
@@ -173,6 +173,7 @@ class SalesReportPdfService
         $revBank   = (float)($paymentMethods['bankak']        ?? 0)
                    + (float)($paymentMethods['visa']          ?? 0)
                    + (float)($paymentMethods['bank_transfer'] ?? 0)
+                   + (float)($paymentMethods['card']          ?? 0)
                    + (float)($paymentMethods['bank']          ?? 0);
         $revFawry  = (float)($paymentMethods['fawry']         ?? 0);
         $revOcash  = (float)($paymentMethods['ocash']         ?? 0);
@@ -359,7 +360,8 @@ class SalesReportPdfService
     {
         return ['cash' => 'نقدي', 'bankak' => 'بنكك', 'bank' => 'بنك',
                 'fawry' => 'فوري', 'ocash' => 'أوكاش', 'visa' => 'فيزا',
-                'bank_transfer' => 'بنك', 'refund' => 'مرتجع'][$m] ?? $m;
+                'bank_transfer' => 'تحويل بنكي', 'card' => 'بطاقة',
+                'refund' => 'مرتجع'][$m] ?? $m;
     }
 
     private function getSaleTotalAmount(Sale $sale): float

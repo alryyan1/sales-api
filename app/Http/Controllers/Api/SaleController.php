@@ -222,7 +222,7 @@ class SaleController extends Controller
             'items.*.quantity' => 'required|integer|min:1',
             'items.*.unit_price' => 'required|numeric|min:0',
             'payments' => 'nullable|array',
-            'payments.*.method' => 'nullable|string|in:cash,bankak,fawry,ocash',
+            'payments.*.method' => ['nullable', 'string', \App\Support\PaymentMethods::validationRule()],
             'payments.*.amount' => 'nullable|numeric|min:0.01',
             'payments.*.payment_date' => 'nullable|date_format:Y-m-d',
             'payments.*.reference_number' => 'nullable|string|max:255',
@@ -508,7 +508,7 @@ class SaleController extends Controller
 
         $validatedData = $request->validate([
             'payments' => 'required|array',
-            'payments.*.method' => 'nullable|string|in:cash,bankak,fawry,ocash',
+            'payments.*.method' => ['nullable', 'string', \App\Support\PaymentMethods::validationRule()],
             'payments.*.amount' => 'nullable|numeric|min:0.01',
             'payments.*.payment_date' => 'nullable|date_format:Y-m-d',
             'payments.*.reference_number' => 'nullable|string|max:255',
@@ -617,7 +617,7 @@ class SaleController extends Controller
     public function addSinglePayment(Request $request, Sale $sale)
     {
         $validatedData = $request->validate([
-            'method' => 'required|string|in:cash,bankak,fawry,ocash',
+            'method' => ['required', 'string', \App\Support\PaymentMethods::validationRule()],
             'amount' => 'required|numeric|min:0.01',
             'reference_number' => 'nullable|string|max:255',
             'notes' => 'nullable|string|max:65535',
