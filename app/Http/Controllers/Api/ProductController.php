@@ -600,25 +600,6 @@ class ProductController extends Controller
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
-    public function bulkUpdateUnits(Request $request)
-    {
-        $validatedData = $request->validate([
-            'unit_id' => 'required|exists:units,id',
-        ]);
-
-        $unitId = $validatedData['unit_id'];
-
-        // Update all products to use this unit for both stocking and sellable
-        Product::query()->update([
-            'stocking_unit_id' => $unitId,
-            'sellable_unit_id' => $unitId,
-            'units_per_stocking_unit' => 1 // Reset to 1 since it's the same unit
-        ]);
-
-        return response()->json([
-            'message' => 'All products updated successfully to the selected unit.'
-        ]);
-    }
 
     public function clearSalePrice(Product $product)
     {
@@ -626,29 +607,6 @@ class ProductController extends Controller
         return response()->json(['message' => 'تم مسح سعر البيع', 'sale_price' => null]);
     }
 
-    public function bulkUpdateSalePrice(Request $request)
-    {
-        $validatedData = $request->validate([
-            'percentage' => 'required|numeric|min:0',
-        ]);
-
-        $multiplier = 1 + ($validatedData['percentage'] / 100);
-        $updatedCount = 0;
-
-        Product::all()->each(function (Product $product) use ($multiplier, &$updatedCount) {
-            $lastPrice = $product->last_sale_price_per_sellable_unit;
-            if ($lastPrice !== null && $lastPrice > 0) {
-                $product->sale_price = round($lastPrice * $multiplier, 2);
-                $product->save();
-                $updatedCount++;
-            }
-        });
-
-        return response()->json([
-            'message' => "تم تحديث سعر البيع لـ {$updatedCount} منتج بنجاح.",
-            'updated_count' => $updatedCount,
-        ]);
-    }
 
     /**
      * Sync all products to Firestore.

@@ -109,7 +109,7 @@ class SettingsService
             'whatsapp_shift_closure_numbers' => $c['whatsapp_shift_closure_numbers'] ?? '',
             'firebase_collection_name' => $c['firebase_collection_name'] ?? 'none',
             'usd_to_sdg_factor' => $c['usd_to_sdg_factor'] ?? 1.0,
-            'product_row_color_highlight' => $c['product_row_color_highlight'] ?? true,
+            'product_row_color_highlight' => $c['product_row_color_highlight'] ?? false,
             'product_scientific_name_visible' => $c['product_scientific_name_visible'] ?? true,
             'product_scientific_name_required' => $c['product_scientific_name_required'] ?? false,
             'pos_show_expired_products' => $c['pos_show_expired_products'] ?? false,

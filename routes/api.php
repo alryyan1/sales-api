@@ -216,8 +216,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/products/{product}/purchase-history', [ProductController::class, 'purchaseHistory']);
     Route::get('/products/{product}/sales-history', [ProductController::class, 'salesHistory']);
     Route::post('/products/{product}/image', [ProductController::class, 'uploadImage'])->name('api.products.upload-image');
-    Route::post('/products/bulk-update-units', [ProductController::class, 'bulkUpdateUnits']);
-    Route::post('/products/bulk-update-sale-price', [ProductController::class, 'bulkUpdateSalePrice']);
     Route::post('/products/{product}/clear-sale-price', [ProductController::class, 'clearSalePrice']);
     Route::apiResource('products', ProductController::class);
     Route::apiResource('packages', PackageController::class);
