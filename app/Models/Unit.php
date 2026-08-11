@@ -38,6 +38,7 @@ class Unit extends Model
 
     protected $fillable = [
         'name',
+        'name_en',
         'description',
         'is_active',
         'is_default',

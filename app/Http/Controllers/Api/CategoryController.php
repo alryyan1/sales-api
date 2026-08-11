@@ -42,6 +42,7 @@ class CategoryController extends Controller
         // $this->authorize('create', Category::class);
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255', Rule::unique('categories', 'name')],
+            'name_en' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'parent_id' => 'nullable|integer|exists:categories,id', // Ensure parent exists
             'is_default' => 'boolean',
@@ -60,7 +61,7 @@ class CategoryController extends Controller
     public function show(Category $category)
     {
         // $this->authorize('view', $category);
-        $category->loadCount(['products', 'children'])->load('parent:id,name');
+        $category->loadCount(['products', 'children'])->load('parent:id,name,name_en');
         return new CategoryResource($category);
     }
 
@@ -69,6 +70,7 @@ class CategoryController extends Controller
         // $this->authorize('update', $category);
         $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('categories', 'name')->ignore($category->id)],
+            'name_en' => 'sometimes|nullable|string|max:255',
             'description' => 'sometimes|nullable|string',
             'parent_id' => 'sometimes|nullable|integer|exists:categories,id' . ($category->id ? ',id,!' . $category->id : ''), // Prevent self-parenting
             'is_default' => 'boolean',

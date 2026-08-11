@@ -310,7 +310,40 @@ class DashboardController extends Controller
             ->whereDate('expense_date', '<=', $endDate)
             ->sum('amount');
 
+        // Sales returns recorded in the period.
+        $salesReturnAmount = (float) (DB::table('sale_return_items')
+            ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
+            ->whereDate('sale_returns.created_at', '>=', $startDate)
+            ->whereDate('sale_returns.created_at', '<=', $endDate)
+            ->selectRaw('SUM(sale_return_items.quantity * sale_return_items.price) as total')
+            ->value('total') ?? 0);
+
+        // Discounts granted on non-quote sales made in the period.
+        $discountAmount = (float) DB::table('sales')
+            ->where('is_quote', false)
+            ->whereDate('sale_date', '>=', $startDate)
+            ->whereDate('sale_date', '<=', $endDate)
+            ->sum('discount_amount');
+
+        // Total purchases made in the period.
+        $totalPurchasesAmount = (float) DB::table('purchases')
+            ->whereDate('purchase_date', '>=', $startDate)
+            ->whereDate('purchase_date', '<=', $endDate)
+            ->sum('total_amount');
+
         $profit = $paidSalesAmount - $expensesAmount - $costOfSalesAmount;
+
+        // Revenue by payment method: payments collected against non-quote sales made in the period.
+        $revenueByPaymentMethod = DB::table('payments')
+            ->join('sales', 'sales.id', '=', 'payments.sale_id')
+            ->where('sales.is_quote', false)
+            ->whereDate('sales.sale_date', '>=', $startDate)
+            ->whereDate('sales.sale_date', '<=', $endDate)
+            ->select('payments.method', DB::raw('SUM(payments.amount) as amount'))
+            ->groupBy('payments.method')
+            ->orderByDesc('amount')
+            ->get()
+            ->map(fn ($r) => ['method' => $r->method, 'amount' => (float) $r->amount]);
 
         return response()->json(['data' => [
             'start_date' => $startDate->toDateString(),
@@ -320,6 +353,10 @@ class DashboardController extends Controller
             'expenses_amount' => $expensesAmount,
             'cost_of_sales_amount' => $costOfSalesAmount,
             'profit' => $profit,
+            'sales_return_amount' => $salesReturnAmount,
+            'discount_amount' => $discountAmount,
+            'total_purchases_amount' => $totalPurchasesAmount,
+            'revenue_by_payment_method' => $revenueByPaymentMethod,
         ]]);
     }
 

@@ -36,7 +36,7 @@ class Category extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'description', 'parent_id', 'is_default'];
+    protected $fillable = ['name', 'name_en', 'description', 'parent_id', 'is_default'];
 
     protected $casts = [
         'is_default' => 'boolean',

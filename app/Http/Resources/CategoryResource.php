@@ -11,10 +11,12 @@ class CategoryResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
+            'name_en' => $this->name_en,
             'description' => $this->description,
             'parent_id' => $this->parent_id,
             'is_default' => $this->is_default,
             'parent_name' => $this->whenLoaded('parent', fn() => $this->parent?->name),
+            'parent_name_en' => $this->whenLoaded('parent', fn() => $this->parent?->name_en),
             // Optionally count products or children
             'products_count' => $this->whenCounted('products'),
             'children_count' => $this->whenCounted('children'),

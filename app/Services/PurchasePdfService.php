@@ -7,90 +7,34 @@ use App\Services\Pdf\PdfHeaderRenderer;
 use TCPDF;
 use Exception;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 /**
- * Professional PDF Report Generator for Purchase Orders
- * 
- * This service generates high-quality, professional PDF documents for purchase orders
- * with support for branding, RTL text, and comprehensive formatting.
- * 
- * @package App\Services
- * @author Sales Management System
- * @version 2.0.0
+ * PDF Report Generator for Purchase Orders.
+ *
+ * Styled to match the supplier statement PDFs (SupplierSummaryPdfService /
+ * SupplierLedgerPdfService): black & white palette, double-rule header,
+ * bordered white-fill tables, and a matching footer.
  */
 class PurchasePdfService
 {
-    /**
-     * @var TCPDF PDF instance
-     */
-    private $pdf;
-
+    private TCPDF $pdf;
     private PdfHeaderRenderer $renderer;
 
-    // ============================================
-    // COLOR SCHEME CONSTANTS
-    // ============================================
+    // ── Palette (black & white only) ─────────────────────────────────────────
+    private const BLACK  = [0,   0,   0];
+    private const MID    = [120, 120, 120];
+    private const WHITE  = [255, 255, 255];
+    private const BORDER = [160, 160, 160];
+    private const TEXT   = [30,  30,  30];
 
-    /** @var array Primary brand color (Professional Gray) */
-    private const COLOR_PRIMARY = [80, 80, 80];
-
-    /** @var array Header background (Dark Gray) */
-    private const COLOR_HEADER_BG = [60, 60, 60];
-
-    /** @var array Light gray for backgrounds */
-    private const COLOR_LIGHT_GRAY = [245, 245, 245];
-
-    /** @var array Border color */
-    private const COLOR_BORDER = [200, 200, 200];
-
-    /** @var array Neutral status color */
-    private const COLOR_STATUS_BG = [230, 230, 230];
-    private const COLOR_STATUS_TEXT = [40, 40, 40];
-
-    // ============================================
-    // LAYOUT CONSTANTS
-    // ============================================
-
-    /** @var int Page margin (mm) */
-    private const MARGIN = 15;
-
-    /** @var int Header height (mm) */
-    private const HEADER_HEIGHT = 40;
-
-    /** @var int Footer height (mm) */
-    private const FOOTER_HEIGHT = 20;
-
-    /** @var int Logo maximum width (mm) */
-    private const LOGO_MAX_WIDTH = 50;
-
-    /** @var int Logo maximum height (mm) */
-    private const LOGO_MAX_HEIGHT = 20;
-
-    // ============================================
-    // TYPOGRAPHY CONSTANTS
-    // ============================================
-
-    /** @var string Main font family */
-    private const FONT_FAMILY = 'dejavusans';
-
-    /** @var int Title font size */
-    private const FONT_SIZE_TITLE = 20;
-
-    /** @var int Subtitle font size */
-    private const FONT_SIZE_SUBTITLE = 14;
-
-    /** @var int Heading font size */
-    private const FONT_SIZE_HEADING = 12;
-
-    /** @var int Body font size */
-    private const FONT_SIZE_BODY = 10;
-
-    /** @var int Small text font size */
-    private const FONT_SIZE_SMALL = 8;
+    // ── Layout ────────────────────────────────────────────────────────────────
+    private const M     = 15;  // page margin (mm)
+    private const RH    = 7;   // standard table row height (mm)
+    private const RH_IMG = 14; // items table row height (mm), taller for product image
+    private const F     = 'arial';
 
     /**
-     * Generate a professional PDF report for a purchase order
+     * Generate a PDF report for a purchase order.
      *
      * @param Purchase $purchase The purchase order to generate PDF for
      * @return string PDF content as string
@@ -99,21 +43,19 @@ class PurchasePdfService
     public function generatePurchasePdf(Purchase $purchase): string
     {
         try {
-            // Load all required relationships
             $this->loadPurchaseRelationships($purchase);
 
-            // Initialize renderer and PDF instance
             $this->renderer = new PdfHeaderRenderer('purchase');
-            $this->initializePdf($purchase);
-
-            // Add first page
+            $this->initPdf($purchase);
             $this->pdf->AddPage();
             $this->renderer->render($this->pdf);
 
-            // Build the professional report
-            $this->buildReport($purchase);
+            $this->drawHeader($purchase);
+            $this->drawPurchaseBox($purchase);
+            $this->drawItemsTable($purchase);
+            $this->drawSummary($purchase);
+            $this->drawFooter();
 
-            // Return PDF content
             return $this->pdf->Output('purchase_order_' . $purchase->id . '.pdf', 'S');
         } catch (Exception $e) {
             Log::error('PDF Generation Failed', [
@@ -125,12 +67,10 @@ class PurchasePdfService
         }
     }
 
-    /**
-     * Load all required relationships for the purchase
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    // Data
+    // ─────────────────────────────────────────────────────────────────────────
+
     private function loadPurchaseRelationships(Purchase $purchase): void
     {
         $purchase->load([
@@ -138,7 +78,7 @@ class PurchasePdfService
             'user',
             'warehouse',
             'items' => function ($query) {
-                $query->orderBy('id', 'desc'); // Sort items by ID descending (newest first)
+                $query->orderBy('id', 'desc');
             },
             'items.product.category',
             'items.product.stockingUnit',
@@ -146,492 +86,332 @@ class PurchasePdfService
         ]);
     }
 
-    /**
-     * Initialize the PDF instance with professional settings
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
-    private function initializePdf(Purchase $purchase): void
+    // ─────────────────────────────────────────────────────────────────────────
+    // Init
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function initPdf(Purchase $purchase): void
     {
-        // Create new PDF instance (Portrait, mm, A4, Unicode support)
         $this->pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
         $this->pdf->setPrintHeader(false);
-
-        // Set document metadata
         $this->pdf->SetCreator('Sales Management System');
         $this->pdf->SetAuthor($purchase->user?->name ?? 'System');
-        $this->pdf->SetTitle('أمر شراء #' . $purchase->id);
+        $this->pdf->SetTitle('فاتورة مشتريات #' . $purchase->id);
         $this->pdf->SetSubject('تفاصيل أمر الشراء');
         $this->pdf->SetKeywords('purchase, order, invoice, ' . $purchase->id);
-
-        // Disable default footer
         $this->pdf->setPrintFooter(false);
-
-        // Set page margins
-        $this->pdf->SetMargins(self::MARGIN, $this->renderer->getTopMargin(), self::MARGIN);
-        $this->pdf->SetAutoPageBreak(true, self::MARGIN + 5);
-
-        // Set default font
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-
-        // Enable RTL (Right-to-Left) for Arabic
+        $this->pdf->SetMargins(self::M, $this->renderer->getTopMargin(), self::M);
+        $this->pdf->SetAutoPageBreak(true, 25);
+        $this->pdf->SetFont(self::F, '', 9);
         $this->pdf->setRTL(false);
     }
 
-    /**
-     * Build the complete report structure
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
-    private function buildReport(Purchase $purchase): void
+    // ─────────────────────────────────────────────────────────────────────────
+    // Section: Header
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function drawHeader(Purchase $purchase): void
     {
-        // Professional header with logo and title
-        $this->addProfessionalHeader($purchase);
+        $W = $this->W();
+        $y = max($this->pdf->GetY(), self::M);
 
-        // Purchase information section
-        $this->addPurchaseInformationSection($purchase);
+        // Heavy top rule
+        $this->pdf->SetDrawColor(...self::BLACK);
+        $this->pdf->SetLineWidth(1.2);
+        $this->pdf->Line(self::M, $y, self::M + $W, $y);
 
-        // Items table with professional styling
-        $this->addProfessionalItemsTable($purchase);
-
-        // Financial summary
-        $this->addFinancialSummary($purchase);
-
-        // Professional footer with terms
-        $this->addProfessionalFooter($purchase);
-    }
-
-    /**
-     * Add professional header with logo and company info
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
-    private function addProfessionalHeader(Purchase $purchase): void
-    {
-        // Add decorative top border
-        $this->pdf->SetDrawColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
-        $this->pdf->SetLineWidth(1.5);
-        $this->pdf->Line(self::MARGIN, self::MARGIN, $this->pdf->getPageWidth() - self::MARGIN, self::MARGIN);
-        $this->pdf->Ln(5);
-
-        // Company name/logo section
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_TITLE);
-        $this->pdf->SetTextColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
-
-        // Document title
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SUBTITLE + 2);
-        $this->pdf->SetTextColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
-        $this->pdf->Cell(0, 8, 'فاتوره مشتريات', 0, 1, 'C');
-
-        // Order number with enhanced styling
-        $this->pdf->Cell(0, 8, 'رقم الطلب: #' . str_pad($purchase->id, 6, '0', STR_PAD_LEFT), 0, 1, 'C');
-
-        // Status badge with professional styling
-        // $this->addEnhancedStatusBadge($purchase->status);
-
-        // Separator line
-        $this->pdf->Ln(3);
-        $this->pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+        // Thin rule 2.5mm below
         $this->pdf->SetLineWidth(0.3);
-        $this->pdf->Line(self::MARGIN, $this->pdf->GetY(), $this->pdf->getPageWidth() - self::MARGIN, $this->pdf->GetY());
-        $this->pdf->Ln(5);
-    }
+        $this->pdf->Line(self::M, $y + 2.5, self::M + $W, $y + 2.5);
 
-    /**
-     * Add enhanced status badge with icon-like appearance
-     *
-     * @param string $status
-     * @return void
-     */
-    private function addEnhancedStatusBadge(string $status): void
-    {
-        $statusText = $this->getStatusText($status);
-        $statusColors = $this->getStatusColors($status);
+        $this->pdf->SetY($y + 7);
 
-        $this->pdf->SetFont('arial', 'B', 12);
-        $this->pdf->SetFillColor($statusColors['bg'][0], $statusColors['bg'][1], $statusColors['bg'][2]);
-        $this->pdf->SetTextColor($statusColors['text'][0], $statusColors['text'][1], $statusColors['text'][2]);
+        // Main title
+        $this->pdf->SetFont(self::F, 'B', 16);
+        $this->pdf->SetTextColor(...self::BLACK);
+        $this->pdf->Cell($W, 10, 'فاتورة مشتريات', 0, 1, 'C');
 
-        // Rounded badge appearance
-        $badgeWidth = 50;
-        $x = ($this->pdf->getPageWidth() - $badgeWidth) / 2;
-        $this->pdf->SetX($x);
-        $this->pdf->Cell($badgeWidth, 8, $statusText, 'LRTB', 1, 'C', true, '', 1, false, 'T', 'M');
+        // System sub-title
+        $this->pdf->SetFont(self::F, '', 9);
+        $this->pdf->SetTextColor(...self::MID);
+        $this->pdf->Cell($W, 5, 'نظام إدارة المبيعات', 0, 1, 'C');
 
-        // Reset text color
-        $this->pdf->SetTextColor(0, 0, 0);
-        $this->pdf->Ln(2);
-    }
+        $this->pdf->Ln(3);
 
-    /**
-     * Add purchase information section with professional grid layout
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
-    private function addPurchaseInformationSection(Purchase $purchase): void
-    {
-        // Section header with icon-like decoration
-        $this->addSectionHeader('معلومات الطلب');
+        // Meta line: order number | issue date
+        $this->pdf->SetFont(self::F, '', 8);
+        $this->pdf->SetTextColor(...self::TEXT);
+        $this->pdf->Cell($W / 2, 5, 'رقم الطلب: #' . str_pad((string) $purchase->id, 6, '0', STR_PAD_LEFT), 0, 0, 'L');
+        $this->pdf->Cell($W / 2, 5, 'تاريخ الإصدار: ' . now()->format('Y-m-d'), 0, 1, 'R');
 
-        // Information grid
-        $pageWidth = $this->pdf->getPageWidth() - (self::MARGIN * 2);
-        $colWidth = $pageWidth / 2;
-        $rowHeight = 8;
+        $this->pdf->Ln(3);
 
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-
-        // Row 1: Warehouse | Supplier
-        $this->addInfoGridRow(
-            'المستودع',
-            $purchase->warehouse?->name ?? 'المستودع الرئيسي',
-            'المورد',
-            $purchase->supplier?->name ?? 'غير محدد',
-            $colWidth,
-            $rowHeight
-        );
-
-        // Row 2: Reference | Purchase Date
-        $this->addInfoGridRow(
-            'رقم المرجع',
-            $purchase->reference_number ?: '---',
-            'تاريخ الشراء',
-            $purchase->purchase_date ?? 'غير محدد',
-            $colWidth,
-            $rowHeight
-        );
-
-        // Row 3: Created At | Created By
-        $this->addInfoGridRow(
-            'تاريخ الإنشاء',
-            $purchase->created_at?->format('Y-m-d H:i') ?? 'غير متوفر',
-            'تم الإنشاء بواسطة',
-            $purchase->user?->name ?? 'النظام',
-            $colWidth,
-            $rowHeight
-        );
-
-        // Notes section (if exists)
-        if (!empty($purchase->notes)) {
-            $this->pdf->Ln(2);
-            $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_BODY);
-            $this->pdf->SetFillColor(self::COLOR_LIGHT_GRAY[0], self::COLOR_LIGHT_GRAY[1], self::COLOR_LIGHT_GRAY[2]);
-            $this->pdf->Cell(35, 7, 'ملاحظات:', 1, 0, 'C', true);
-
-            $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY - 1);
-            $this->pdf->MultiCell(0, 7, $purchase->notes, 1, 'R', false, 1);
-        }
+        // Thin rule then heavy rule
+        $this->pdf->SetDrawColor(...self::BLACK);
+        $this->pdf->SetLineWidth(0.3);
+        $this->pdf->Line(self::M, $this->pdf->GetY(), self::M + $W, $this->pdf->GetY());
+        $this->pdf->SetLineWidth(1.0);
+        $this->pdf->Line(self::M, $this->pdf->GetY() + 2.5, self::M + $W, $this->pdf->GetY() + 2.5);
 
         $this->pdf->Ln(8);
+        $this->pdf->SetTextColor(...self::TEXT);
     }
 
-    /**
-     * Add section header with professional styling
-     *
-     * @param string $title
-     * @return void
-     */
-    private function addSectionHeader(string $title): void
+    // ─────────────────────────────────────────────────────────────────────────
+    // Section: Purchase info
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function drawPurchaseBox(Purchase $purchase): void
     {
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_HEADING);
-        // $this->pdf->SetFillColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
-        // $this->pdf->SetTextColor(255, 255, 255);
-        $this->pdf->Cell(0, 10, $title, 0, 1, 'R', 0);
-        $this->pdf->SetTextColor(0, 0, 0);
-        $this->pdf->Ln(3);
-    }
+        $W      = $this->W();
+        $colW   = $W / 2;
+        $labelW = $colW * 0.40;
+        $valW   = $colW * 0.60;
+        $rowH   = 7;
 
-    /**
-     * Add information grid row (2 columns)
-     *
-     * @param string $label1
-     * @param string $value1
-     * @param string $label2
-     * @param string $value2
-     * @param float $colWidth
-     * @param float $height
-     * @return void
-     */
-    private function addInfoGridRow(
-        string $label1,
-        string $value1,
-        string $label2,
-        string $value2,
-        float $colWidth,
-        float $height
-    ): void {
-        $labelWidth = $colWidth * 0.4;
-        $valueWidth = $colWidth * 0.6;
+        // Section heading
+        $this->pdf->SetFont(self::F, 'B', 9);
+        $this->pdf->SetFillColor(...self::WHITE);
+        $this->pdf->SetTextColor(...self::BLACK);
+        $this->pdf->SetDrawColor(...self::BORDER);
+        $this->pdf->SetLineWidth(0.3);
+        $this->pdf->Cell($W, 7, 'بيانات الطلب', 1, 1, 'C', true);
 
-        // Column 1 - Value (left), Label (right)
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($valueWidth, $height, $value1, 1, 0, 'C');
-
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL + 1);
-        $this->pdf->SetFillColor(self::COLOR_LIGHT_GRAY[0], self::COLOR_LIGHT_GRAY[1], self::COLOR_LIGHT_GRAY[2]);
-        $this->pdf->Cell($labelWidth, $height, ':' . $label1, 1, 0, 'R', true);
-
-        // Column 2 - Value (left), Label (right)
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($valueWidth, $height, $value2, 1, 0, 'C');
-
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL + 1);
-        $this->pdf->SetFillColor(self::COLOR_LIGHT_GRAY[0], self::COLOR_LIGHT_GRAY[1], self::COLOR_LIGHT_GRAY[2]);
-        $this->pdf->Cell($labelWidth, $height, ':' . $label2, 1, 1, 'R', true);
-    }
-
-    /**
-     * Add professional items table with enhanced styling
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
-    private function addProfessionalItemsTable(Purchase $purchase): void
-    {
-        // Section header
-        $this->addSectionHeader('تفاصيل الأصناف');
-
-        // Table header with gradient-like effect
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL + 1);
-        $this->pdf->SetFillColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
-        $this->pdf->SetTextColor(255, 255, 255);
-        $this->pdf->SetDrawColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
-        $this->pdf->SetLineWidth(0.5);
-
-        // Calculate column widths
-        $pageWidth = $this->pdf->getPageWidth() - (self::MARGIN * 2);
-        $widths = [
-            'no'      => $pageWidth * 0.05,  // #
-            'img'     => $pageWidth * 0.07,  // Image
-            'product' => $pageWidth * 0.21,  // Product
-            'batch'   => $pageWidth * 0.10,  // Batch
-            'qty'     => $pageWidth * 0.10,  // Quantity
-            'cost'    => $pageWidth * 0.12,  // Unit Cost
-            'sale'    => $pageWidth * 0.12,  // Sale Price
-            'expiry'  => $pageWidth * 0.10,  // Expiry
-            'total'   => $pageWidth * 0.13,  // Total
+        $rows = [
+            ['المستودع', $purchase->warehouse?->name ?? 'المستودع الرئيسي', 'المورد', $purchase->supplier?->name ?? 'غير محدد'],
+            ['رقم المرجع', $purchase->reference_number ?: '---', 'تاريخ الشراء', $purchase->purchase_date ?? 'غير محدد'],
+            ['تاريخ الإنشاء', $purchase->created_at?->format('Y-m-d H:i') ?? 'غير متوفر', 'تم الإنشاء بواسطة', $purchase->user?->name ?? 'النظام'],
         ];
 
-        // Table headers
-        $this->pdf->Cell($widths['no'],      8, '#',          1, 0, 'C', true);
-        $this->pdf->Cell($widths['img'],     8, 'صورة',       1, 0, 'C', true);
-        $this->pdf->Cell($widths['product'], 8, 'المنتج',     1, 0, 'C', true);
-        $this->pdf->Cell($widths['batch'],   8, 'رقم الدفعة', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['qty'],     8, 'الكمية',     1, 0, 'C', true);
-        $this->pdf->Cell($widths['cost'],    8, 'سعر الوحدة', 1, 0, 'C', true);
-        $this->pdf->Cell($widths['sale'],    8, 'سعر البيع',  1, 0, 'C', true);
-        $this->pdf->Cell($widths['expiry'],  8, 'الصلاحية',   1, 0, 'C', true);
-        $this->pdf->Cell($widths['total'],   8, 'الإجمالي',   1, 1, 'C', true);
+        $this->pdf->SetFillColor(...self::WHITE);
+        foreach ($rows as [$l1, $v1, $l2, $v2]) {
+            $this->pdf->SetFont(self::F, 'B', 8.5);
+            $this->pdf->SetTextColor(...self::TEXT);
+            $this->pdf->Cell($labelW, $rowH, $l1 . ':', 1, 0, 'R', true);
 
-        // Reset colors for body
-        $this->pdf->SetTextColor(0, 0, 0);
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_SMALL);
-        $this->pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
+            $this->pdf->SetFont(self::F, '', 8.5);
+            $this->pdf->Cell($valW, $rowH, $v1, 1, 0, 'R', true);
+
+            $this->pdf->SetFont(self::F, 'B', 8.5);
+            $this->pdf->Cell($labelW, $rowH, $l2 . ':', 1, 0, 'R', true);
+
+            $this->pdf->SetFont(self::F, '', 8.5);
+            $this->pdf->Cell($valW, $rowH, $v2, 1, 1, 'R', true);
+        }
+
+        if (!empty($purchase->notes)) {
+            $this->pdf->SetFont(self::F, 'B', 8.5);
+            $this->pdf->SetTextColor(...self::TEXT);
+            $this->pdf->Cell($labelW, $rowH, 'ملاحظات:', 1, 0, 'R', true);
+
+            $this->pdf->SetFont(self::F, '', 8.5);
+            $this->pdf->MultiCell($valW + $colW, $rowH, $purchase->notes, 1, 'R', true, 1);
+        }
+
+        $this->pdf->Ln(6);
+        $this->pdf->SetTextColor(...self::TEXT);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Section: Items table
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function drawItemsTable(Purchase $purchase): void
+    {
+        $W = $this->W();
+
+        $w = [
+            'no'      => $W * 0.05,
+            'img'     => $W * 0.07,
+            'product' => $W * 0.21,
+            'batch'   => $W * 0.10,
+            'qty'     => $W * 0.10,
+            'cost'    => $W * 0.12,
+            'sale'    => $W * 0.12,
+            'expiry'  => $W * 0.10,
+            'total'   => $W * 0.13,
+        ];
+
+        $this->drawItemsTableHeader($w);
+
+        $items = $purchase->items;
+
+        if ($items->isEmpty()) {
+            $this->pdf->SetFont(self::F, '', 9);
+            $this->pdf->SetFillColor(...self::WHITE);
+            $this->pdf->SetTextColor(...self::MID);
+            $this->pdf->SetDrawColor(...self::BORDER);
+            $this->pdf->Cell($W, 12, 'لا توجد أصناف', 1, 1, 'C', true);
+            return;
+        }
+
         $this->pdf->SetLineWidth(0.2);
 
-        // Row height for image rows
-        $rowH = 14;
+        $grandTotal = 0.0;
 
-        // Table rows with alternating colors
-        $fill = false;
-        foreach ($purchase->items as $index => $item) {
-            // Alternate row background
-            $fillColor = $fill ? [252, 252, 252] : [255, 255, 255];
-            $this->pdf->SetFillColor($fillColor[0], $fillColor[1], $fillColor[2]);
+        foreach ($items as $index => $item) {
+            if ($this->pdf->GetY() + self::RH_IMG > $this->pdf->getPageHeight() - 28) {
+                $this->pdf->AddPage();
+                $this->renderer->render($this->pdf);
+                $this->drawItemsTableHeader($w);
+            }
 
             $itemTotal   = $item->quantity * $item->unit_cost;
+            $grandTotal += $itemTotal;
+
             $productName = $item->product?->name ?? 'منتج محذوف';
             $unit        = $item->product?->stockingUnit?->name ?? '';
 
-            // Save Y position before drawing row cells
-            $rowY = $this->pdf->GetY();
-            $rowX = $this->pdf->GetX();
+            $this->pdf->SetFillColor(...self::WHITE);
+            $this->pdf->SetDrawColor(...self::BORDER);
 
-            // Draw all cells except image first
-            $this->pdf->Cell($widths['no'],      $rowH, ($index + 1),                                                              1, 0, 'C', true);
+            $rowY = $this->pdf->GetY();
+            $imgCellX = $this->pdf->GetX() + $w['no'];
+
+            $this->pdf->SetFont(self::F, '', 7.5);
+            $this->pdf->SetTextColor(...self::MID);
+            $this->pdf->Cell($w['no'], self::RH_IMG, $index + 1, 1, 0, 'C', true);
 
             // Image cell placeholder (drawn below)
-            $imgCellX = $this->pdf->GetX();
-            $this->pdf->Cell($widths['img'],     $rowH, '',                                                                        1, 0, 'C', true);
+            $this->pdf->Cell($w['img'], self::RH_IMG, '', 1, 0, 'C', true);
 
-            $this->pdf->Cell($widths['product'], $rowH, $productName,                                                              1, 0, 'R', true);
-            $this->pdf->Cell($widths['batch'],   $rowH, $item->batch_number ?: '---',                                             1, 0, 'C', true);
-            $this->pdf->Cell($widths['qty'],     $rowH, number_format($item->quantity) . ($unit ? " $unit" : ''),                  1, 0, 'C', true);
-            $this->pdf->Cell($widths['cost'],    $rowH, number_format($item->unit_cost, 2),                                        1, 0, 'C', true);
-            $this->pdf->Cell($widths['sale'],    $rowH, $item->sale_price ? number_format($item->sale_price, 2) : '---',           1, 0, 'C', true);
-            $this->pdf->Cell($widths['expiry'],  $rowH, $item->expiry_date ? date('Y-m-d', strtotime($item->expiry_date)) : '---', 1, 0, 'C', true);
+            $this->pdf->SetFont(self::F, '', 8.5);
+            $this->pdf->SetTextColor(...self::TEXT);
+            $this->pdf->Cell($w['product'], self::RH_IMG, $productName, 1, 0, 'R', true);
+            $this->pdf->Cell($w['batch'], self::RH_IMG, $item->batch_number ?: '---', 1, 0, 'C', true);
+            $this->pdf->Cell($w['qty'], self::RH_IMG, number_format($item->quantity) . ($unit ? " $unit" : ''), 1, 0, 'C', true);
+            $this->pdf->Cell($w['cost'], self::RH_IMG, number_format($item->unit_cost, 2), 1, 0, 'C', true);
+            $this->pdf->Cell($w['sale'], self::RH_IMG, $item->sale_price ? number_format($item->sale_price, 2) : '---', 1, 0, 'C', true);
+            $this->pdf->Cell($w['expiry'], self::RH_IMG, $item->expiry_date ? date('Y-m-d', strtotime($item->expiry_date)) : '---', 1, 0, 'C', true);
 
-            // Total with bold font
-            $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL);
-            $this->pdf->Cell($widths['total'],   $rowH, number_format($itemTotal, 2),                                              1, 1, 'C', true);
-            $this->pdf->SetFont('arial', '', self::FONT_SIZE_SMALL);
+            $this->pdf->SetFont(self::F, 'B', 8.5);
+            $this->pdf->SetTextColor(...self::BLACK);
+            $this->pdf->Cell($w['total'], self::RH_IMG, number_format($itemTotal, 2), 1, 1, 'C', true);
 
-            // Now render the product image inside the image cell
             $imageUrl = $item->product?->image_url ?? null;
             if ($imageUrl) {
                 $imgPath = $this->resolveProductImagePath($imageUrl);
                 if ($imgPath) {
                     try {
-                        $imgSize  = $rowH - 2; // mm, with 1mm padding on each side
-                        $imgXPos  = $imgCellX + ($widths['img'] - $imgSize) / 2;
-                        $imgYPos  = $rowY + ($rowH - $imgSize) / 2;
+                        $imgSize = self::RH_IMG - 2;
+                        $imgXPos = $imgCellX + ($w['img'] - $imgSize) / 2;
+                        $imgYPos = $rowY + (self::RH_IMG - $imgSize) / 2;
                         @$this->pdf->Image($imgPath, $imgXPos, $imgYPos, $imgSize, $imgSize, '', '', '', true, 150, '', false, false, 0, 'CM');
                     } catch (\Throwable $e) {
                         // Silently skip if image rendering fails
                     }
                 }
             }
-
-            $fill = !$fill;
         }
 
-        $this->pdf->Ln(5);
+        // Totals row — white fill, bold, full border
+        $this->pdf->SetFont(self::F, 'B', 8.5);
+        $this->pdf->SetFillColor(...self::WHITE);
+        $this->pdf->SetTextColor(...self::BLACK);
+        $this->pdf->SetDrawColor(...self::BORDER);
+        $this->pdf->SetLineWidth(0.4);
+
+        $labelWidth = $w['no'] + $w['img'] + $w['product'] + $w['batch'] + $w['qty'] + $w['cost'] + $w['sale'] + $w['expiry'];
+        $this->pdf->Cell($labelWidth, self::RH, 'الإجمالي', 1, 0, 'R', true);
+        $this->pdf->Cell($w['total'], self::RH, number_format($grandTotal, 2), 1, 1, 'C', true);
+
+        $this->pdf->SetTextColor(...self::TEXT);
+        $this->pdf->Ln(6);
     }
 
-
-    /**
-     * Add financial summary with professional card-like layout
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
-    private function addFinancialSummary(Purchase $purchase): void
+    private function drawItemsTableHeader(array $w): void
     {
-        // Calculate totals
-        $totalAmount = 0;
+        $this->pdf->SetFont(self::F, 'B', 8.5);
+        $this->pdf->SetFillColor(...self::WHITE);
+        $this->pdf->SetTextColor(...self::BLACK);
+        $this->pdf->SetDrawColor(...self::BORDER);
+        $this->pdf->SetLineWidth(0.3);
+
+        $this->pdf->Cell($w['no'], 8, '#', 1, 0, 'C', true);
+        $this->pdf->Cell($w['img'], 8, 'صورة', 1, 0, 'C', true);
+        $this->pdf->Cell($w['product'], 8, 'المنتج', 1, 0, 'C', true);
+        $this->pdf->Cell($w['batch'], 8, 'رقم الدفعة', 1, 0, 'C', true);
+        $this->pdf->Cell($w['qty'], 8, 'الكمية', 1, 0, 'C', true);
+        $this->pdf->Cell($w['cost'], 8, 'سعر الوحدة', 1, 0, 'C', true);
+        $this->pdf->Cell($w['sale'], 8, 'سعر البيع', 1, 0, 'C', true);
+        $this->pdf->Cell($w['expiry'], 8, 'الصلاحية', 1, 0, 'C', true);
+        $this->pdf->Cell($w['total'], 8, 'الإجمالي', 1, 1, 'C', true);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Section: Financial summary
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function drawSummary(Purchase $purchase): void
+    {
+        $totalAmount = 0.0;
         $totalQuantity = 0;
-        $totalItems = $purchase->items->count();
 
         foreach ($purchase->items as $item) {
             $totalAmount += $item->quantity * $item->unit_cost;
             $totalQuantity += $item->quantity;
         }
 
-        // Summary card positioned on the right
-        $cardWidth = 90;
-        $x = $this->pdf->getPageWidth() - self::MARGIN - $cardWidth;
+        $W      = $this->W();
+        $colW   = $W / 3;
+        $labelW = $colW * 0.55;
+        $valW   = $colW * 0.45;
+        $rowH   = 8;
 
-        // Card header
-        $this->pdf->SetX($x);
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_HEADING);
-        $this->pdf->SetFillColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
-        $this->pdf->SetTextColor(255, 255, 255);
-        $this->pdf->Cell($cardWidth, 9, 'الملخص المالي', 1, 1, 'C', true);
-        $this->pdf->SetTextColor(0, 0, 0);
+        // Section heading
+        $this->pdf->SetFont(self::F, 'B', 9);
+        $this->pdf->SetFillColor(...self::WHITE);
+        $this->pdf->SetTextColor(...self::BLACK);
+        $this->pdf->SetDrawColor(...self::BORDER);
+        $this->pdf->SetLineWidth(0.3);
+        $this->pdf->Cell($W, 7, 'الملخص المالي', 1, 1, 'C', true);
 
-        // Summary rows
-        $labelWidth = $cardWidth * 0.5;
-        $valueWidth = $cardWidth * 0.5;
+        $pairs = [
+            ['عدد الأصناف', number_format($purchase->items->count())],
+            ['إجمالي الكمية', number_format($totalQuantity)],
+            ['المبلغ الإجمالي', number_format($totalAmount, 2) . ' ' . ($purchase->currency ?? 'SDG')],
+        ];
 
-        // Items count
-        $this->pdf->SetX($x);
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_BODY - 1);
-        $this->pdf->SetFillColor(self::COLOR_LIGHT_GRAY[0], self::COLOR_LIGHT_GRAY[1], self::COLOR_LIGHT_GRAY[2]);
-        $this->pdf->Cell($labelWidth, 7, 'عدد الأصناف:', 1, 0, 'R', true);
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($valueWidth, 7, number_format($totalItems), 1, 1, 'C');
+        $this->pdf->SetFillColor(...self::WHITE);
+        foreach ($pairs as [$label, $value]) {
+            $this->pdf->Cell($labelW, $rowH, $label . ':', 1, 0, 'R', true);
+            $this->pdf->Cell($valW, $rowH, $value, 1, 0, 'C', true);
+        }
+        $this->pdf->Ln($rowH);
 
-        // Total quantity
-        $this->pdf->SetX($x);
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_BODY - 1);
-        $this->pdf->Cell($labelWidth, 7, 'إجمالي الكمية:', 1, 0, 'R', true);
-        $this->pdf->SetFont('arial', '', self::FONT_SIZE_BODY);
-        $this->pdf->Cell($valueWidth, 7, number_format($totalQuantity), 1, 1, 'C');
-
-        // Grand total with emphasis
-        $this->pdf->SetX($x);
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_BODY);
-        $this->pdf->SetFillColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
-        $this->pdf->SetTextColor(255, 255, 255);
-        $this->pdf->Cell($labelWidth, 9, 'المبلغ الإجمالي:', 1, 0, 'R', true);
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_HEADING - 1);
-        $this->pdf->Cell($valueWidth, 9, number_format($totalAmount, 2) . ' ' . ($purchase->currency ?? 'SDG'), 1, 1, 'C', true);
-        $this->pdf->SetTextColor(0, 0, 0);
+        $this->pdf->SetTextColor(...self::TEXT);
     }
 
-    /**
-     * Add professional footer with terms and page numbers
-     *
-     * @param Purchase $purchase
-     * @return void
-     */
-    private function addProfessionalFooter(Purchase $purchase): void
-    {
-        // Position footer at bottom
-        $this->pdf->SetY(-25);
+    // ─────────────────────────────────────────────────────────────────────────
+    // Section: Footer
+    // ─────────────────────────────────────────────────────────────────────────
 
-        // Separator line
-        $this->pdf->SetDrawColor(self::COLOR_PRIMARY[0], self::COLOR_PRIMARY[1], self::COLOR_PRIMARY[2]);
+    private function drawFooter(): void
+    {
+        $W = $this->W();
+
+        $this->pdf->SetAutoPageBreak(false);
+        $this->pdf->SetY(-16);
+
+        $this->pdf->SetDrawColor(...self::BLACK);
         $this->pdf->SetLineWidth(0.8);
-        $this->pdf->Line(self::MARGIN, $this->pdf->GetY(), $this->pdf->getPageWidth() - self::MARGIN, $this->pdf->GetY());
-        $this->pdf->Ln(4);
+        $this->pdf->Line(self::M, $this->pdf->GetY(), self::M + $W, $this->pdf->GetY());
+        $this->pdf->SetLineWidth(0.2);
+        $this->pdf->Line(self::M, $this->pdf->GetY() + 1.5, self::M + $W, $this->pdf->GetY() + 1.5);
+        $this->pdf->Ln(3.5);
 
-        // Footer information
-        $this->pdf->SetFont('arial', 'I', self::FONT_SIZE_SMALL);
-        $this->pdf->SetTextColor(100, 100, 100);
+        $this->pdf->SetFont(self::F, '', 7.5);
+        $this->pdf->SetTextColor(...self::MID);
 
-        $footerText = 'تم الإنشاء بواسطة نظام إدارة المبيعات المتطور';
-        $this->pdf->Cell(0, 4, $footerText, 0, 1, 'C');
-
-        $dateText = 'تاريخ الطباعة: ' . date('Y-m-d H:i:s');
-        $this->pdf->Cell(0, 4, $dateText, 0, 1, 'C');
-
-        // Page number
-        $pageNum = 'صفحة ' . $this->pdf->getAliasNumPage() . ' من ' . $this->pdf->getAliasNbPages();
-        $this->pdf->SetFont('arial', 'B', self::FONT_SIZE_SMALL);
-        $this->pdf->Cell(0, 4, $pageNum, 0, 1, 'C');
+        $this->pdf->Cell($W / 2, 5, 'نظام إدارة المبيعات  ·  طُبع: ' . now()->format('Y-m-d  H:i'), 0, 0, 'R');
+        $this->pdf->Cell($W / 2, 5, 'صفحة ' . $this->pdf->getAliasNumPage() . ' / ' . $this->pdf->getAliasNbPages(), 0, 1, 'L');
     }
 
-    /**
-     * Get localized status text in Arabic
-     *
-     * @param string $status
-     * @return string
-     */
-    private function getStatusText(string $status): string
-    {
-        return match ($status) {
-            'received' => 'مستلم ✓',
-            'pending' => 'قيد الانتظار',
-            'ordered' => 'مطلوب',
-            'cancelled' => 'ملغي',
-            default => ucfirst($status),
-        };
-    }
+    // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Get status-specific colors for badges (Grayscale)
-     *
-     * @param string $status
-     * @return array{bg: array<int>, text: array<int>}
-     */
-    private function getStatusColors(string $status): array
+    private function W(): float
     {
-        return match ($status) {
-            'received' => [
-                'bg' => [210, 210, 210],
-                'text' => [0, 0, 0],
-            ],
-            'pending' => [
-                'bg' => [230, 230, 230],
-                'text' => [50, 50, 50],
-            ],
-            'ordered' => [
-                'bg' => [240, 240, 240],
-                'text' => [80, 80, 80],
-            ],
-            'cancelled' => [
-                'bg' => [200, 200, 200],
-                'text' => [100, 100, 100],
-            ],
-            default => [
-                'bg' => self::COLOR_LIGHT_GRAY,
-                'text' => [0, 0, 0],
-            ],
-        };
+        return $this->pdf->getPageWidth() - self::M * 2;
     }
 
     /**
@@ -647,7 +427,6 @@ class PurchasePdfService
         $path = parse_url($imageUrl, PHP_URL_PATH) ?: '';
         if (!$path) return null;
 
-        // Resolve /storage/ URLs
         $storagePos = strpos($path, '/storage/');
         if ($storagePos !== false) {
             $relative  = substr($path, $storagePos + strlen('/storage/'));
@@ -657,7 +436,6 @@ class PurchasePdfService
             }
         }
 
-        // Try resolving relative to public_path
         $candidate = public_path(ltrim($path, '/'));
         if (file_exists($candidate)) {
             return $candidate;

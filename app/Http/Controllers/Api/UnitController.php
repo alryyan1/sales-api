@@ -68,6 +68,7 @@ class UnitController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255|unique:units,name',
+            'name_en' => 'nullable|string|max:255',
             'description' => 'nullable|string|max:1000',
             'is_active' => 'boolean',
             'is_default' => 'boolean',
@@ -111,6 +112,7 @@ class UnitController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => ['required', 'string', 'max:255', Rule::unique('units', 'name')->ignore($unit->id)],
+            'name_en' => 'nullable|string|max:255',
             'description' => 'nullable|string|max:1000',
             'is_active' => 'boolean',
             'is_default' => 'boolean',
