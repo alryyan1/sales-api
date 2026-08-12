@@ -284,9 +284,17 @@ class Product extends Model
      */
     public function scopeLowStock($query)
     {
+        // total_warehouse_stock is a correlated subquery column (via withSum), not a real
+        // GROUP BY aggregate, so it can't be filtered with HAVING under ONLY_FULL_GROUP_BY —
+        // MySQL rejects `stock_alert_level` as ungrouped in a HAVING clause (error 1463).
+        // Filter in WHERE instead, repeating the same subquery expression withSum builds.
         return $query->whereNotNull('stock_alert_level')
             ->withSum('warehouses as total_warehouse_stock', 'product_warehouse.quantity')
-            ->havingRaw('COALESCE(total_warehouse_stock, 0) <= stock_alert_level');
+            ->whereRaw(
+                'COALESCE((select sum(`product_warehouse`.`quantity`) from `warehouses` '
+                . 'inner join `product_warehouse` on `warehouses`.`id` = `product_warehouse`.`warehouse_id` '
+                . 'where `products`.`id` = `product_warehouse`.`product_id`), 0) <= `stock_alert_level`'
+            );
     }
 
     /**
