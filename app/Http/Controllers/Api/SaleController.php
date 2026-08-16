@@ -997,11 +997,13 @@ class SaleController extends Controller
                         $newBatch = PurchaseItem::whereKey($newBatchId)
                             ->where('product_id', $product->id)
                             ->whereHas('purchase', fn ($q) => $q->where('warehouse_id', $warehouseId))
+                            ->with('purchase:id,currency')
                             ->first();
                         if ($newBatch) {
                             $saleItem->purchase_item_id = $newBatch->id;
                             $saleItem->batch_number_sold = $newBatch->batch_number;
-                            $saleItem->cost_price_at_sale = $newBatch->cost_per_sellable_unit ?? $newBatch->unit_cost ?? 0;
+                            $cost = (float) ($newBatch->cost_per_sellable_unit ?? $newBatch->unit_cost ?? 0);
+                            $saleItem->cost_price_at_sale = $this->convertCostToLocalCurrency($cost, $newBatch->purchase?->currency);
                         }
                     } else {
                         $saleItem->purchase_item_id = null;
@@ -1865,15 +1867,39 @@ class SaleController extends Controller
             ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
             ->orderBy('purchases.purchase_date', 'desc')
             ->orderBy('purchase_items.created_at', 'desc')
-            ->select('purchase_items.*')
+            ->select('purchase_items.*', 'purchases.currency as purchase_currency')
             ->first();
 
         if ($lastItem) {
-            return (float) ($lastItem->cost_per_sellable_unit > 0
+            $cost = (float) ($lastItem->cost_per_sellable_unit > 0
                 ? $lastItem->cost_per_sellable_unit
                 : ($lastItem->unit_cost ?? 0));
+
+            return $this->convertCostToLocalCurrency($cost, $lastItem->purchase_currency);
         }
 
-        return (float) ($product->cost_price ?? 0);
+        return $this->convertCostToLocalCurrency((float) ($product->cost_price ?? 0), $product->preferred_currency);
+    }
+
+    /**
+     * Cost prices are frozen onto sale_items in whatever currency the source purchase was
+     * recorded in. Dashboard/report totals sum cost_price_at_sale as one currency, so a USD
+     * cost must be converted to the local currency using the exchange rate in effect at the
+     * moment of sale (usd_to_sdg_factor), matching how POS already prices USD-sourced products.
+     */
+    private function convertCostToLocalCurrency(float $cost, ?string $currency): float
+    {
+        if ($currency !== 'USD') {
+            return $cost;
+        }
+
+        $settings = (new \App\Services\SettingsService)->getAll();
+        if (! ($settings['usd_conversion_enabled'] ?? true)) {
+            return $cost;
+        }
+
+        $factor = (float) ($settings['usd_to_sdg_factor'] ?? 1);
+
+        return $cost * $factor;
     }
 }

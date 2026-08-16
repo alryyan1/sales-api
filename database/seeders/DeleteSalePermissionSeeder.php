@@ -16,16 +16,19 @@ class DeleteSalePermissionSeeder extends Seeder
     {
         app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
-        $permission = Permission::firstOrCreate(['name' => 'حذف فاتورة', 'guard_name' => 'web']);
+        $permissions = [
+            Permission::firstOrCreate(['name' => 'حذف فاتورة', 'guard_name' => 'web']),
+            Permission::firstOrCreate(['name' => 'تعديل سعر الدولار', 'guard_name' => 'web']),
+        ];
 
         foreach (['ادمن', 'admin'] as $adminRoleName) {
             $adminRole = Role::where('name', $adminRoleName)->first();
             if ($adminRole) {
-                $adminRole->givePermissionTo($permission);
-                $this->command->info("Permission assigned to role: {$adminRoleName}");
+                $adminRole->givePermissionTo($permissions);
+                $this->command->info("Permissions assigned to role: {$adminRoleName}");
             }
         }
 
-        $this->command->info('Delete-sale permission seeded successfully.');
+        $this->command->info('Missing permissions seeded successfully.');
     }
 }
