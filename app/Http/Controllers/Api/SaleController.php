@@ -31,13 +31,7 @@ class SaleController extends Controller
     {
         $query = Sale::with(['client:id,name', 'user:id,name', 'warehouse:id,name', 'items.product:id,name,image_url', 'items.product.warehouses']);
 
-        if ($search = $request->input('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('id', $search)
-                    ->orWhere('number', 'like', "%{$search}%")
-                    ->orWhereHas('client', fn ($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
-            });
-        }
+        $this->applySaleSearchFilter($query, $request);
         // Status filtering removed because the status column was dropped.
         if ($request->boolean('today_only')) {
             $query->whereDate('sale_date', Carbon::today());
@@ -53,6 +47,30 @@ class SaleController extends Controller
 
             return SaleResource::collection($sales);
         }
+        $this->applySaleListFilters($query, $request);
+
+        $sales = $query->latest('id')->paginate($request->input('per_page', 15));
+
+        return SaleResource::collection($sales);
+    }
+
+    private function applySaleSearchFilter($query, Request $request): void
+    {
+        if ($search = $request->input('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('id', $search)
+                    ->orWhere('number', 'like', "%{$search}%")
+                    ->orWhereHas('client', fn ($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
+            });
+        }
+    }
+
+    /**
+     * Filters shared by index() and summary() so the summary totals always match exactly
+     * the set of sales the list page is currently showing.
+     */
+    private function applySaleListFilters($query, Request $request): void
+    {
         if ($request->boolean('for_current_user')) {
             $query->where('user_id', $request->user()->id);
         }
@@ -93,10 +111,64 @@ class SaleController extends Controller
             // Load payments when filtering by shift_id (for offline POS)
             $query->with(['payments.user:id,name,username']);
         }
+    }
 
-        $sales = $query->latest('id')->paginate($request->input('per_page', 15));
+    /**
+     * Aggregate totals (revenue, paid, cost) for every sale matching the same filters as
+     * index(), not just the current page — used by the Sales List page's totals row.
+     */
+    public function summary(Request $request)
+    {
+        $filtered = Sale::query();
+        $this->applySaleSearchFilter($filtered, $request);
+        $this->applySaleListFilters($filtered, $request);
 
-        return SaleResource::collection($sales);
+        $filteredIds = (clone $filtered)->select('id');
+
+        $itemAgg = DB::table('sale_items')
+            ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'sale_items.sale_id')
+            ->selectRaw('COALESCE(SUM(sale_items.total_price), 0) as subtotal, COALESCE(SUM(sale_items.cost_price_at_sale * sale_items.quantity), 0) as raw_cost')
+            ->first();
+
+        $discountSum = (float) (clone $filtered)->sum('discount_amount');
+
+        $paidSum = (float) DB::table('payments')
+            ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'payments.sale_id')
+            ->sum('amount');
+
+        // Same "unreliable stored cost" rule as CostPriceResolver::resolveSaleItemCost(), but
+        // batched: only the (typically tiny) subset of current-month items that actually need
+        // live re-resolution is looped in PHP — every other item is summed in the SQL above.
+        $monthStart = now()->startOfMonth()->toDateString();
+        $unreliableItems = DB::table('sale_items')
+            ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'sale_items.sale_id')
+            ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
+            ->where('sales.sale_date', '>=', $monthStart)
+            ->where(function ($q) {
+                $q->where('sale_items.cost_price_at_sale', '<=', 0)
+                    ->orWhereRaw('sale_items.unit_price > 0 AND sale_items.cost_price_at_sale > 0 AND (sale_items.unit_price / sale_items.cost_price_at_sale) > 100');
+            })
+            ->select('sale_items.product_id', 'sale_items.quantity', 'sale_items.unit_price', 'sale_items.cost_price_at_sale')
+            ->get();
+
+        $costAdjustment = 0.0;
+        foreach ($unreliableItems as $row) {
+            $stored = (float) $row->cost_price_at_sale;
+            $qty = (float) $row->quantity;
+            $resolvedUnit = \App\Services\CostPriceResolver::resolveSaleItemCost(
+                (int) $row->product_id,
+                $stored,
+                (float) $row->unit_price,
+                true
+            );
+            $costAdjustment += ($resolvedUnit - $stored) * $qty;
+        }
+
+        return response()->json([
+            'total_amount' => (float) $itemAgg->subtotal - $discountSum,
+            'paid_amount' => $paidSum,
+            'total_cost' => (float) $itemAgg->raw_cost + $costAdjustment,
+        ]);
     }
 
     /**
@@ -1863,43 +1935,11 @@ class SaleController extends Controller
      */
     private function resolveCostPrice(\App\Models\Product $product): float
     {
-        $lastItem = PurchaseItem::where('purchase_items.product_id', $product->id)
-            ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
-            ->orderBy('purchases.purchase_date', 'desc')
-            ->orderBy('purchase_items.created_at', 'desc')
-            ->select('purchase_items.*', 'purchases.currency as purchase_currency')
-            ->first();
-
-        if ($lastItem) {
-            $cost = (float) ($lastItem->cost_per_sellable_unit > 0
-                ? $lastItem->cost_per_sellable_unit
-                : ($lastItem->unit_cost ?? 0));
-
-            return $this->convertCostToLocalCurrency($cost, $lastItem->purchase_currency);
-        }
-
-        return $this->convertCostToLocalCurrency((float) ($product->cost_price ?? 0), $product->preferred_currency);
+        return \App\Services\CostPriceResolver::resolveCostPrice($product);
     }
 
-    /**
-     * Cost prices are frozen onto sale_items in whatever currency the source purchase was
-     * recorded in. Dashboard/report totals sum cost_price_at_sale as one currency, so a USD
-     * cost must be converted to the local currency using the exchange rate in effect at the
-     * moment of sale (usd_to_sdg_factor), matching how POS already prices USD-sourced products.
-     */
     private function convertCostToLocalCurrency(float $cost, ?string $currency): float
     {
-        if ($currency !== 'USD') {
-            return $cost;
-        }
-
-        $settings = (new \App\Services\SettingsService)->getAll();
-        if (! ($settings['usd_conversion_enabled'] ?? true)) {
-            return $cost;
-        }
-
-        $factor = (float) ($settings['usd_to_sdg_factor'] ?? 1);
-
-        return $cost * $factor;
+        return \App\Services\CostPriceResolver::convertCostToLocalCurrency($cost, $currency);
     }
 }

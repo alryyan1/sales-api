@@ -256,6 +256,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/payments', [\App\Http\Controllers\Api\PaymentController::class, 'index'])->name('api.payments.index');
     Route::get('/payments/stats', [\App\Http\Controllers\Api\PaymentController::class, 'stats'])->name('api.payments.stats');
     Route::get('/sales/list-all', [SaleController::class, 'listAll'])->name('api.sales.listAll');
+    Route::get('/sales/summary', [SaleController::class, 'summary'])->name('api.sales.summary');
     // -- Sales Management --
     Route::apiResource('sales', SaleController::class);
     Route::post('/sales/create-empty', [SaleController::class, 'createEmptySale'])->name('api.sales.createEmpty');

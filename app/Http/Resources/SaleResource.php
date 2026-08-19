@@ -14,6 +14,21 @@ class SaleResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        // Resolved once and reused for both total_cost and each item's resolved_cost_price,
+        // so CostPriceResolver isn't invoked twice per item. See
+        // CostPriceResolver::resolveSaleItemCost() for the per-item resolution rules.
+        if ($this->relationLoaded('items')) {
+            $isCurrentMonth = $this->sale_date && $this->sale_date->greaterThanOrEqualTo(now()->startOfMonth());
+            $this->items->each(function ($item) use ($isCurrentMonth) {
+                $item->resolved_cost_price = \App\Services\CostPriceResolver::resolveSaleItemCost(
+                    (int) $item->product_id,
+                    (float) $item->cost_price_at_sale,
+                    (float) $item->unit_price,
+                    $isCurrentMonth
+                );
+            });
+        }
+
         return [
             'id' => $this->id,
             'number' => $this->number,
@@ -42,6 +57,8 @@ class SaleResource extends JsonResource
             'subtotal' => (float) $this->items->sum('total_price'),
             'discount_amount' => (float) ($this->discount_amount ?? 0),
             'total_amount' => (float) ($this->items->sum('total_price') - ($this->discount_amount ?? 0)),
+            // Total cost of goods sold, in local currency (sum of each item's resolved_cost_price).
+            'total_cost' => (float) $this->items->sum(fn ($item) => (float) $item->resolved_cost_price * (float) $item->quantity),
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
             'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null, // Include if needed
 

@@ -84,6 +84,10 @@ class SaleItemResource extends JsonResource
             'unit_price' => $this->unit_price, // Price at which this item was sold (already cast to decimal:2 in model)
             'total_price' => $this->total_price, // quantity * unit_price (already cast in model)
             'cost_price_at_sale' => $this->cost_price_at_sale, // Cost per sellable unit at sale time
+            // Best-known per-unit cost in local currency: falls back to a live-resolved value
+            // (see CostPriceResolver::resolveSaleItemCost()) when set by the parent SaleResource;
+            // otherwise the raw stored cost_price_at_sale.
+            'resolved_cost_price' => (float) ($this->resolved_cost_price ?? $this->cost_price_at_sale),
 
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null, // Optional: if needed by frontend
             'updated_at' => $this->updated_at ? $this->updated_at->toISOString() : null, // Optional: if needed by frontend
