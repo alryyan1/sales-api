@@ -252,7 +252,7 @@ class InvoicePdfService
         $pdf->AddPage();
 
         $this->generateArabicProformaHeader($pdf, $renderer, $sale, $title, $settings);
-        $this->generateArabicProformaTable($pdf, $sale);
+        $this->generateArabicProformaTable($pdf, $sale, $settings);
         $this->generateArabicProformaSummary($pdf, $sale, $isFinal);
         $this->generateArabicProformaTerms($pdf, $sale);
         $this->generateStampAndSignature($pdf, $settings);
@@ -352,20 +352,33 @@ class InvoicePdfService
         $pdf->SetY($infoY + $rowH * 3 + 2); // Reduced from 5
     }
 
-    private function generateArabicProformaTable(TCPDF $pdf, Sale $sale): void
+    private function generateArabicProformaTable(TCPDF $pdf, Sale $sale, array $settings = []): void
     {
         $pdf->SetFillColor(240, 240, 240);
         $pdf->SetFont('arial', 'B', 9); // Reduced from 10
 
-        // Column widths
-        $w = [10, 80, 15, 15, 25, 45]; // م, البيان, الوحده, العدد, السعر, المبلغ
+        $showUnit = $settings['sales_a4_show_unit_column'] ?? true;
 
-        $pdf->Cell($w[0], 7, 'م', 1, 0, 'C', true);
-        $pdf->Cell($w[1], 7, 'البيان', 1, 0, 'C', true);
-        $pdf->Cell($w[2], 7, 'الوحده', 1, 0, 'C', true);
-        $pdf->Cell($w[3], 7, 'العدد', 1, 0, 'C', true);
-        $pdf->Cell($w[4], 7, 'السعر', 1, 0, 'C', true);
-        $pdf->Cell($w[5], 7, 'المبلغ', 1, 1, 'C', true);
+        if ($showUnit) {
+            // Column widths
+            $w = [10, 80, 15, 15, 25, 45]; // م, البيان, الوحده, العدد, السعر, المبلغ
+
+            $pdf->Cell($w[0], 7, 'م', 1, 0, 'C', true);
+            $pdf->Cell($w[1], 7, 'البيان', 1, 0, 'C', true);
+            $pdf->Cell($w[2], 7, 'الوحده', 1, 0, 'C', true);
+            $pdf->Cell($w[3], 7, 'العدد', 1, 0, 'C', true);
+            $pdf->Cell($w[4], 7, 'السعر', 1, 0, 'C', true);
+            $pdf->Cell($w[5], 7, 'المبلغ', 1, 1, 'C', true);
+        } else {
+            // Same total width as above (190mm), unit column's 15mm folded into البيان.
+            $w = [10, 95, 0, 15, 25, 45]; // م, البيان, -, العدد, السعر, المبلغ
+
+            $pdf->Cell($w[0], 7, 'م', 1, 0, 'C', true);
+            $pdf->Cell($w[1], 7, 'البيان', 1, 0, 'C', true);
+            $pdf->Cell($w[3], 7, 'العدد', 1, 0, 'C', true);
+            $pdf->Cell($w[4], 7, 'السعر', 1, 0, 'C', true);
+            $pdf->Cell($w[5], 7, 'المبلغ', 1, 1, 'C', true);
+        }
 
         $pdf->SetFont('arial', '', 8); // Reduced from 10
         foreach ($sale->items as $idx => $item) {
@@ -385,7 +398,9 @@ class InvoicePdfService
 
             $pdf->Cell($w[0], 6, ($idx + 1), 1, 0, 'C'); // Reduced height from 8 to 6
             $pdf->Cell($w[1], 6, $productName, 1, 0, 'C');
-            $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
+            if ($showUnit) {
+                $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
+            }
             $pdf->Cell($w[3], 6, $item->quantity, 1, 0, 'C');
             $pdf->Cell($w[4], 6, $this->formatMoney($item->unit_price), 1, 0, 'C');
             $pdf->Cell($w[5], 6, $this->formatMoney($item->total_price), 1, 1, 'C');
