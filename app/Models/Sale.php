@@ -166,11 +166,24 @@ class Sale extends Model
         return (float) max(0, $itemsTotal - $discount);
     }
 
-    // Accessor for the sale's total cost of goods sold (sum of cost_price_at_sale * quantity)
+    // Accessor for the sale's total cost of goods sold. Uses the same live resolution
+    // as the sales list (CostPriceResolver::resolveSaleItemCost) instead of the raw
+    // frozen cost_price_at_sale, so a missing/stale stored cost is re-resolved from the
+    // product's latest purchase and converted at today's exchange rate — matching what
+    // the sales list page shows for this sale.
     public function getCalculatedCostAmountAttribute(): float
     {
-        return (float) $this->items()
-            ->selectRaw('COALESCE(SUM(cost_price_at_sale * quantity), 0) as total')
-            ->value('total');
+        $isCurrentMonth = $this->sale_date && $this->sale_date->greaterThanOrEqualTo(now()->startOfMonth());
+
+        return (float) $this->items->sum(function ($item) use ($isCurrentMonth) {
+            $resolvedCost = \App\Services\CostPriceResolver::resolveSaleItemCost(
+                (int) $item->product_id,
+                (float) $item->cost_price_at_sale,
+                (float) $item->unit_price,
+                $isCurrentMonth
+            );
+
+            return $resolvedCost * (float) $item->quantity;
+        });
     }
 }
