@@ -1930,6 +1930,41 @@ class SaleController extends Controller
     }
 
     /**
+     * Given a batch of sale ids the client currently shows as exported, checks
+     * Firestore for each and clears finance_exported_at/finance_export_error on
+     * any whose journal entry was deleted on finance-api's side — so the sales
+     * list stops showing a checkmark for an export that no longer exists there.
+     */
+    public function verifyFinanceExports(Request $request, FinanceBridgeService $financeBridge)
+    {
+        $validated = $request->validate([
+            'sale_ids' => ['required', 'array', 'min:1'],
+            'sale_ids.*' => ['integer'],
+        ]);
+
+        $saleIds = Sale::whereIn('id', $validated['sale_ids'])
+            ->whereNotNull('finance_exported_at')
+            ->pluck('id')
+            ->all();
+
+        if (empty($saleIds)) {
+            return response()->json(['removed' => []]);
+        }
+
+        $exists = $financeBridge->checkExported($saleIds);
+        $removedIds = array_values(array_keys(array_filter($exists, fn ($stillExists) => ! $stillExists)));
+
+        if (! empty($removedIds)) {
+            Sale::whereIn('id', $removedIds)->update([
+                'finance_exported_at' => null,
+                'finance_export_error' => null,
+            ]);
+        }
+
+        return response()->json(['removed' => $removedIds]);
+    }
+
+    /**
      * Resolve cost price for a product from the latest purchase invoice.
      * Falls back to product->cost_price if no purchase item exists.
      */

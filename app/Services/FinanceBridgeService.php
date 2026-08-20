@@ -112,6 +112,61 @@ class FinanceBridgeService
     }
 
     /**
+     * Checks, for each given sale id, whether its journal entry document still
+     * exists in Firestore — lets the sales list detect a sale that was marked
+     * exported here but whose entry was later deleted on finance-api's side, so
+     * the UI can stop showing it as exported. Uses Firestore's batchGet so all
+     * ids are checked in a single request regardless of how many are passed.
+     *
+     * @param  array<int>  $saleIds
+     * @return array<int, bool> sale id => still exists in Firestore
+     */
+    public function checkExported(array $saleIds): array
+    {
+        if (empty($saleIds)) {
+            return [];
+        }
+
+        $token = FirebaseService::getAccessToken();
+        if (! $token) {
+            throw new \RuntimeException('تعذّر الاتصال بـ Firebase — تحقق من إعدادات الاعتماد.');
+        }
+
+        $projectId = config('firebase.project_id');
+        $collection = config('firebase.finance_bridge_collection');
+        $basePath = self::BASE_URL."/projects/{$projectId}/databases/(default)/documents";
+
+        $saleIdByDocName = [];
+        foreach ($saleIds as $saleId) {
+            $saleIdByDocName["projects/{$projectId}/databases/(default)/documents/finance/{$collection}/journal_entries/sale_{$saleId}"] = $saleId;
+        }
+
+        $url = "{$basePath}:batchGet";
+        $response = Http::withToken($token)->post($url, [
+            'documents' => array_keys($saleIdByDocName),
+        ]);
+
+        if (! $response->successful()) {
+            Log::error('FinanceBridgeService: failed to batch-check journal entries in Firestore', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            throw new \RuntimeException('تعذّر التحقق من حالة التصدير في النظام المالي.');
+        }
+
+        $exists = array_fill_keys($saleIds, false);
+        foreach ($response->json() ?? [] as $result) {
+            $docName = $result['found']['name'] ?? $result['missing'] ?? null;
+            if ($docName !== null && isset($saleIdByDocName[$docName])) {
+                $exists[$saleIdByDocName[$docName]] = isset($result['found']);
+            }
+        }
+
+        return $exists;
+    }
+
+    /**
      * Records money actually received against a sale that was booked to
      * receivable: debits the payment's own cash/bank account, credits
      * receivable for the same amount, so the customer's outstanding balance
