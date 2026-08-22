@@ -374,7 +374,7 @@ class SaleController extends Controller
                         $discountValue = min((float) $validatedData['discount_amount'], $subtotal);
                     }
 
-                    $sale->update(['discount_amount' => round($discountValue, 2)]);
+                    $sale->update(['discount_amount' => round($discountValue, 4)]);
                 }
 
                 // Payments — same shape as addPayment()/addSinglePayment().
@@ -777,7 +777,7 @@ class SaleController extends Controller
                 $totalAfterDiscount = $subtotal - $discountValue;
 
                 // Persist discount as amount only
-                $sale->update(['discount_amount' => round($discountValue, 2)]);
+                $sale->update(['discount_amount' => round($discountValue, 4)]);
             });
 
             // Reload relevant relations for client consumption

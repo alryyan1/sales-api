@@ -66,7 +66,7 @@ class Sale extends Model
         'sale_date' => 'date',
         'is_returned' => 'boolean',
         'is_quote' => 'boolean',
-        'discount_amount' => 'decimal:2',
+        'discount_amount' => 'decimal:4',
         'finance_exported_at' => 'datetime',
     ];
 
