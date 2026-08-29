@@ -48,12 +48,19 @@ class FinanceBridgeService
 
         $revenueAmount = $sale->calculated_total_amount;
         $costAmount = $sale->calculated_cost_amount;
+        $discountAmount = (float) ($sale->discount_amount ?? 0);
 
         if ($revenueAmount <= 0) {
             throw new \RuntimeException('لا يمكن تصدير فاتورة بدون قيمة.');
         }
 
         $debitRole = $this->debitRole($sale);
+
+        // calculated_total_amount is already net of the discount (see Sale::getCalculatedTotalAmountAttribute),
+        // so the customer/cash side is debited for the net amount actually owed/received, while revenue is
+        // credited at the gross (pre-discount) amount and the difference is debited to a dedicated discount
+        // account — keeping the discount visible in the ledger instead of silently netted into revenue.
+        $grossAmount = $revenueAmount + $discountAmount;
 
         $lines = [
             [
@@ -71,9 +78,19 @@ class FinanceBridgeService
                 'party_id' => null,
                 'description' => "إيراد فاتورة رقم {$sale->id}",
                 'debit' => 0,
-                'credit' => $revenueAmount,
+                'credit' => $grossAmount,
             ],
         ];
+
+        if ($discountAmount > 0) {
+            $lines[] = [
+                'account_role' => 'sales_discount',
+                'party_id' => null,
+                'description' => "خصم ممنوح — فاتورة رقم {$sale->id}",
+                'debit' => $discountAmount,
+                'credit' => 0,
+            ];
+        }
 
         if ($costAmount > 0) {
             $lines[] = [
