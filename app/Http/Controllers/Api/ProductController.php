@@ -96,11 +96,12 @@ class ProductController extends Controller
             $query->lowStock();
         }
 
-        // Filter by out of stock only
+        // Filter by out of stock only (services are never "out of stock" — they aren't tracked)
         if ($request->boolean('out_of_stock_only')) {
-            $query->whereDoesntHave('warehouses', function ($q) {
-                $q->where('product_warehouse.quantity', '>', 0);
-            });
+            $query->where('is_service', false)
+                ->whereDoesntHave('warehouses', function ($q) {
+                    $q->where('product_warehouse.quantity', '>', 0);
+                });
         }
 
         // Sorting
@@ -160,6 +161,7 @@ class ProductController extends Controller
             'sellable_unit_id' => 'nullable|exists:units,id',
             'units_per_stocking_unit' => 'nullable|integer|min:1',
             'has_expiry_date' => 'nullable|boolean',
+            'is_service' => 'nullable|boolean',
             'sale_price' => 'nullable|numeric|min:0',
             'cost_price' => 'nullable|numeric|min:0',
             'expire_date' => 'nullable|date',
@@ -196,6 +198,7 @@ class ProductController extends Controller
             'sellable_unit_id' => 'sometimes|nullable|exists:units,id',
             'units_per_stocking_unit' => 'sometimes|nullable|integer|min:1',
             'has_expiry_date' => 'sometimes|boolean',
+            'is_service' => 'sometimes|boolean',
             'sale_price' => 'sometimes|nullable|numeric|min:0',
             'cost_price' => 'sometimes|nullable|numeric|min:0',
             'expire_date' => 'sometimes|nullable|date',

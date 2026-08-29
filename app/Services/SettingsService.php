@@ -60,6 +60,8 @@ class SettingsService
             'product_row_color_highlight' => 'bool',
             'product_scientific_name_visible' => 'bool',
             'product_scientific_name_required' => 'bool',
+            'products_nav_label' => 'string',
+            'hide_expiry_date' => 'bool',
             'pos_show_expired_products' => 'bool',
             'pos_show_out_of_stock_products' => 'bool',
             'pos_show_expiry_date_column' => 'bool',
@@ -119,6 +121,12 @@ class SettingsService
             'product_row_color_highlight' => $c['product_row_color_highlight'] ?? false,
             'product_scientific_name_visible' => $c['product_scientific_name_visible'] ?? true,
             'product_scientific_name_required' => $c['product_scientific_name_required'] ?? false,
+            // Overrides the sidebar's "products" nav label — clients that sell equipment,
+            // medicine, etc. rename it instead of the default "Products" translation.
+            'products_nav_label' => $c['products_nav_label'] ?? null,
+            // Master switch — when true, every expiry-date field/column/report/badge in the
+            // system is hidden from the UI (for businesses that don't sell perishable stock).
+            'hide_expiry_date' => $c['hide_expiry_date'] ?? false,
             'pos_show_expired_products' => $c['pos_show_expired_products'] ?? false,
             'pos_show_out_of_stock_products' => $c['pos_show_out_of_stock_products'] ?? false,
             'pos_show_expiry_date_column' => $c['pos_show_expiry_date_column'] ?? true,

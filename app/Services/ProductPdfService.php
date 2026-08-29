@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\PurchaseItem;
 use App\Services\Pdf\PdfHeaderRenderer;
+use TCPDF;
 
 class ProductPdfService
 {

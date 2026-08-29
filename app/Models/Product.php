@@ -102,6 +102,7 @@ class Product extends Model
         'units_per_stocking_unit',
         'image_url',
         'has_expiry_date',
+        'is_service',
         'sale_price',
         'cost_price',
         'expire_date',
@@ -119,6 +120,7 @@ class Product extends Model
         'stock_alert_level' => 'integer', // Cast to integer
         'units_per_stocking_unit' => 'integer', // Cast to integer
         'has_expiry_date' => 'boolean',
+        'is_service' => 'boolean',
         'sale_price' => 'float',
         'cost_price' => 'float',
         'expire_date' => 'date',
@@ -272,9 +274,13 @@ class Product extends Model
      */
     public function scopeHasStock($query)
     {
-        // Query product_warehouse directly (SSOT)
-        return $query->whereHas('warehouses', function ($q) {
-            $q->where('product_warehouse.quantity', '>', 0);
+        // Query product_warehouse directly (SSOT). Services carry no warehouse stock
+        // but are always sellable, so they always pass this filter.
+        return $query->where(function ($q) {
+            $q->where('is_service', true)
+                ->orWhereHas('warehouses', function ($wq) {
+                    $wq->where('product_warehouse.quantity', '>', 0);
+                });
         });
     }
 
@@ -288,7 +294,8 @@ class Product extends Model
         // GROUP BY aggregate, so it can't be filtered with HAVING under ONLY_FULL_GROUP_BY —
         // MySQL rejects `stock_alert_level` as ungrouped in a HAVING clause (error 1463).
         // Filter in WHERE instead, repeating the same subquery expression withSum builds.
-        return $query->whereNotNull('stock_alert_level')
+        return $query->where('is_service', false)
+            ->whereNotNull('stock_alert_level')
             ->withSum('warehouses as total_warehouse_stock', 'product_warehouse.quantity')
             ->whereRaw(
                 'COALESCE((select sum(`product_warehouse`.`quantity`) from `warehouses` '
@@ -302,7 +309,7 @@ class Product extends Model
      */
     public function scopeLowStockInWarehouse($query, $warehouseId)
     {
-        return $query->whereHas('warehouses', function ($q) use ($warehouseId) {
+        return $query->where('is_service', false)->whereHas('warehouses', function ($q) use ($warehouseId) {
             $q->where('warehouse_id', $warehouseId)
                 ->whereNotNull('product_warehouse.min_stock_level')
                 ->whereColumn('product_warehouse.quantity', '<=', 'product_warehouse.min_stock_level');
@@ -335,6 +342,11 @@ class Product extends Model
 
     public function incrementWarehouseStock($warehouseId, $quantity)
     {
+        // Services have no warehouse ledger to maintain.
+        if ($this->is_service) {
+            return;
+        }
+
         $warehouse = $this->warehouses()->where('warehouses.id', $warehouseId)->first();
         if ($warehouse) {
             $this->warehouses()->updateExistingPivot($warehouseId, [
@@ -347,6 +359,11 @@ class Product extends Model
 
     public function decrementWarehouseStock($warehouseId, $quantity)
     {
+        // Services have no warehouse ledger to maintain — nothing to decrement, no alerts to fire.
+        if ($this->is_service) {
+            return;
+        }
+
         // Get stock before update for comparison
         $oldTotal = $this->total_stock;
 
@@ -543,6 +560,12 @@ class Product extends Model
      */
     public function countStock(?int $warehouseId = null): int
     {
+        // Services aren't tracked in product_warehouse — treat them as always available
+        // so every stock-availability check downstream (Sale creation, POS, etc.) passes.
+        if ($this->is_service) {
+            return PHP_INT_MAX;
+        }
+
         if ($warehouseId) {
             // Use loaded relationship if available to avoid N+1
             if ($this->relationLoaded('warehouses')) {
@@ -584,8 +607,11 @@ class Product extends Model
      */
     public function scopeInStockAt($query, int $warehouseId)
     {
-        return $query->whereHas('warehouses', function ($q) use ($warehouseId) {
-            $q->where('warehouse_id', $warehouseId)->where('product_warehouse.quantity', '>', 0);
+        return $query->where(function ($q) use ($warehouseId) {
+            $q->where('is_service', true)
+                ->orWhereHas('warehouses', function ($wq) use ($warehouseId) {
+                    $wq->where('warehouse_id', $warehouseId)->where('product_warehouse.quantity', '>', 0);
+                });
         });
     }
 }
