@@ -426,27 +426,34 @@ class Product extends Model
         return null;
     }
 
-    // Accessor to get the last sale price from the most recent purchase item
+    // Accessor to get the last sale price, respecting the 'price_priority_source' setting
     public function getLastSalePricePerSellableUnitAttribute(): ?float
     {
-        if ($this->sale_price !== null) {
-            return (float) $this->sale_price;
+        static $settingsCache = null;
+        if ($settingsCache === null) {
+            $settingsCache = (new \App\Services\SettingsService())->getAll();
         }
+        $priority = $settingsCache['price_priority_source'] ?? 'product';
+
+        $productPrice = $this->sale_price !== null ? (float) $this->sale_price : null;
 
         if (array_key_exists('last_sale_price_raw', $this->attributes)) {
-            return $this->attributes['last_sale_price_raw'] !== null ? (float) $this->attributes['last_sale_price_raw'] : null;
+            $purchasePrice = $this->attributes['last_sale_price_raw'] !== null ? (float) $this->attributes['last_sale_price_raw'] : null;
+        } else {
+            $latestPurchaseItem = $this->purchaseItems()
+                ->whereNotNull('sale_price')
+                ->orderBy('created_at', 'desc')
+                ->first();
+            $purchasePrice = ($latestPurchaseItem && $latestPurchaseItem->sale_price !== null)
+                ? (float) $latestPurchaseItem->sale_price
+                : null;
         }
 
-        $latestPurchaseItem = $this->purchaseItems()
-            ->whereNotNull('sale_price')
-            ->orderBy('created_at', 'desc')
-            ->first();
-
-        if ($latestPurchaseItem && $latestPurchaseItem->sale_price !== null) {
-            return (float) $latestPurchaseItem->sale_price;
+        if ($priority === 'purchase') {
+            return $purchasePrice ?? $productPrice;
         }
 
-        return null;
+        return $productPrice ?? $purchasePrice;
     }
 
     // Accessor to get the earliest expiry date from available stock

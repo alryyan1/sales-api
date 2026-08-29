@@ -59,6 +59,7 @@ class SettingsService
             'pos_show_out_of_stock_products' => 'bool',
             'purchase_use_batch_number' => 'bool',
             'purchase_use_expiry_date' => 'bool',
+            'price_priority_source' => 'string', // 'product' or 'purchase'
         ];
     }
 
@@ -111,6 +112,7 @@ class SettingsService
             'pos_show_out_of_stock_products' => $c['pos_show_out_of_stock_products'] ?? false,
             'purchase_use_batch_number' => $c['purchase_use_batch_number'] ?? true,
             'purchase_use_expiry_date' => $c['purchase_use_expiry_date'] ?? true,
+            'price_priority_source' => $c['price_priority_source'] ?? 'product',
         ];
     }
 
@@ -170,6 +172,7 @@ class SettingsService
         $rules['company_email'] = ['nullable', 'email', 'max:255'];
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
+        $rules['price_priority_source'] = ['nullable', 'string', Rule::in(['product', 'purchase'])];
         return $rules;
     }
 
