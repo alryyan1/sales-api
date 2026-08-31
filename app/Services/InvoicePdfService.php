@@ -460,8 +460,10 @@ class InvoicePdfService
         }
         $pdf->SetTextColor(0, 0, 0);
 
-        // ── STAMP (reuses the same setting-driven stamp renderer) ───────────
-        $pdf->SetY(max($pdf->GetY() + 10, 190));
+        // ── STAMP (reuses the same setting-driven stamp renderer, positioned
+        // right after the totals like the classic template — not pinned to a
+        // fixed Y, which pushed it past the bottom edge on short invoices) ───
+        $pdf->Ln(10);
         $this->generateStampAndSignature($pdf, $settings);
 
         return $pdf->Output('', 'S');
