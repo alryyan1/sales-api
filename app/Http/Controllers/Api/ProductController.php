@@ -591,6 +591,7 @@ class ProductController extends Controller
         $copies = max(1, min(100, (int)$request->input('copies',    1)));
 
         $barcodeValue = $product->sku ?: (string)$product->id;
+        $companyName  = app(\App\Services\SettingsService::class)->getAll()['company_name'] ?? '';
 
         $pdf = new \TCPDF('L', 'mm', [$height, $width], true, 'UTF-8', false);
         $pdf->setPrintHeader(false);
@@ -619,9 +620,11 @@ class ProductController extends Controller
         for ($i = 0; $i < $copies; $i++) {
             $pdf->AddPage();
 
-            // Product name (top, centred)
-            $pdf->SetFont('helvetica', 'B', 7);
-            $pdf->Cell(0, 4, $product->name, 0, 1, 'C');
+            // Company name (top, centred) — 'arial' is the Unicode/Arabic-capable TTF font
+            // registered for this app; 'helvetica' only supports Latin glyphs and renders
+            // Arabic company names as "?".
+            $pdf->SetFont('arial', 'B', 7);
+            $pdf->Cell(0, 4, $companyName, 0, 1, 'C');
 
             // Barcode (Code 128)
             $barcodeH = $height * 0.45;

@@ -18,7 +18,7 @@ class InvoicePdfService
      * @param Sale $sale
      * @return string PDF content
      */
-    public function generateInvoicePdf(Sale $sale): string
+    public function generateInvoicePdf(Sale $sale, string $priceMode = 'local'): string
     {
         // Get settings
         $settings = app(\App\Services\SettingsService::class)->getAll();
@@ -38,7 +38,31 @@ class InvoicePdfService
             $title = $isFinal ? 'فاتورة نهائية' : 'فاتورة مبدئية';
         }
 
-        return $this->generateArabicProformaPdf($sale, $settings, $title, $isFinal);
+        return $this->generateArabicProformaPdf($sale, $settings, $title, $isFinal, $priceMode);
+    }
+
+    /**
+     * Resolve the unit price to print for an item given the price mode.
+     * In 'usd' mode, items priced in USD show the unit_price_usd snapshot taken
+     * at the time of sale, instead of the converted local-currency amount.
+     */
+    private function resolveDisplayUnitPrice($item, string $priceMode): float
+    {
+        if ($priceMode === 'usd' && $item->unit_price_usd !== null) {
+            return (float) $item->unit_price_usd;
+        }
+
+        return (float) $item->unit_price;
+    }
+
+    /**
+     * Format a money value for display, appending "$" when printing the USD-priced invoice.
+     */
+    private function formatDisplayMoney(float|int|string|null $value, string $priceMode): string
+    {
+        $formatted = $this->formatMoney($value);
+
+        return $priceMode === 'usd' ? $formatted . ' $' : $formatted;
     }
 
     /** @deprecated — kept for reference only, not called */
@@ -236,7 +260,7 @@ class InvoicePdfService
     /**
      * Generate Arabic Proforma Invoice PDF
      */
-    private function generateArabicProformaPdf(Sale $sale, array $settings, string $title, bool $isFinal = false): string
+    private function generateArabicProformaPdf(Sale $sale, array $settings, string $title, bool $isFinal = false, string $priceMode = 'local'): string
     {
         $renderer = new \App\Services\Pdf\PdfHeaderRenderer('invoice');
 
@@ -252,8 +276,8 @@ class InvoicePdfService
         $pdf->AddPage();
 
         $this->generateArabicProformaHeader($pdf, $renderer, $sale, $title, $settings);
-        $this->generateArabicProformaTable($pdf, $sale, $settings);
-        $this->generateArabicProformaSummary($pdf, $sale, $isFinal);
+        $this->generateArabicProformaTable($pdf, $sale, $settings, $priceMode);
+        $this->generateArabicProformaSummary($pdf, $sale, $isFinal, $priceMode);
         $this->generateArabicProformaTerms($pdf, $sale);
         $this->generateStampAndSignature($pdf, $settings);
 
@@ -352,7 +376,7 @@ class InvoicePdfService
         $pdf->SetY($infoY + $rowH * 3 + 2); // Reduced from 5
     }
 
-    private function generateArabicProformaTable(TCPDF $pdf, Sale $sale, array $settings = []): void
+    private function generateArabicProformaTable(TCPDF $pdf, Sale $sale, array $settings = [], string $priceMode = 'local'): void
     {
         $pdf->SetFillColor(240, 240, 240);
         $pdf->SetFont('arial', 'B', 9); // Reduced from 10
@@ -401,15 +425,18 @@ class InvoicePdfService
             if ($showUnit) {
                 $pdf->Cell($w[2], 6, ($item->product->sellableUnit->name ?? 'حبة'), 1, 0, 'C');
             }
+            $unitPrice = $this->resolveDisplayUnitPrice($item, $priceMode);
+            $lineTotal = $unitPrice * $item->quantity;
+
             $pdf->Cell($w[3], 6, $item->quantity, 1, 0, 'C');
-            $pdf->Cell($w[4], 6, $this->formatMoney($item->unit_price), 1, 0, 'C');
-            $pdf->Cell($w[5], 6, $this->formatMoney($item->total_price), 1, 1, 'C');
+            $pdf->Cell($w[4], 6, $this->formatDisplayMoney($unitPrice, $priceMode), 1, 0, 'C');
+            $pdf->Cell($w[5], 6, $this->formatDisplayMoney($lineTotal, $priceMode), 1, 1, 'C');
         }
     }
 
-    private function generateArabicProformaSummary(TCPDF $pdf, Sale $sale, bool $isFinal = false): void
+    private function generateArabicProformaSummary(TCPDF $pdf, Sale $sale, bool $isFinal = false, string $priceMode = 'local'): void
     {
-        $total = $sale->items->sum('total_price');
+        $total = $sale->items->sum(fn($item) => $this->resolveDisplayUnitPrice($item, $priceMode) * $item->quantity);
         $discount = $sale->discount_amount ?? 0;
         $net = $total - $discount;
 
@@ -418,9 +445,9 @@ class InvoicePdfService
         // Total row
         $pdf->SetFont('arial', 'B', 11);
         $pdf->Cell(145, 10, 'الإجمالي الكلي', 1, 0, 'C');
-        $pdf->Cell(45, 10, $this->formatMoney($net), 1, 1, 'C');
+        $pdf->Cell(45, 10, $this->formatDisplayMoney($net, $priceMode), 1, 1, 'C');
 
-        if ($isFinal) {
+        if ($isFinal && $priceMode !== 'usd') {
             $paid = (float) ($sale->payments?->sum('amount') ?? 0);
             $due = max(0, $net - $paid);
 
@@ -431,10 +458,12 @@ class InvoicePdfService
             $pdf->Cell(45, 10, $this->formatMoney($due), 1, 1, 'C');
         }
 
-        // Sum in words
-        $pdf->SetFont('arial', '', 11);
-        $wordAmount = $this->numberToArabicWords($net);
-        $pdf->Cell(0, 10, 'فقط وقدره: ' . $wordAmount . ' جنية   لا غير', 0, 1, 'R');
+        // Sum in words — omitted for USD-priced invoices
+        if ($priceMode !== 'usd') {
+            $pdf->SetFont('arial', '', 11);
+            $wordAmount = $this->numberToArabicWords($net);
+            $pdf->Cell(0, 10, 'فقط وقدره: ' . $wordAmount . ' جنية   لا غير', 0, 1, 'R');
+        }
         $pdf->Ln(2); // Reduced from 5
     }
 
@@ -622,10 +651,10 @@ class InvoicePdfService
      * @param string $filename
      * @return \Illuminate\Http\Response
      */
-    public function downloadInvoice(Sale $sale, string $filename = null): \Illuminate\Http\Response
+    public function downloadInvoice(Sale $sale, string $filename = null, string $priceMode = 'local'): \Illuminate\Http\Response
     {
         $filename = $filename ?? 'invoice_' . $sale->id . '.pdf';
-        $pdfContent = $this->generateInvoicePdf($sale);
+        $pdfContent = $this->generateInvoicePdf($sale, $priceMode);
 
         return response($pdfContent)
             ->header('Content-Type', 'application/pdf')
@@ -638,9 +667,9 @@ class InvoicePdfService
      * @param Sale $sale
      * @return \Illuminate\Http\Response
      */
-    public function viewInvoice(Sale $sale): \Illuminate\Http\Response
+    public function viewInvoice(Sale $sale, string $priceMode = 'local'): \Illuminate\Http\Response
     {
-        $pdfContent = $this->generateInvoicePdf($sale);
+        $pdfContent = $this->generateInvoicePdf($sale, $priceMode);
 
         return response($pdfContent)
             ->header('Content-Type', 'application/pdf')

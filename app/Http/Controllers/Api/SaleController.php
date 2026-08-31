@@ -350,6 +350,7 @@ class SaleController extends Controller
                         'batch_number_sold' => null,
                         'quantity' => $itemData['quantity'],
                         'unit_price' => $unitPrice,
+                        'unit_price_usd' => $this->resolveUsdUnitPriceSnapshot($product),
                         'total_price' => $itemData['quantity'] * $unitPrice,
                         'cost_price_at_sale' => $this->resolveCostPrice($product),
                     ]);
@@ -944,6 +945,7 @@ class SaleController extends Controller
                     'batch_number_sold' => null,
                     'quantity' => $validatedData['quantity'],
                     'unit_price' => $resolvedUnitPrice,
+                    'unit_price_usd' => $this->resolveUsdUnitPriceSnapshot($product),
                     'total_price' => $validatedData['quantity'] * $resolvedUnitPrice,
                     'cost_price_at_sale' => $this->resolveCostPrice($product),
                 ]);
@@ -1741,6 +1743,7 @@ class SaleController extends Controller
                             'batch_number_sold' => null,
                             'quantity' => $itemData['quantity'],
                             'unit_price' => $resolvedUnitPrice,
+                            'unit_price_usd' => $this->resolveUsdUnitPriceSnapshot($product),
                             'total_price' => $itemData['quantity'] * $resolvedUnitPrice,
                             'cost_price_at_sale' => $this->resolveCostPrice($product),
                         ]);
@@ -1814,21 +1817,23 @@ class SaleController extends Controller
     /**
      * Generate and download A4 invoice PDF (English, TCPDF)
      */
-    public function downloadA4InvoicePdf(Sale $sale)
+    public function downloadA4InvoicePdf(Sale $sale, Request $request)
     {
         $invoiceService = app(\App\Services\InvoicePdfService::class);
+        $priceMode = $request->query('currency') === 'usd' ? 'usd' : 'local';
 
-        return $invoiceService->downloadInvoice($sale);
+        return $invoiceService->downloadInvoice($sale, null, $priceMode);
     }
 
     /**
      * View A4 invoice PDF in browser (English, TCPDF)
      */
-    public function viewA4InvoicePdf(Sale $sale)
+    public function viewA4InvoicePdf(Sale $sale, Request $request)
     {
         $invoiceService = app(\App\Services\InvoicePdfService::class);
+        $priceMode = $request->query('currency') === 'usd' ? 'usd' : 'local';
 
-        return $invoiceService->viewInvoice($sale);
+        return $invoiceService->viewInvoice($sale, $priceMode);
     }
 
     /**
@@ -1976,5 +1981,18 @@ class SaleController extends Controller
     private function convertCostToLocalCurrency(float $cost, ?string $currency): float
     {
         return \App\Services\CostPriceResolver::convertCostToLocalCurrency($cost, $currency);
+    }
+
+    /**
+     * Snapshot the product's raw USD sale price at the moment of sale, so a USD-priced
+     * invoice can be reprinted later without depending on the product's (possibly changed) price.
+     */
+    private function resolveUsdUnitPriceSnapshot(\App\Models\Product $product): ?float
+    {
+        if ($product->preferred_currency !== 'USD' || $product->sale_price === null) {
+            return null;
+        }
+
+        return (float) $product->sale_price;
     }
 }

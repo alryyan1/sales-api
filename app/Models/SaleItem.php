@@ -50,6 +50,7 @@ class SaleItem extends Model
         'batch_number_sold',
         'quantity',           // Quantity in sellable_unit_name (e.g., pieces)
         'unit_price',         // Sale price PER sellable_unit_name
+        'unit_price_usd',     // Snapshot of the product's raw USD sale price at the time of sale, if priced in USD
         'cost_price_at_sale', // Cost PER sellable_unit_name from batch
         'total_price',
     ];
@@ -57,6 +58,7 @@ class SaleItem extends Model
     protected $casts = [
         'quantity' => 'integer',
         'unit_price' => 'decimal:4',
+        'unit_price_usd' => 'decimal:4',
         'total_price' => 'decimal:4',
         'cost_price_at_sale' => 'decimal:4', // Optional, can be set at point of sale
     ];
