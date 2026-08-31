@@ -17,6 +17,7 @@ use Illuminate\Validation\ValidationException;
 use App\Services\PurchasePdfService;
 use App\Services\PurchaseExcelService;
 use App\Services\TaxPdfService;
+use App\Services\SettingsService;
 
 
 class PurchaseController extends Controller
@@ -268,6 +269,8 @@ class PurchaseController extends Controller
                             'sale_price_stocking_unit' => $itemData['sale_price_stocking_unit'] ?? null,
                             'expiry_date' => $itemData['expiry_date'] ?? null,
                         ]);
+
+                        $this->maybeSyncProductSalePrice($product, $itemData['sale_price'], $costPerSellableUnit);
 
                         // UPDATE WAREHOUSE STOCK (SSOT)
                         // We must also update the product_warehouse pivot table to reflect this new stock
@@ -600,6 +603,8 @@ class PurchaseController extends Controller
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
                 ]);
 
+                $this->maybeSyncProductSalePrice($product, $validatedData['sale_price'], $costPerSellableUnit);
+
                 // UPDATE WAREHOUSE STOCK (SSOT)
                 $warehouseId = $purchase->warehouse_id;
                 if ($warehouseId && $purchase->status === 'received') {
@@ -694,6 +699,11 @@ class PurchaseController extends Controller
                     'sale_price' => $validatedData['sale_price'] ?? null,
                     'expiry_date' => $validatedData['expiry_date'] ?? null,
                 ]);
+
+                $updatedCostPerSellableUnit = $unitsPerStockingUnit > 0
+                    ? $validatedData['unit_cost'] / $unitsPerStockingUnit
+                    : 0;
+                $this->maybeSyncProductSalePrice($product, $validatedData['sale_price'] ?? null, $updatedCostPerSellableUnit);
 
                 // Update purchase total amount
                 $this->updatePurchaseTotal($purchase);
@@ -909,6 +919,34 @@ class PurchaseController extends Controller
     {
         $totalAmount = $purchase->items()->sum(DB::raw('quantity * unit_cost'));
         $purchase->update(['total_amount' => $totalAmount]);
+    }
+
+    /**
+     * When the `purchase_sync_product_sale_price` setting is enabled, the latest
+     * purchase's sale price AND cost (per sellable unit) take over the product's
+     * own `sale_price`/`cost_price` immediately, so sales pick them up right away
+     * (Product::getLastSalePricePerSellableUnitAttribute prioritizes `sale_price`
+     * first; CostPriceResolver reads `cost_price` the same way). Off by default —
+     * the product's manually-set price/cost keep priority otherwise.
+     */
+    private function maybeSyncProductSalePrice(Product $product, $salePrice, $costPerSellableUnit = null): void
+    {
+        $syncEnabled = app(SettingsService::class)->getAll()['purchase_sync_product_sale_price'] ?? false;
+        if (! $syncEnabled) {
+            return;
+        }
+
+        $updates = [];
+        if ($salePrice !== null && (float) $salePrice > 0) {
+            $updates['sale_price'] = $salePrice;
+        }
+        if ($costPerSellableUnit !== null && (float) $costPerSellableUnit > 0) {
+            $updates['cost_price'] = $costPerSellableUnit;
+        }
+
+        if (! empty($updates)) {
+            $product->update($updates);
+        }
     }
 
     /**

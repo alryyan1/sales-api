@@ -38,6 +38,10 @@ class InvoicePdfService
             $title = $isFinal ? 'فاتورة نهائية' : 'فاتورة مبدئية';
         }
 
+        if (($settings['invoice_template'] ?? 'classic') === 'modern') {
+            return $this->generateModernInvoicePdf($sale, $settings, $isFinal, $priceMode);
+        }
+
         return $this->generateArabicProformaPdf($sale, $settings, $title, $isFinal, $priceMode);
     }
 
@@ -296,6 +300,185 @@ class InvoicePdfService
         }
 
         return $pdf->Output('', 'S');
+    }
+
+    /**
+     * Modern invoice template — a clean international-style layout (logo top-left,
+     * "INVOICE" title top-right, Date/Due Date/Balance Due box, dark-header items
+     * table, Subtotal/Tax/Total summary). Selected via the `invoice_template`
+     * setting; the classic Arabic proforma layout above remains the default.
+     */
+    private function generateModernInvoicePdf(Sale $sale, array $settings, bool $isFinal, string $priceMode = 'local'): string
+    {
+        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->setRTL(false);
+        $pdf->SetMargins(15, 15, 15);
+        $pdf->SetAutoPageBreak(false, 10);
+        $pdf->AddPage();
+
+        $pageW  = $pdf->getPageWidth();
+        $leftM  = 15;
+        $rightM = 15;
+        $usableW = $pageW - $leftM - $rightM;
+
+        // ── TOP BAR ──────────────────────────────────────────────────────────
+        $pdf->SetFillColor(20, 20, 20);
+        $pdf->Rect(0, 0, $pageW, 3, 'F');
+
+        // ── LOGO + COMPANY BLOCK (top-left) ─────────────────────────────────
+        $logoPath = $this->resolveImagePath($settings['company_logo_url'] ?? null);
+        $blockY = 10;
+        if ($logoPath) {
+            try {
+                @$pdf->Image($logoPath, $leftM, $blockY, 26, 0, '', '', '', false, 300, '', false, false, 0);
+            } catch (\Throwable $e) {}
+        }
+
+        $pdf->SetXY($leftM, $blockY + 26);
+        $pdf->SetFont('arial', 'B', 12);
+        $pdf->SetTextColor(40, 40, 40);
+        $pdf->Cell($usableW / 2, 6, $this->bidiSafe($settings['company_name'] ?? ''), 0, 1, 'L');
+
+        if (! empty($settings['company_address'])) {
+            $pdf->SetX($leftM);
+            $pdf->SetFont('arial', '', 8);
+            $pdf->SetTextColor(140, 140, 140);
+            $pdf->Cell($usableW / 2, 5, $this->bidiSafe($settings['company_address']), 0, 1, 'L');
+        }
+
+        $pdf->SetX($leftM);
+        $pdf->SetFont('arial', '', 8);
+        $pdf->SetTextColor(140, 140, 140);
+        $pdf->Cell($usableW / 2, 6, 'Bill To:', 0, 1, 'L');
+
+        $pdf->SetX($leftM);
+        $pdf->SetFont('arial', 'B', 10);
+        $pdf->SetTextColor(30, 30, 30);
+        $pdf->Cell($usableW / 2, 6, $this->bidiSafe($sale->client ? $sale->client->name : 'عميل نقدي'), 0, 1, 'L');
+
+        // ── "INVOICE" TITLE + NUMBER (top-right) ────────────────────────────
+        $pdf->SetXY($leftM + $usableW / 2, $blockY);
+        $pdf->SetFont('helvetica', 'B', 24);
+        $pdf->SetTextColor(70, 70, 70);
+        $pdf->Cell($usableW / 2, 10, 'INVOICE', 0, 1, 'R');
+
+        $pdf->SetX($leftM + $usableW / 2);
+        $pdf->SetFont('helvetica', '', 10);
+        $pdf->SetTextColor(140, 140, 140);
+        $pdf->Cell($usableW / 2, 6, '# ' . $sale->id, 0, 1, 'R');
+
+        // ── DATE / DUE DATE / BALANCE DUE BOX (right-aligned) ───────────────
+        $paid = (float) ($sale->payments?->sum('amount') ?? 0);
+        $subtotalForDue = (float) $sale->items->sum(fn($item) => $this->resolveDisplayUnitPrice($item, $priceMode) * $item->quantity);
+        $discount = (float) ($sale->discount_amount ?? 0);
+        $netForDue = $subtotalForDue - $discount;
+        $due = $isFinal ? max(0, $netForDue - $paid) : $netForDue;
+
+        $infoW = 75;
+        $infoX = $leftM + $usableW - $infoW;
+        $labelW = $infoW * 0.5;
+        $valueW = $infoW * 0.5;
+        $rowH = 7;
+        $infoY = $blockY + 20;
+
+        $saleDateStr = date('M j, Y', strtotime($sale->sale_date));
+        $rows = [
+            ['Date:', $saleDateStr, false],
+            ['Due Date:', $saleDateStr, false],
+            ['Balance Due:', $this->formatDisplayMoney($due, $priceMode), true],
+        ];
+
+        foreach ($rows as $i => [$label, $value, $highlight]) {
+            $y = $infoY + $i * $rowH;
+            if ($highlight) {
+                $pdf->SetFillColor(240, 240, 240);
+                $pdf->Rect($infoX, $y, $infoW, $rowH, 'F');
+            }
+            $pdf->SetXY($infoX, $y);
+            $pdf->SetFont('helvetica', $highlight ? 'B' : '', 9);
+            $pdf->SetTextColor($highlight ? 30 : 120, $highlight ? 30 : 120, $highlight ? 30 : 120);
+            $pdf->Cell($labelW, $rowH, $label, 0, 0, 'L');
+            $pdf->SetFont('helvetica', 'B', 9);
+            $pdf->SetTextColor(30, 30, 30);
+            $pdf->Cell($valueW, $rowH, $value, 0, 0, 'R');
+        }
+
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetY(max($blockY + 26 + 18, $infoY + count($rows) * $rowH) + 10);
+
+        // ── ITEMS TABLE ──────────────────────────────────────────────────────
+        $colW = [$usableW * 0.45, $usableW * 0.15, $usableW * 0.20, $usableW * 0.20];
+
+        $pdf->SetFillColor(35, 35, 40);
+        $pdf->SetTextColor(255, 255, 255);
+        $pdf->SetFont('helvetica', '', 9);
+        $tableY = $pdf->GetY();
+        $pdf->SetXY($leftM, $tableY);
+        $pdf->Cell($colW[0], 8, 'Item', 0, 0, 'L', true);
+        $pdf->Cell($colW[1], 8, 'Quantity', 0, 0, 'C', true);
+        $pdf->Cell($colW[2], 8, 'Rate', 0, 0, 'C', true);
+        $pdf->Cell($colW[3], 8, 'Amount', 0, 1, 'C', true);
+
+        $pdf->SetTextColor(30, 30, 30);
+        $pdf->SetFont('arial', '', 9);
+        foreach ($sale->items as $item) {
+            $pdf->SetX($leftM);
+            $unitPrice = $this->resolveDisplayUnitPrice($item, $priceMode);
+            $lineTotal = $unitPrice * $item->quantity;
+
+            $pdf->Cell($colW[0], 8, $this->bidiSafe($item->product->name ?? ''), 0, 0, 'L');
+            $pdf->Cell($colW[1], 8, (string) $item->quantity, 0, 0, 'C');
+            $pdf->Cell($colW[2], 8, $this->formatDisplayMoney($unitPrice, $priceMode), 0, 0, 'C');
+            $pdf->Cell($colW[3], 8, $this->formatDisplayMoney($lineTotal, $priceMode), 0, 1, 'C');
+        }
+
+        // ── SUMMARY (Subtotal / Discount / Tax / Total) ─────────────────────
+        $pdf->Ln(8);
+        $summaryW = $usableW * 0.4;
+        $summaryX = $leftM + $usableW - $summaryW;
+        $summaryLabelW = $summaryW * 0.55;
+        $summaryValueW = $summaryW * 0.45;
+
+        $summaryRows = [['Subtotal:', $this->formatDisplayMoney($subtotalForDue, $priceMode), false]];
+        if ($discount > 0) {
+            $summaryRows[] = ['Discount:', '-' . $this->formatDisplayMoney($discount, $priceMode), false];
+        }
+        if ($priceMode !== 'usd') {
+            $summaryRows[] = ['Tax (0%):', $this->formatMoney(0), false];
+        }
+        $summaryRows[] = ['Total:', $this->formatDisplayMoney($netForDue, $priceMode), true];
+
+        $pdf->SetTextColor(120, 120, 120);
+        foreach ($summaryRows as [$label, $value, $bold]) {
+            $pdf->SetX($summaryX);
+            $pdf->SetFont('helvetica', $bold ? 'B' : '', $bold ? 11 : 9);
+            $pdf->SetTextColor($bold ? 30 : 120, $bold ? 30 : 120, $bold ? 30 : 120);
+            $pdf->Cell($summaryLabelW, 6, $label, 0, 0, 'L');
+            $pdf->Cell($summaryValueW, 6, $value, 0, 1, 'R');
+        }
+        $pdf->SetTextColor(0, 0, 0);
+
+        // ── STAMP (reuses the same setting-driven stamp renderer) ───────────
+        $pdf->SetY(max($pdf->GetY() + 10, 190));
+        $this->generateStampAndSignature($pdf, $settings);
+
+        return $pdf->Output('', 'S');
+    }
+
+    /**
+     * Wrap Arabic text with Unicode RLE/PDF markers so TCPDF's bidi algorithm
+     * renders it correctly inside an otherwise LTR (helvetica/English) layout.
+     */
+    private function bidiSafe(?string $text): string
+    {
+        $text = $text ?? '';
+        if (preg_match('/[\x{0600}-\x{06FF}]/u', $text)) {
+            return "\xE2\x80\xAB" . $text . "\xE2\x80\xAC";
+        }
+
+        return $text;
     }
 
     private function generateArabicProformaHeader(TCPDF $pdf, \App\Services\Pdf\PdfHeaderRenderer $renderer, Sale $sale, string $title, array $settings = []): void

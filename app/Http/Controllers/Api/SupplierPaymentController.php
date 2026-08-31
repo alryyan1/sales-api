@@ -9,6 +9,7 @@ use App\Models\Supplier;
 use App\Services\SupplierLedgerPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
@@ -321,6 +322,10 @@ class SupplierPaymentController extends Controller
      */
     public function destroy($id)
     {
+        if (! Auth::user()->can('الغاء سداد')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $payment = PurchasePayment::find($id);
 
         if (!$payment) {

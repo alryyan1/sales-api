@@ -48,6 +48,8 @@ class SettingsService
             'tax_number' => 'string',
             'account_number' => 'string',
             'stamp_position' => 'string', // 'left', 'center', 'right'
+            'invoice_template' => 'string', // 'classic' or 'modern'
+            'purchase_sync_product_sale_price' => 'bool',
             'pdf_font' => 'string',
             'pos_mode' => 'string', // 'shift' or 'days'
             'pos_filter_sales_by_user' => 'bool',
@@ -111,6 +113,12 @@ class SettingsService
             'tax_number' => $c['tax_number'] ?? null,
             'account_number' => $c['account_number'] ?? null,
             'stamp_position' => $c['stamp_position'] ?? 'right',
+            'invoice_template' => $c['invoice_template'] ?? 'classic',
+            // When true, recording/editing a purchase item immediately overwrites the
+            // product's `sale_price`, so sales pick up the latest purchase price instead
+            // of whatever price was manually set on the product. Off by default — the
+            // product's own `sale_price` keeps priority (see Product::getLastSalePricePerSellableUnitAttribute).
+            'purchase_sync_product_sale_price' => $c['purchase_sync_product_sale_price'] ?? false,
             'pdf_font' => $c['pdf_font'] ?? 'Amiri',
             'pos_mode' => $c['pos_mode'] ?? 'shift',
             'pos_filter_sales_by_user' => $c['pos_filter_sales_by_user'] ?? false,
@@ -232,6 +240,7 @@ class SettingsService
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
         $rules['stamp_position'] = ['nullable', 'string', Rule::in(['left', 'center', 'right'])];
+        $rules['invoice_template'] = ['nullable', 'string', Rule::in(['classic', 'modern'])];
         $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['currency_code'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['sales_default_customer_id'] = ['nullable', 'integer', 'exists:clients,id'];
