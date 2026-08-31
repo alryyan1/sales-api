@@ -364,13 +364,21 @@ class InvoicePdfService
         $pdf->SetFont('arial', '', 9); // Reduced from 10
         $pdf->Cell($colW * 0.4, $rowH, 'الرقم التعريفي:', 0, 0, 'C');
 
-        // Row 3 — Branch Name
+        // Row 3 — right column: branch name | left column: bank account number
         if ($sale->warehouse) {
             $pdf->SetXY($leftM + $colW, $infoY + $rowH * 2);
             $pdf->SetFont('arial', 'B', 9);
             $pdf->Cell($colW * 0.55, $rowH, $sale->warehouse->name, 0, 0, 'R');
             $pdf->SetFont('arial', '', 9);
             $pdf->Cell($colW * 0.45, $rowH, 'الفرع:', 0, 0, 'C');
+        }
+
+        if (! empty($settings['account_number'])) {
+            $pdf->SetXY($leftM, $infoY + $rowH * 2);
+            $pdf->SetFont('arial', 'B', 9);
+            $pdf->Cell($colW * 0.6, $rowH, $settings['account_number'], 0, 0, 'R');
+            $pdf->SetFont('arial', '', 9);
+            $pdf->Cell($colW * 0.4, $rowH, 'رقم الحساب:', 0, 0, 'C');
         }
 
         $pdf->SetY($infoY + $rowH * 3 + 2); // Reduced from 5
@@ -597,12 +605,16 @@ class InvoicePdfService
         $pdf->SetTextColor(120, 120, 120);
 
         if ($showStamp && $stampPath) {
-            // Right side
-            $x = $pageW - $rightM - $imgW - 20; // 20mm total padding for label + image
+            $renderedW = $imgW + 20; // actual width the stamp image is drawn at, below
+            $x = match ($settings['stamp_position'] ?? 'right') {
+                'left'   => $leftM,
+                'center' => ($pageW - $renderedW) / 2,
+                default  => $pageW - $rightM - $imgW - 20, // 20mm total padding for label + image
+            };
             $pdf->SetXY($x, $y +50);
             $pdf->Cell($imgW, 5, 'الختم', 0, 0, 'C');
             try {
-                @$pdf->Image($stampPath, $x, $y + 64, $imgW+20, $imgH+20, '', '', '', false, 300, '', false, false, 0);
+                @$pdf->Image($stampPath, $x, $y + 64, $renderedW, $imgH+20, '', '', '', false, 300, '', false, false, 0);
             } catch (\Throwable $e) {}
         }
 

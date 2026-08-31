@@ -46,6 +46,8 @@ class SettingsService
             'logo_height' => 'int',
             'logo_width' => 'int',
             'tax_number' => 'string',
+            'account_number' => 'string',
+            'stamp_position' => 'string', // 'left', 'center', 'right'
             'pdf_font' => 'string',
             'pos_mode' => 'string', // 'shift' or 'days'
             'pos_filter_sales_by_user' => 'bool',
@@ -107,6 +109,8 @@ class SettingsService
             'logo_height' => $c['logo_height'] ?? 60,
             'logo_width' => $c['logo_width'] ?? 60,
             'tax_number' => $c['tax_number'] ?? null,
+            'account_number' => $c['account_number'] ?? null,
+            'stamp_position' => $c['stamp_position'] ?? 'right',
             'pdf_font' => $c['pdf_font'] ?? 'Amiri',
             'pos_mode' => $c['pos_mode'] ?? 'shift',
             'pos_filter_sales_by_user' => $c['pos_filter_sales_by_user'] ?? false,
@@ -227,6 +231,7 @@ class SettingsService
         $rules['company_email'] = ['nullable', 'email', 'max:255'];
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
+        $rules['stamp_position'] = ['nullable', 'string', Rule::in(['left', 'center', 'right'])];
         $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['currency_code'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['sales_default_customer_id'] = ['nullable', 'integer', 'exists:clients,id'];
