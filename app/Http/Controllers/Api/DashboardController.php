@@ -277,11 +277,15 @@ class DashboardController extends Controller
             ? Carbon::parse($validated['end_date'])
             : Carbon::now()->endOfMonth();
 
-        // Total sales amount: full invoiced value of non-quote sales made in the period
-        // (includes unpaid/deferred amounts — not the same as paid_sales_amount below).
+        // Total sales amount: full invoiced value of non-quote, non-returned sales made in the
+        // period (includes unpaid/deferred amounts — not the same as paid_sales_amount below).
+        // Excludes returned sales to stay consistent with cost_of_sales_amount below, which
+        // also excludes them — otherwise a returned sale would count its revenue here without
+        // its cost being deducted there, inflating profit.
         $totalSalesAmount = (float) DB::table('sale_items')
             ->join('sales', 'sales.id', '=', 'sale_items.sale_id')
             ->where('sales.is_quote', false)
+            ->where('sales.is_returned', false)
             ->whereDate('sales.sale_date', '>=', $startDate)
             ->whereDate('sales.sale_date', '<=', $endDate)
             ->sum('sale_items.total_price');
@@ -318,9 +322,11 @@ class DashboardController extends Controller
             ->selectRaw('SUM(sale_return_items.quantity * sale_return_items.price) as total')
             ->value('total') ?? 0);
 
-        // Discounts granted on non-quote sales made in the period.
+        // Discounts granted on non-quote, non-returned sales made in the period — same
+        // is_returned filter as total_sales_amount, since this is netted against it above.
         $discountAmount = (float) DB::table('sales')
             ->where('is_quote', false)
+            ->where('is_returned', false)
             ->whereDate('sale_date', '>=', $startDate)
             ->whereDate('sale_date', '<=', $endDate)
             ->sum('discount_amount');
@@ -331,6 +337,10 @@ class DashboardController extends Controller
             ->whereDate('purchase_date', '<=', $endDate)
             ->sum('total_amount');
 
+        // Profit = cash actually collected in the period minus expenses and cost of goods sold
+        // for every item sold (paid or not). Deliberate choice, confirmed with the user: this
+        // can go negative for a period with unpaid/deferred (credit) sales, since their full
+        // cost is deducted immediately while their revenue isn't counted until collected.
         $profit = $paidSalesAmount - $expensesAmount - $costOfSalesAmount;
 
         // Revenue by payment method: payments collected against non-quote sales made in the period.

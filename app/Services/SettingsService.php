@@ -64,7 +64,8 @@ class SettingsService
             'product_row_color_highlight' => 'bool',
             'product_scientific_name_visible' => 'bool',
             'product_scientific_name_required' => 'bool',
-            'products_nav_label' => 'string',
+            'business_type' => 'string', // 'equipment' or 'pharmacy' — drives the "products"/"gallery" nav labels
+            'show_pos_page' => 'bool',
             'hide_expiry_date' => 'bool',
             'pos_show_expired_products' => 'bool',
             'pos_show_out_of_stock_products' => 'bool',
@@ -133,9 +134,12 @@ class SettingsService
             'product_row_color_highlight' => $c['product_row_color_highlight'] ?? false,
             'product_scientific_name_visible' => $c['product_scientific_name_visible'] ?? true,
             'product_scientific_name_required' => $c['product_scientific_name_required'] ?? false,
-            // Overrides the sidebar's "products" nav label — clients that sell equipment,
-            // medicine, etc. rename it instead of the default "Products" translation.
-            'products_nav_label' => $c['products_nav_label'] ?? null,
+            // Drives the sidebar's "products"/"gallery" nav labels: 'equipment' shows
+            // "المعدات"/"المعرض", 'pharmacy' shows "المنتجات"/"نقطة البيع".
+            'business_type' => $c['business_type'] ?? 'equipment',
+            // Master switch for the "Point of Sale" (/sales/pos) sidebar nav item — hides it
+            // for businesses that only use the gallery/other sales entry points.
+            'show_pos_page' => $c['show_pos_page'] ?? true,
             // Master switch — when true, every expiry-date field/column/report/badge in the
             // system is hidden from the UI (for businesses that don't sell perishable stock).
             'hide_expiry_date' => $c['hide_expiry_date'] ?? false,
@@ -241,6 +245,7 @@ class SettingsService
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
         $rules['stamp_position'] = ['nullable', 'string', Rule::in(['left', 'center', 'right'])];
         $rules['invoice_template'] = ['nullable', 'string', Rule::in(['classic', 'modern'])];
+        $rules['business_type'] = ['nullable', 'string', Rule::in(['equipment', 'pharmacy'])];
         $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['currency_code'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['sales_default_customer_id'] = ['nullable', 'integer', 'exists:clients,id'];
