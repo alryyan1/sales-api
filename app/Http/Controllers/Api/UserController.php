@@ -183,16 +183,28 @@ class UserController extends Controller
     }
 
     /**
-     * Get a simple list of users for filters (no admin required)
+     * Get a simple list of users for filters (no admin required).
+     * When shift_id is given, only users who recorded a payment in that shift are returned.
      */
     public function listForFilters(Request $request)
     {
-        $users = User::select(['id', 'name'])
-            ->orderBy('name')
-            ->get();
+        $validated = $request->validate([
+            'shift_id' => 'nullable|integer|exists:shifts,id',
+        ]);
+
+        $query = User::select(['id', 'name'])->orderBy('name');
+
+        if (!empty($validated['shift_id'])) {
+            $query->whereIn('id', function ($sub) use ($validated) {
+                $sub->select('user_id')
+                    ->from('payments')
+                    ->where('shift_id', $validated['shift_id'])
+                    ->whereNotNull('user_id');
+            });
+        }
 
         return response()->json([
-            'data' => $users
+            'data' => $query->get()
         ]);
     }
 

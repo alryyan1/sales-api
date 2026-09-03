@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Payment;
+use App\Models\SaleReturn;
 use Illuminate\Http\Request;
 
 class PaymentController extends Controller
@@ -121,9 +122,40 @@ class PaymentController extends Controller
             $total += $amount;
         }
 
+        // Sale returns (refunds) over the same window, broken down by the
+        // payment method the refund was issued through.
+        $returnsQuery = SaleReturn::query()->with('items:id,sale_return_id,quantity,price');
+
+        if (!empty($validated['shift_id'])) {
+            $returnsQuery->where('shift_id', $validated['shift_id']);
+        } else {
+            if (!empty($validated['start_date'])) {
+                $returnsQuery->whereDate('created_at', '>=', $validated['start_date']);
+            }
+            if (!empty($validated['end_date'])) {
+                $returnsQuery->whereDate('created_at', '<=', $validated['end_date']);
+            }
+        }
+
+        if (!empty($validated['user_id'])) {
+            $returnsQuery->where('user_id', $validated['user_id']);
+        }
+
+        $returnsByMethod = [];
+        $returnsTotal = 0.0;
+
+        foreach ($returnsQuery->get() as $saleReturn) {
+            $method = $saleReturn->returned_payment_method ?? 'cash';
+            $amount = (float) $saleReturn->items->sum(fn ($i) => $i->quantity * (float) $i->price);
+            $returnsByMethod[$method] = ($returnsByMethod[$method] ?? 0) + $amount;
+            $returnsTotal += $amount;
+        }
+
         return response()->json([
-            'total'     => $total,
-            'by_method' => $byMethod,
+            'total'             => $total,
+            'by_method'         => $byMethod,
+            'returns_total'     => $returnsTotal,
+            'returns_by_method' => $returnsByMethod,
         ]);
     }
 }
