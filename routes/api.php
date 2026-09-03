@@ -163,10 +163,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/warehouse-products-pdf', [ReportController::class, 'warehouseProductsPdf'])->name('warehouse-products-pdf');
     });
 
+    // Creating/editing/deleting categories is an inventory task, so warehouse
+    // managers get it too — not just admin. Listing/viewing is open to any
+    // authenticated user (see the read-only /admin/categories route below).
+    Route::middleware(['role:admin|ادمن|مسوول المخزن'])->prefix('admin')->name('api.admin.')->group(function () {
+        Route::apiResource('categories', CategoryController::class)->except(['index', 'show']);
+    });
+
     // -- Admin Only Routes --
     Route::middleware(['role:admin|ادمن'])->prefix('admin')->name('api.admin.')->group(function () {
         Route::apiResource('users', UserController::class);
-        Route::apiResource('categories', CategoryController::class);
         // Expenses Management
         Route::apiResource('expense-categories', ExpenseCategoryController::class);
         Route::apiResource('expenses', ExpenseController::class);
@@ -189,6 +195,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/test-shift-firestore/{shift_id?}', [WhatsAppCloudApiController::class, 'testShiftFirestore']);
         });
     });
+
+    // Read-only category access for any authenticated user (product forms, filters,
+    // reports, ...). Mutating actions remain admin-only, registered above under /admin.
+    Route::apiResource('admin/categories', CategoryController::class)->only(['index', 'show']);
 
     // -- Suppliers Management --
     Route::get('/suppliers/summary', [SupplierController::class, 'summary'])->name('api.suppliers.summary');

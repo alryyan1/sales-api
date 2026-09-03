@@ -36,6 +36,10 @@ class StockTransferController extends Controller
 
     public function store(Request $request)
     {
+        if (! $request->user()->can('تحويل مخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $validated = $request->validate([
             'from_warehouse_id'   => 'required|exists:warehouses,id',
             'to_warehouse_id'     => 'required|exists:warehouses,id|different:from_warehouse_id',

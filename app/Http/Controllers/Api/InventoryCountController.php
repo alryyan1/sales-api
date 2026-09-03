@@ -60,6 +60,10 @@ class InventoryCountController extends Controller
      */
     public function store(Request $request)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $validatedData = $request->validate([
             'warehouse_id' => 'required|exists:warehouses,id',
             'count_date' => 'required|date',
@@ -104,6 +108,10 @@ class InventoryCountController extends Controller
      */
     public function update(Request $request, InventoryCount $inventoryCount)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         // Only allow updating if status is draft or in_progress
         if (!in_array($inventoryCount->status, ['draft', 'in_progress'])) {
             return response()->json(['message' => 'Cannot update count with status: ' . $inventoryCount->status], 403);
@@ -138,8 +146,12 @@ class InventoryCountController extends Controller
     /**
      * Remove the specified inventory count
      */
-    public function destroy(InventoryCount $inventoryCount)
+    public function destroy(Request $request, InventoryCount $inventoryCount)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         // Only allow deletion if status is draft
         if ($inventoryCount->status !== 'draft') {
             return response()->json(['message' => 'Can only delete draft counts.'], 403);
@@ -159,6 +171,10 @@ class InventoryCountController extends Controller
      */
     public function addItem(Request $request, InventoryCount $inventoryCount)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         // Only allow adding items if status is draft or in_progress
         if (!in_array($inventoryCount->status, ['draft', 'in_progress'])) {
             return response()->json(['message' => 'Cannot add items to count with status: ' . $inventoryCount->status], 403);
@@ -203,6 +219,10 @@ class InventoryCountController extends Controller
      */
     public function updateItem(Request $request, InventoryCount $inventoryCount, InventoryCountItem $item)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         // Verify item belongs to count
         if ($item->inventory_count_id !== $inventoryCount->id) {
             return response()->json(['message' => 'Item does not belong to this count.'], 404);
@@ -232,8 +252,12 @@ class InventoryCountController extends Controller
     /**
      * Remove an item from the count
      */
-    public function deleteItem(InventoryCount $inventoryCount, InventoryCountItem $item)
+    public function deleteItem(Request $request, InventoryCount $inventoryCount, InventoryCountItem $item)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         // Verify item belongs to count
         if ($item->inventory_count_id !== $inventoryCount->id) {
             return response()->json(['message' => 'Item does not belong to this count.'], 404);
@@ -258,6 +282,10 @@ class InventoryCountController extends Controller
      */
     public function approve(Request $request, InventoryCount $inventoryCount)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         if ($inventoryCount->status !== 'completed') {
             return response()->json(['message' => 'Can only approve completed counts.'], 403);
         }
@@ -281,6 +309,10 @@ class InventoryCountController extends Controller
      */
     public function reject(Request $request, InventoryCount $inventoryCount)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         if ($inventoryCount->status !== 'completed') {
             return response()->json(['message' => 'Can only reject completed counts.'], 403);
         }
@@ -299,8 +331,12 @@ class InventoryCountController extends Controller
     /**
      * Import all products from the warehouse into the inventory count
      */
-    public function importAllProducts(InventoryCount $inventoryCount)
+    public function importAllProducts(Request $request, InventoryCount $inventoryCount)
     {
+        if (! $request->user()->can('جرد المخزون')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         // Only allow importing if status is draft or in_progress
         if (!in_array($inventoryCount->status, ['draft', 'in_progress'])) {
             return response()->json(['message' => 'Cannot import products to count with status: ' . $inventoryCount->status], 403);

@@ -6,13 +6,32 @@ use App\Models\Product;
 use App\Models\Category;
 use App\Models\Warehouse;
 use App\Services\Pdf\PdfHeaderRenderer;
-use Illuminate\Support\Facades\DB;
 use TCPDF;
 
 class InventoryAuditPdfService
 {
+    private const COLOR_BRAND      = [45,  55,  72];
+    private const COLOR_TITLE_BAND = [240, 244, 255];
+    private const COLOR_TEXT       = [51,  58,  69];
+    private const COLOR_MUTED      = [110, 118, 129];
+    private const COLOR_WARNING    = [200,  40,  40];
+    private const COLOR_BORDER     = [222, 226, 231];
+
+    // Generic, print-friendly per-category palette — cycled by category position.
+    // Not tied to any specific client's category names (see fix note below).
+    private const CATEGORY_PALETTE = [
+        [219, 234, 254], // blue
+        [220, 252, 231], // green
+        [255, 237, 213], // orange
+        [237, 233, 254], // purple
+        [224, 242, 241], // teal
+        [254, 226, 226], // red
+        [254, 249, 195], // yellow
+        [252, 231, 243], // pink
+    ];
+
     /**
-     * Generate the Inventory Audit PDF report
+     * Generate the Inventory Audit PDF report (all products × all warehouses balance matrix)
      *
      * @param array $filters
      * @return string PDF content
@@ -47,31 +66,36 @@ class InventoryAuditPdfService
 
             // Load all warehouse stock
             $query->with(['warehouses']);
-            
+
             $query->orderBy('name');
         }, 'products.sellableUnit'])->get();
+
+        // Item noun used in the title/labels — reuses the same business_type setting the
+        // sidebar already uses to distinguish "المعدات" (equipment) vs "المنتجات" (pharmacy),
+        // instead of the previous hardcoded "المعدات" wording, which was wrong for any
+        // non-equipment client (see also the hardcoded category-name colour map removed below).
+        $businessType = app(SettingsService::class)->getAll()['business_type'] ?? 'equipment';
+        $itemNoun = $businessType === 'pharmacy' ? 'المنتجات' : 'المعدات';
 
         // Create PDF - A4 Landscape
         $renderer = new PdfHeaderRenderer('inventory_audit');
         $pdf = new TCPDF('L', 'mm', 'A4', true, 'UTF-8', false);
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
-        $pdf->SetTitle('تقرير بكميات المعدات');
+        $pdf->SetTitle("تقرير بكميات {$itemNoun}");
         $pdf->SetMargins(5, $renderer->getTopMargin(), 5);
-        $pdf->SetAutoPageBreak(true, 10);
+        $pdf->SetAutoPageBreak(false, 10);
         $pdf->AddPage();
         $renderer->render($pdf);
         $pdf->setRTL(false);
 
         // Header Section
-        $pdf->SetFont('arial', 'B', 10);
         if ($warehouses->count() === 1) {
-            $reportTitle = 'تقرير بكميات المعدات لمخزن ( ' . $warehouses->first()->name . ' ) بتاريخ ' . now()->format('d/m/Y') . 'م';
+            $reportTitle = "تقرير بكميات {$itemNoun} لمخزن ( " . $warehouses->first()->name . ' ) بتاريخ ' . now()->format('d/m/Y') . 'م';
         } else {
-            $reportTitle = 'تقرير بكميات المعدات لكل مخازن الشركة بتاريخ ' . now()->format('d/m/Y') . 'م';
+            $reportTitle = "تقرير بكميات {$itemNoun} لكل مخازن الشركة بتاريخ " . now()->format('d/m/Y') . 'م';
         }
-        $pdf->MultiCell(0, 6, $reportTitle, 0, 'C');
-        $pdf->Ln(3);
+        $this->drawTitleBand($pdf, $reportTitle);
 
         // Table Layout Calculations (A4 Landscape width = 297mm, Margins 5+5=10, Total 287mm)
         $colNumWidth = 10;
@@ -101,18 +125,9 @@ class InventoryAuditPdfService
 
         $totalTableWidth = $colSumWidth + ($whCount * $colWhWidth) + $colUnitWidth + $colNameWidth + $colNumWidth;
 
-        // Category Colors
-        $catColors = [
-            'محولات سكنية' => [146, 208, 80],
-            'منظمات' => [0, 176, 240],
-            'بطاريات ليثيوم' => [255, 255, 0],
-            'نواشف زراعية' => [0, 176, 80],
-            'default' => [255, 255, 255]
-        ];
-
         $printTableColumnHeaders = function () use ($pdf, $colSumWidth, $colWhWidth, $colUnitWidth, $colNameWidth, $colNumWidth, $warehouses) {
             $pdf->SetFont('arial', 'B', 10);
-            $pdf->SetFillColor(68, 114, 196);
+            $pdf->SetFillColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
             $pdf->SetTextColor(255, 255, 255);
             $pdf->Cell($colSumWidth, 9, 'رصيد الصنف', 1, 0, 'C', true);
             foreach ($warehouses->reverse() as $wh) {
@@ -121,21 +136,31 @@ class InventoryAuditPdfService
             $pdf->Cell($colUnitWidth, 9, 'الوحدة', 1, 0, 'C', true);
             $pdf->Cell($colNameWidth, 9, 'بيان الصنف', 1, 0, 'C', true);
             $pdf->Cell($colNumWidth, 9, 'رقم', 1, 1, 'C', true);
-            $pdf->SetTextColor(0, 0, 0);
+            $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
         };
 
+        $categoryIndex = 0;
         foreach ($categories as $category) {
             $products = $category->products;
             if ($products->isEmpty()) continue;
 
             $catName = $category->name;
-            $color = $catColors[$catName] ?? $catColors['default'];
+            $color = self::CATEGORY_PALETTE[$categoryIndex % count(self::CATEGORY_PALETTE)];
+            $categoryIndex++;
+
+            // Keep the category title + column header + at least one row together, so a
+            // section never opens as an orphan heading at the very bottom of a page.
+            if ($pdf->GetY() + 10 + 9 + 8 > $pdf->getPageHeight() - 10) {
+                $pdf->AddPage();
+                $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
+                $renderer->render($pdf);
+            }
 
             // Category title above its own table
             $pdf->Ln(3);
             $pdf->SetFont('arial', 'B', 12);
             $pdf->SetFillColor($color[0], $color[1], $color[2]);
-            $pdf->SetTextColor(0, 0, 0);
+            $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
             $pdf->Cell($totalTableWidth, 10, $catName, 1, 1, 'C', true);
 
             // Column headers for this category's table
@@ -146,33 +171,41 @@ class InventoryAuditPdfService
             foreach ($products as $index => $product) {
                 if ($pdf->GetY() + 8 > $pdf->getPageHeight() - 10) {
                     $pdf->AddPage();
+                    $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
                     $renderer->render($pdf);
                     // Category title continued
                     $pdf->SetFont('arial', 'B', 12);
                     $pdf->SetFillColor($color[0], $color[1], $color[2]);
-                    $pdf->SetTextColor(0, 0, 0);
+                    $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
                     $pdf->Cell($totalTableWidth, 10, $catName . ' (تابع)', 1, 1, 'C', true);
                     $printTableColumnHeaders();
                     $pdf->SetFillColor($color[0], $color[1], $color[2]);
                 }
 
-                $pdf->SetFont('arial', 'B', 10);
-                $pdf->SetTextColor(255, 0, 0);
-
-                // Total Balance (Red)
+                // Total Balance across all warehouses
                 $totalStock = 0;
                 foreach ($warehouses as $wh) {
                     $totalStock += $product->warehouses->where('id', $wh->id)->first()?->pivot->quantity ?? 0;
                 }
-                $pdf->Cell($colSumWidth, 8, $totalStock, 1, 0, 'C', true);
 
-                $pdf->SetTextColor(0, 0, 0);
+                // Only flag it visually when the balance is actually a problem (zero) —
+                // colouring every single row red regardless of stock level (the previous
+                // behaviour) conveys no real signal and reads as an alarm on a healthy report.
+                $pdf->SetFont('arial', 'B', 10);
+                if ($totalStock <= 0) {
+                    $pdf->SetTextColor(self::COLOR_WARNING[0], self::COLOR_WARNING[1], self::COLOR_WARNING[2]);
+                } else {
+                    $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
+                }
+                $pdf->Cell($colSumWidth, 8, number_format($totalStock), 1, 0, 'C', true);
+
+                $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
                 $pdf->SetFont('arial', '', 9);
 
                 // Individual warehouses
                 foreach ($warehouses->reverse() as $wh) {
                     $stock = $product->warehouses->where('id', $wh->id)->first()?->pivot->quantity ?? 0;
-                    $pdf->Cell($colWhWidth, 8, $stock, 1, 0, 'C', true);
+                    $pdf->Cell($colWhWidth, 8, number_format($stock), 1, 0, 'C', true);
                 }
 
                 $pdf->Cell($colUnitWidth, 8, $product->sellableUnit?->name ?: 'وحدة', 1, 0, 'C', true);
@@ -187,6 +220,24 @@ class InventoryAuditPdfService
         }
 
         return $pdf->Output('inventory_audit.pdf', 'S');
+    }
+
+    private function drawTitleBand(TCPDF $pdf, string $title): void
+    {
+        $pageW = $pdf->getPageWidth() - 10;
+        $bandY = $pdf->GetY();
+        $pdf->SetFillColor(self::COLOR_TITLE_BAND[0], self::COLOR_TITLE_BAND[1], self::COLOR_TITLE_BAND[2]);
+        $pdf->Rect(5, $bandY, $pageW, 10, 'F');
+
+        $pdf->SetFont('arial', 'B', 11);
+        $pdf->SetTextColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+        $pdf->SetY($bandY + 1);
+        $pdf->MultiCell(0, 6, $title, 0, 'C');
+
+        $pdf->SetFillColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+        $pdf->Rect(5, $bandY + 10, $pageW, 0.6, 'F');
+        $pdf->Ln(4);
+        $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
     }
 
     /**
@@ -232,46 +283,67 @@ class InventoryAuditPdfService
         $pdf->setPrintFooter(false);
         $pdf->SetTitle('منتجات المستودع - ' . $warehouse->name);
         $pdf->SetMargins(10, $renderer->getTopMargin(), 10);
-        $pdf->SetAutoPageBreak(true, 10);
+        $pdf->SetAutoPageBreak(false, 10);
         $pdf->setRTL(false); // Important for Arabic text
         $pdf->AddPage();
+        $renderer->render($pdf);
 
-        // Header
+        $pageW = $pdf->getPageWidth() - 20;
+        $bandY = $pdf->GetY();
+        $pdf->SetFillColor(self::COLOR_TITLE_BAND[0], self::COLOR_TITLE_BAND[1], self::COLOR_TITLE_BAND[2]);
+        $pdf->Rect(10, $bandY, $pageW, 15, 'F');
         $pdf->SetFont('arial', 'B', 16);
-        $pdf->SetTextColor(0, 0, 0);
-        $pdf->Cell(0, 15, 'منتجات المستودع', 0, 1, 'C');
-        $pdf->SetFont('arial', 'B', 12);
-        $pdf->Cell(0, 10, $warehouse->name, 0, 1, 'C');
-        $pdf->Ln(5);
+        $pdf->SetTextColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+        $pdf->SetY($bandY + 1);
+        $pdf->Cell(0, 8, 'منتجات المستودع', 0, 1, 'C');
+        $pdf->SetFont('arial', 'B', 11);
+        $pdf->Cell(0, 6, $warehouse->name, 0, 1, 'C');
+        $pdf->SetFillColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+        $pdf->Rect(10, $bandY + 15, $pageW, 0.6, 'F');
+        $pdf->Ln(4);
+        $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
 
-        // Table headers
-        $pdf->SetFont('arial', 'B', 10);
-        $pdf->SetFillColor(240, 240, 240);
+        $colWidths = [15, 60, 25, 30, 30, 30]; // #, Name, SKU, Category, Quantity, Sale price
 
-        $colWidths = [15, 60, 25, 30, 30, 30]; // ID, Name, SKU, Category, Quantity, Unit Price
+        $printHeaders = function () use ($pdf, $colWidths) {
+            $pdf->SetFont('arial', 'B', 10);
+            $pdf->SetFillColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+            $pdf->SetTextColor(255, 255, 255);
+            $pdf->Cell($colWidths[0], 10, 'الرقم', 1, 0, 'C', true);
+            $pdf->Cell($colWidths[1], 10, 'اسم المنتج', 1, 0, 'C', true);
+            $pdf->Cell($colWidths[2], 10, 'الرمز', 1, 0, 'C', true);
+            $pdf->Cell($colWidths[3], 10, 'الفئة', 1, 0, 'C', true);
+            $pdf->Cell($colWidths[4], 10, 'الكمية', 1, 0, 'C', true);
+            $pdf->Cell($colWidths[5], 10, 'سعر البيع', 1, 1, 'C', true);
+            $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
+        };
+        $printHeaders();
 
-        $pdf->Cell($colWidths[0], 10, 'الرقم', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[1], 10, 'اسم المنتج', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[2], 10, 'الرمز', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[3], 10, 'الفئة', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[4], 10, 'الكمية', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[5], 10, 'السعر', 1, 1, 'C', true);
-
-        // Table data
         $pdf->SetFont('arial', '', 9);
-        $pdf->SetFillColor(255, 255, 255);
-
         $index = 0;
         foreach ($products as $product) {
+            if ($pdf->GetY() + 8 > $pdf->getPageHeight() - 10) {
+                $pdf->AddPage();
+                $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
+                $renderer->render($pdf);
+                $printHeaders();
+                $pdf->SetFont('arial', '', 9);
+            }
+
             $warehouseStock = $product->warehouses->first();
             $quantity = $warehouseStock ? $warehouseStock->pivot->quantity : 0;
+            $fill = $index % 2 === 1;
+            $pdf->SetFillColor($fill ? 247 : 255, $fill ? 248 : 255, $fill ? 250 : 255);
 
             $pdf->Cell($colWidths[0], 8, ++$index, 1, 0, 'C', true);
             $pdf->Cell($colWidths[1], 8, $product->name, 1, 0, 'L', true);
             $pdf->Cell($colWidths[2], 8, $product->sku ?: '-', 1, 0, 'C', true);
             $pdf->Cell($colWidths[3], 8, $product->category?->name ?: '-', 1, 0, 'C', true);
             $pdf->Cell($colWidths[4], 8, number_format($quantity), 1, 0, 'C', true);
-            $pdf->Cell($colWidths[5], 8, number_format($product->latest_cost_per_sellable_unit ?: 0, 2), 1, 1, 'R', true);
+            // Sale price, not cost — the column is labelled "سعر البيع" (sale price); the
+            // previous version showed latest_cost_per_sellable_unit (the purchase cost)
+            // under this label, which is a different figure than what it claimed to show.
+            $pdf->Cell($colWidths[5], 8, number_format($product->last_sale_price_per_sellable_unit ?: 0, 2), 1, 1, 'R', true);
         }
 
         // Summary

@@ -9,6 +9,22 @@ use TCPDF;
 
 class PriceListPdfService
 {
+    private const COLOR_BRAND       = [45,  55,  72];
+    private const COLOR_TITLE_BAND  = [240, 244, 255];
+    private const COLOR_HEADER_BG   = [235, 237, 241];
+    private const COLOR_ROW_ALT     = [247, 248, 250];
+    private const COLOR_ROW_NORMAL  = [255, 255, 255];
+    private const COLOR_BORDER      = [222, 226, 231];
+    private const COLOR_TEXT        = [51,  58,  69];
+    private const COLOR_MUTED       = [110, 118, 129];
+    private const COLOR_USD_BADGE   = [22, 128,  74];
+
+    private const MARGIN = 15;
+    private const ROW_H  = 6.5;
+
+    private TCPDF $pdf;
+    private PdfHeaderRenderer $renderer;
+
     /**
      * Generate a price list PDF grouped by category
      *
@@ -35,85 +51,140 @@ class PriceListPdfService
         $sorted = $grouped->sortKeys();
         $uncategorized = $sorted->pull('__uncategorized__');
 
-        $renderer = new PdfHeaderRenderer('pricelist');
-        $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $this->renderer = new PdfHeaderRenderer('pricelist');
+        $this->pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8', false);
+        $pdf = $this->pdf;
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
         $pdf->SetTitle('قائمة الأسعار');
-        $pdf->SetMargins(15, $renderer->getTopMargin(), 15);
-        $pdf->SetAutoPageBreak(true, 15);
+        $pdf->SetMargins(self::MARGIN, $this->renderer->getTopMargin(), self::MARGIN);
+        $pdf->SetAutoPageBreak(false, self::MARGIN);
         $pdf->AddPage();
-        $renderer->render($pdf);
+        $this->renderer->render($pdf);
 
-        $this->generateContent($pdf, $sorted, $uncategorized);
+        $this->drawTitle($products->count());
+
+        $colWidths = [10, 100, 35, 35]; // sum = 180 = 210 - 2×15 (portrait A4 usable width)
+
+        $rowNum = 1;
+        foreach ($sorted as $categoryName => $categoryProducts) {
+            $this->renderCategorySection($categoryName, $categoryProducts, $colWidths, $rowNum);
+        }
+        if ($uncategorized && $uncategorized->isNotEmpty()) {
+            $this->renderCategorySection('بدون تصنيف', $uncategorized, $colWidths, $rowNum);
+        }
 
         return $pdf->Output('pricelist.pdf', 'S');
     }
 
-    private function generateContent(TCPDF $pdf, $grouped, $uncategorized): void
+    private function drawTitle(int $totalCount): void
     {
-        // Title
+        $pdf = $this->pdf;
+        $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
+
+        $bandY = $pdf->GetY();
+        $pdf->SetFillColor(self::COLOR_TITLE_BAND[0], self::COLOR_TITLE_BAND[1], self::COLOR_TITLE_BAND[2]);
+        $pdf->Rect(self::MARGIN, $bandY, $pageW, 11, 'F');
+
         $pdf->SetFont('arial', 'B', 16);
-        $pdf->Cell(0, 10, 'قائمة الأسعار', 0, 1, 'C');
+        $pdf->SetTextColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+        $pdf->SetY($bandY + 1.5);
+        $pdf->Cell(0, 8, 'قائمة الأسعار', 0, 1, 'C');
 
-        // Date
-        $pdf->SetFont('arial', '', 9);
-        $pdf->Cell(0, 6, 'تاريخ: ' . now()->format('Y-m-d'), 0, 1, 'R');
-        $pdf->Ln(3);
+        $pdf->SetFillColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+        $pdf->Rect(self::MARGIN, $bandY + 11, $pageW, 0.8, 'F');
+        $pdf->Ln(3.5);
 
-        // Column widths for portrait A4 (~180mm usable)
-        $colWidths = [10, 100, 35, 35];
-
-        $rowNum = 1;
-
-        foreach ($grouped as $categoryName => $products) {
-            $this->renderCategorySection($pdf, $categoryName, $products, $colWidths, $rowNum);
-        }
-
-        if ($uncategorized && $uncategorized->isNotEmpty()) {
-            $this->renderCategorySection($pdf, 'بدون تصنيف', $uncategorized, $colWidths, $rowNum);
-        }
+        $pdf->SetFont('arial', '', 8);
+        $pdf->SetTextColor(self::COLOR_MUTED[0], self::COLOR_MUTED[1], self::COLOR_MUTED[2]);
+        $pdf->Cell($pageW / 2, 5, 'تاريخ: ' . now()->format('Y-m-d'), 0, 0, 'R');
+        $pdf->Cell($pageW / 2, 5, 'عدد الأصناف: ' . number_format($totalCount), 0, 1, 'L');
+        $pdf->Ln(2);
+        $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
     }
 
-    private function renderCategorySection(TCPDF $pdf, string $categoryName, $products, array $colWidths, int &$rowNum): void
+    /**
+     * Make sure at least $neededHeight mm remain on the current page; if not, start a new
+     * one and redraw the branding header. Returns true if a new page was started, so the
+     * caller can decide whether to repeat section-level chrome (category bar/column header).
+     */
+    private function ensureSpace(float $neededHeight): bool
     {
+        $pdf = $this->pdf;
+        if ($pdf->GetY() + $neededHeight <= $pdf->getPageHeight() - self::MARGIN) {
+            return false;
+        }
+
+        $pdf->AddPage();
+        $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
+        $this->renderer->render($pdf);
+
+        return true;
+    }
+
+    private function renderCategorySection(string $categoryName, $products, array $colWidths, int &$rowNum): void
+    {
+        $pdf = $this->pdf;
         $totalWidth = array_sum($colWidths);
 
-        // Category header row
-        $pdf->SetFont('arial', 'B', 10);
-        $pdf->SetFillColor(21, 101, 192);   // blue
-        $pdf->SetTextColor(255, 255, 255);   // white
-        $pdf->Cell($totalWidth, 8, $categoryName, 1, 1, 'C', true);
-        $pdf->SetTextColor(0, 0, 0);
+        // Keep the category bar + column header + at least one data row together, so a
+        // section never opens as an orphan heading at the very bottom of a page.
+        $this->ensureSpace(8 + 7 + self::ROW_H);
+        $this->drawSectionHeader($categoryName, $colWidths, $totalWidth);
 
-        // Column headers
-        $pdf->SetFont('arial', 'B', 9);
-        $pdf->SetFillColor(220, 220, 220);
-        $pdf->Cell($colWidths[0], 7, '#',       1, 0, 'C', true);
-        $pdf->Cell($colWidths[1], 7, 'الاسم',   1, 0, 'C', true);
-        $pdf->Cell($colWidths[2], 7, 'الوحدة', 1, 0, 'C', true);
-        $pdf->Cell($colWidths[3], 7, 'السعر',   1, 1, 'C', true);
-
-        // Data rows
         $pdf->SetFont('arial', '', 8);
         $fill = false;
         foreach ($products as $product) {
-            $pdf->SetFillColor($fill ? 245 : 255, $fill ? 245 : 255, $fill ? 245 : 255);
+            if ($this->ensureSpace(self::ROW_H)) {
+                $this->drawSectionHeader($categoryName . '  (تابع)', $colWidths, $totalWidth);
+                $pdf->SetFont('arial', '', 8);
+            }
 
-            $price = $product->last_sale_price_per_sellable_unit !== null
-                ? number_format($product->last_sale_price_per_sellable_unit, 2)
+            [$r, $g, $b] = $fill ? self::COLOR_ROW_ALT : self::COLOR_ROW_NORMAL;
+            $pdf->SetFillColor($r, $g, $b);
+
+            $isUsd = $product->preferred_currency === 'USD';
+            $rawPrice = $product->last_sale_price_per_sellable_unit;
+            $price = $rawPrice !== null
+                ? number_format($rawPrice, 2) . ($isUsd ? ' $' : '')
                 : '-';
 
-            $pdf->Cell($colWidths[0], 6, $rowNum,                                          1, 0, 'C', true);
-            $pdf->Cell($colWidths[1], 6, $this->truncate($product->name, 55),              1, 0, 'C', true);
-            $pdf->Cell($colWidths[2], 6, $product->sellableUnit?->name ?? '-',             1, 0, 'C', true);
-            $pdf->Cell($colWidths[3], 6, $price,                                           1, 1, 'C', true);
+            $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
+            $pdf->Cell($colWidths[0], self::ROW_H, (string) $rowNum, 'B', 0, 'C', true);
+            $pdf->Cell($colWidths[1], self::ROW_H, $this->truncate($product->name, 55), 'B', 0, 'C', true);
+            $pdf->Cell($colWidths[2], self::ROW_H, $product->sellableUnit?->name ?? '-', 'B', 0, 'C', true);
+            if ($isUsd) {
+                $pdf->SetTextColor(self::COLOR_USD_BADGE[0], self::COLOR_USD_BADGE[1], self::COLOR_USD_BADGE[2]);
+                $pdf->SetFont('arial', 'B', 8);
+            }
+            $pdf->Cell($colWidths[3], self::ROW_H, $price, 'B', 1, 'C', true);
+            if ($isUsd) {
+                $pdf->SetFont('arial', '', 8);
+            }
 
             $rowNum++;
             $fill = !$fill;
         }
 
         $pdf->Ln(3);
+    }
+
+    private function drawSectionHeader(string $categoryName, array $colWidths, float $totalWidth): void
+    {
+        $pdf = $this->pdf;
+
+        $pdf->SetFont('arial', 'B', 10);
+        $pdf->SetFillColor(self::COLOR_BRAND[0], self::COLOR_BRAND[1], self::COLOR_BRAND[2]);
+        $pdf->SetTextColor(255, 255, 255);
+        $pdf->Cell($totalWidth, 8, $categoryName, 0, 1, 'C', true);
+
+        $pdf->SetFont('arial', 'B', 9);
+        $pdf->SetFillColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
+        $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
+        $pdf->Cell($colWidths[0], 7, '#', 0, 0, 'C', true);
+        $pdf->Cell($colWidths[1], 7, 'الاسم', 0, 0, 'C', true);
+        $pdf->Cell($colWidths[2], 7, 'الوحدة', 0, 0, 'C', true);
+        $pdf->Cell($colWidths[3], 7, 'السعر', 0, 1, 'C', true);
     }
 
     private function truncate(string $text, int $maxLength): string

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\PurchaseItem;
 use App\Services\Pdf\PdfHeaderRenderer;
+use Illuminate\Support\Facades\DB;
 use TCPDF;
 
 class ProductPdfService
@@ -17,10 +18,18 @@ class ProductPdfService
     private const COLOR_HEADER_TEXT = [255, 255, 255];
     private const COLOR_ROW_ALT     = [247, 248, 250];
     private const COLOR_ROW_NORMAL  = [255, 255, 255];
-    private const COLOR_LOW_STOCK   = [255, 249, 219];
-    private const COLOR_OUT_STOCK   = [255, 240, 240];
-    private const COLOR_BORDER      = [210, 215, 220];
+    private const COLOR_BORDER      = [222, 226, 231];
     private const COLOR_TOTAL_BG    = [45,  55,  72];
+    private const COLOR_TITLE_BAND  = [240, 244, 255];
+    private const COLOR_TEXT        = [51,  58,  69];
+
+    // Status → text colour, reused for both the summary cards and the row status label.
+    private const STATUS_COLORS = [
+        'in_stock'     => [22,  163,  74],
+        'out_of_stock' => [220,  38,  38],
+        'low_stock'    => [180, 110,   0],
+        'service'      => [71,  85, 105],
+    ];
 
     // ── Layout ────────────────────────────────────────────────────────────────
     private const MARGIN   = 12;
@@ -35,8 +44,8 @@ class ProductPdfService
     private const F_SMALL   = 6;
 
     // ── Column widths (sum = 273 = 297 - 2×12) ───────────────────────────────
-    //    #    Name  Sci   SKU   Cat   Qty   Unit  Cost  Sale  Alert Status
-    private const COLS = [7, 48, 30, 24, 28, 16, 22, 24, 24, 16, 24];
+    //    #    Name  Sci   SKU   Cat   Qty   Unit  Cost  Sale  Status
+    private const COLS = [7, 59, 30, 24, 35, 18, 22, 24, 27, 27];
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -84,6 +93,13 @@ class ProductPdfService
                     ->whereNotNull('sale_price')
                     ->latest('created_at')
                     ->limit(1),
+                // Product::stock_quantity is a live accessor (SUM over product_warehouse,
+                // one query per access, not cached) — computing it here as a single
+                // correlated subquery avoids an N+1 that made this report very slow for
+                // any real product count (it was being read multiple times per row).
+                'stock_quantity_raw' => DB::table('product_warehouse')
+                    ->selectRaw('COALESCE(SUM(quantity), 0)')
+                    ->whereColumn('product_id', 'products.id'),
             ])
             ->with(['category', 'stockingUnit', 'sellableUnit']);
 
@@ -108,14 +124,20 @@ class ProductPdfService
         $pdf   = $this->pdf;
         $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
 
+        // Soft tinted banner behind the title, with a solid accent bar under it, instead of
+        // a plain heading + thin grey rule — gives the report a clearer visual anchor.
+        $bandY = $pdf->GetY();
+        $pdf->SetFillColor(self::COLOR_TITLE_BAND[0], self::COLOR_TITLE_BAND[1], self::COLOR_TITLE_BAND[2]);
+        $pdf->Rect(self::MARGIN, $bandY, $pageW, 11, 'F');
+
         $pdf->SetFont('arial', 'B', self::F_TITLE);
         $pdf->SetTextColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
+        $pdf->SetY($bandY + 1.5);
         $pdf->Cell(0, 8, 'تقرير المنتجات', 0, 1, 'C');
 
-        $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
-        $pdf->SetLineWidth(0.3);
-        $pdf->Line(self::MARGIN, $pdf->GetY(), self::MARGIN + $pageW, $pdf->GetY());
-        $pdf->Ln(2.5);
+        $pdf->SetFillColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
+        $pdf->Rect(self::MARGIN, $bandY + 11, $pageW, 0.8, 'F');
+        $pdf->Ln(3.5);
 
         // Filters / date line
         $notes = [];
@@ -144,44 +166,49 @@ class ProductPdfService
     {
         $pdf   = $this->pdf;
         $total      = $products->count();
-        $inStock    = $products->where('stock_quantity', '>', 0)->count();
-        $outOfStock = $total - $inStock;
+        // Services carry no warehouse stock but are always sellable — exclude them from
+        // out-of-stock/low-stock counts, matching Product::scopeHasStock()'s treatment.
+        $outOfStock = $products->filter(fn($p) => ! $p->is_service && $this->stockQty($p) <= 0)->count();
         $lowStock   = $products->filter(fn($p) =>
-            $p->stock_alert_level && $p->stock_quantity > 0 && $p->stock_quantity <= $p->stock_alert_level
+            ! $p->is_service && $p->stock_alert_level && $this->stockQty($p) > 0 && $this->stockQty($p) <= $p->stock_alert_level
         )->count();
+        $inStock    = $total - $outOfStock;
 
         $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
-        $boxW  = $pageW / 4;
-        $boxH  = 13;
+        $gap   = 3;
+        $boxW  = ($pageW - $gap * 3) / 4;
+        $boxH  = 14;
         $y     = $pdf->GetY();
 
         $stats = [
-            ['إجمالي المنتجات', $total,      [240, 244, 255], [45,  55,  72]],
-            ['متوفر',           $inStock,     [237, 252, 244], [22,  163,  74]],
-            ['غير متوفر',       $outOfStock,  [255, 240, 240], [220,  38,  38]],
-            ['مخزون منخفض',     $lowStock,    [255, 249, 219], [160, 100,   0]],
+            ['إجمالي المنتجات', $total,      [240, 244, 255], self::COLOR_HEADER_BG],
+            ['متوفر',           $inStock,     [237, 252, 244], self::STATUS_COLORS['in_stock']],
+            ['غير متوفر',       $outOfStock,  [255, 240, 240], self::STATUS_COLORS['out_of_stock']],
+            ['مخزون منخفض',     $lowStock,    [255, 249, 219], self::STATUS_COLORS['low_stock']],
         ];
 
         foreach ($stats as $i => [$label, $val, $bg, $fg]) {
-            $x = self::MARGIN + $i * $boxW;
+            $x = self::MARGIN + $i * ($boxW + $gap);
             $pdf->SetFillColor($bg[0], $bg[1], $bg[2]);
-            $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
-            $pdf->SetLineWidth(0.2);
-            $pdf->Rect($x, $y, $boxW - 1, $boxH, 'FD');
+            // Flat, borderless rounded card — a lighter, more modern look than a boxed/ruled grid.
+            $pdf->RoundedRect($x, $y, $boxW, $boxH, 2, '1111', 'F');
+            // Slim accent bar on the card's leading edge, in the stat's colour.
+            $pdf->SetFillColor($fg[0], $fg[1], $fg[2]);
+            $pdf->RoundedRect($x, $y, 1.6, $boxH, 0.8, '1001', 'F');
 
-            $pdf->SetFont('arial', 'B', 11);
+            $pdf->SetFont('arial', 'B', 12);
             $pdf->SetTextColor($fg[0], $fg[1], $fg[2]);
-            $pdf->SetXY($x, $y + 1.5);
-            $pdf->Cell($boxW - 1, 6, (string) $val, 0, 0, 'C');
+            $pdf->SetXY($x, $y + 2);
+            $pdf->Cell($boxW, 6, (string) $val, 0, 0, 'C');
 
             $pdf->SetFont('arial', '', self::F_SMALL);
-            $pdf->SetTextColor(80, 90, 100);
-            $pdf->SetXY($x, $y + 7.5);
-            $pdf->Cell($boxW - 1, 4, $label, 0, 0, 'C');
+            $pdf->SetTextColor(90, 98, 110);
+            $pdf->SetXY($x, $y + 8.5);
+            $pdf->Cell($boxW, 4, $label, 0, 0, 'C');
         }
 
-        $pdf->SetXY(self::MARGIN, $y + $boxH + 3);
-        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetXY(self::MARGIN, $y + $boxH + 4);
+        $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
     }
 
     // ── Table header ─────────────────────────────────────────────────────────
@@ -196,12 +223,12 @@ class ProductPdfService
         $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
         $pdf->SetLineWidth(0.1);
 
-        $labels = ['#', 'الاسم', 'الاسم العلمي', 'الكود', 'الفئة', 'المخزون', 'الوحدة', 'آخر تكلفة', 'سعر البيع', 'حد التنبيه', 'الحالة'];
+        $labels = ['#', 'الاسم', 'الاسم العلمي', 'الكود', 'الفئة', 'المخزون', 'الوحدة', 'آخر تكلفة', 'سعر البيع', 'الحالة'];
         $last   = count($labels) - 1;
         foreach ($labels as $i => $lbl) {
-            $pdf->Cell(self::COLS[$i], self::HEADER_H, $lbl, 1, ($i === $last ? 1 : 0), 'C', true);
+            $pdf->Cell(self::COLS[$i], self::HEADER_H, $lbl, 0, ($i === $last ? 1 : 0), 'C', true);
         }
-        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
     }
 
     // ── Table rows ───────────────────────────────────────────────────────────
@@ -216,6 +243,10 @@ class ProductPdfService
         foreach ($products as $i => $product) {
             if ($pdf->GetY() + self::ROW_H > $pdf->getPageHeight() - self::MARGIN) {
                 $pdf->AddPage();
+                // Reset from the previous row's status colour first — PdfHeaderRenderer's
+                // company-name text doesn't set its own colour, so it would otherwise inherit
+                // whatever colour the last status cell left active.
+                $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
                 $this->renderer->render($pdf);
                 $this->drawTableHeader();
                 $pdf->SetFont('arial', '', self::F_BODY);
@@ -223,34 +254,40 @@ class ProductPdfService
                 $pdf->SetDrawColor(self::COLOR_BORDER[0], self::COLOR_BORDER[1], self::COLOR_BORDER[2]);
             }
 
-            [$r, $g, $b] = $this->rowColor($product, $i);
+            // Plain zebra striping — the status column's colour already flags out-of-stock/
+            // low-stock rows, so tinting the whole row on top of that read as noisy/dated.
+            [$r, $g, $b] = $i % 2 === 0 ? self::COLOR_ROW_NORMAL : self::COLOR_ROW_ALT;
             $pdf->SetFillColor($r, $g, $b);
 
             $cost  = $product->latest_cost_per_sellable_unit
                 ? number_format((float) $product->latest_cost_per_sellable_unit, 2) : '-';
             $sale  = $product->last_sale_price_per_sellable_unit
                 ? number_format((float) $product->last_sale_price_per_sellable_unit, 2) : '-';
-            $alert = $product->stock_alert_level
-                ? number_format((int) $product->stock_alert_level) : '-';
 
             $cells = [
                 $i + 1,
-                $this->cut($product->name, 30),
+                $this->cut($product->name, 34),
                 $this->cut($product->scientific_name ?: '-', 20),
                 $this->cut($product->sku ?: '-', 14),
-                $this->cut($product->category?->name ?: '-', 17),
-                number_format((int) $product->stock_quantity),
+                $this->cut($product->category?->name ?: '-', 19),
+                $product->is_service ? '-' : number_format($this->stockQty($product)),
                 $this->cut($product->sellableUnit?->name ?: '-', 11),
                 $cost,
                 $sale,
-                $alert,
-                $this->statusLabel($product),
             ];
 
-            $last = count($cells) - 1;
+            $pdf->SetFont('arial', '', self::F_BODY);
+            $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
             foreach ($cells as $j => $val) {
-                $pdf->Cell(self::COLS[$j], self::ROW_H, (string) $val, 1, ($j === $last ? 1 : 0), 'C', true);
+                $pdf->Cell(self::COLS[$j], self::ROW_H, (string) $val, 'B', 0, 'C', true);
             }
+
+            // Status column — coloured, bold text on the same row background, instead of a
+            // full colour-tinted row (see comment above) or a boxed badge.
+            $fg = self::STATUS_COLORS[$this->statusColorKey($product)];
+            $pdf->SetFont('arial', 'B', self::F_BODY);
+            $pdf->SetTextColor($fg[0], $fg[1], $fg[2]);
+            $pdf->Cell(self::COLS[9], self::ROW_H, $this->statusLabel($product), 'B', 1, 'C', true);
         }
     }
 
@@ -262,8 +299,18 @@ class ProductPdfService
         $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
 
         $totalCost = $products->sum(fn($p) =>
-            ((float) ($p->latest_cost_per_sellable_unit ?? 0)) * ((int) $p->stock_quantity)
+            ((float) ($p->latest_cost_per_sellable_unit ?? 0)) * $this->stockQty($p)
         );
+
+        // The rows loop only checks room for one row at a time, so a table that ends right
+        // at the bottom margin would otherwise push this whole block past the page edge with
+        // no header on the overflow page (auto page break has no header, since setPrintHeader
+        // is off and the header is drawn manually after each AddPage() elsewhere).
+        $footerHeight = 2 + self::ROW_H + 3 + 1.5 + 4;
+        if ($pdf->GetY() + $footerHeight > $pdf->getPageHeight() - self::MARGIN) {
+            $pdf->AddPage();
+            $this->renderer->render($pdf);
+        }
 
         $pdf->Ln(2);
 
@@ -277,9 +324,11 @@ class ProductPdfService
         $valueW = 40;
         $spacer = $pageW - $labelW - $valueW;
 
-        $pdf->Cell($spacer, self::ROW_H, '', 0, 0);
-        $pdf->Cell($labelW, self::ROW_H, 'إجمالي تكلفة المخزون:', 1, 0, 'R', true);
-        $pdf->Cell($valueW, self::ROW_H, number_format($totalCost, 2), 1, 1, 'C', true);
+        $totalH = self::ROW_H + 2;
+        $pdf->Cell($spacer, $totalH, '', 0, 0);
+        $pdf->RoundedRect(self::MARGIN + $spacer, $pdf->GetY(), $labelW + $valueW, $totalH, 1.5, '1111', 'F');
+        $pdf->Cell($labelW, $totalH, 'إجمالي تكلفة المخزون:', 0, 0, 'R');
+        $pdf->Cell($valueW, $totalH, number_format($totalCost, 2), 0, 1, 'C');
 
         // Footer rule + page info
         $pdf->Ln(3);
@@ -296,21 +345,32 @@ class ProductPdfService
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private function rowColor(Product $product, int $index): array
+    private function statusColorKey(Product $product): string
     {
-        if ($product->stock_quantity <= 0)
-            return self::COLOR_OUT_STOCK;
-        if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level)
-            return self::COLOR_LOW_STOCK;
-        return $index % 2 === 0 ? self::COLOR_ROW_NORMAL : self::COLOR_ROW_ALT;
+        if ($product->is_service) return 'service';
+        if ($this->stockQty($product) <= 0) return 'out_of_stock';
+        if ($product->stock_alert_level && $this->stockQty($product) <= $product->stock_alert_level)
+            return 'low_stock';
+        return 'in_stock';
     }
 
     private function statusLabel(Product $product): string
     {
-        if ($product->stock_quantity <= 0) return 'غير متوفر';
-        if ($product->stock_alert_level && $product->stock_quantity <= $product->stock_alert_level)
-            return 'منخفض';
-        return 'متوفر';
+        return match ($this->statusColorKey($product)) {
+            'service'      => 'خدمة',
+            'out_of_stock' => 'غير متوفر',
+            'low_stock'    => 'منخفض',
+            default        => 'متوفر',
+        };
+    }
+
+    /**
+     * Fast stock read from the stock_quantity_raw subquery column selected in buildQuery() —
+     * NOT Product::stock_quantity, which is a live per-access accessor (see comment there).
+     */
+    private function stockQty(Product $product): int
+    {
+        return (int) ($product->getAttribute('stock_quantity_raw') ?? 0);
     }
 
     private function cut(string $text, int $max): string

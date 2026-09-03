@@ -148,6 +148,10 @@ class ProductController extends Controller
 
     public function store(Request $request)
     {
+        if (! $request->user()->can('اضافة منتج')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
             'scientific_name' => 'nullable|string|max:255',
@@ -186,6 +190,10 @@ class ProductController extends Controller
 
     public function update(Request $request, Product $product)
     {
+        if (! $request->user()->can('تعديل منتج')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
         $validatedData = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'scientific_name' => 'sometimes|nullable|string|max:255',
@@ -224,14 +232,37 @@ class ProductController extends Controller
 
     public function destroy(Product $product, Request $request)
     {
-        // Authorization check
-        // if (auth()->user()->cannot('delete', $product)) { abort(403); }
+        if (! $request->user()->can('حذف منتج')) {
+            abort(403, 'This action is unauthorized.');
+        }
 
         $forceDelete = $request->query('force', false) === 'true' || $request->input('force') === true;
 
-        // Check for dependencies (e.g., if product is in purchase_items or sale_items)
-        // The 'restrict' onDelete constraint in migrations for purchase_items and sale_items
-        // should prevent deletion if related records exist, throwing a QueryException.
+        // A normal delete only soft-deletes the product (Product uses SoftDeletes), which is
+        // an UPDATE, not a DELETE — so the 'restrict' onDelete FK constraints on purchase_items/
+        // sale_items never actually fire for it. Check for existing sale/purchase history
+        // explicitly instead of relying on a constraint that won't trigger.
+        if (! $forceDelete) {
+            $hasSales = $product->saleItems()->exists();
+            $hasPurchases = $product->purchaseItems()->exists();
+
+            if ($hasSales || $hasPurchases) {
+                Log::warning("Attempted to delete Product ID {$product->id} with existing relations.");
+
+                $reason = $hasSales && $hasPurchases
+                    ? 'مرتبط بفواتير مبيعات وفواتير مشتريات سابقة'
+                    : ($hasSales ? 'مرتبط بفاتورة مبيعات سابقة' : 'مرتبط بفاتورة مشتريات سابقة');
+
+                return response()->json([
+                    // The frontend surfaces this exact field to the user (productService.deleteProduct
+                    // reads response.data.message via getErrorMessage) — keep it specific, not generic.
+                    'message' => "لا يمكن حذف المنتج، {$reason}.",
+                    'can_force_delete' => true, // Flag to tell frontend it can ask for force delete
+                    'confirmation_message' => "هذا المنتج {$reason}. هل تريد بالتأكيد حذفه وحذف جميع العمليات المرتبطة به؟ هذا الإجراء لا يمكن التراجع عنه.",
+                ], Response::HTTP_CONFLICT); // 409 Conflict
+            }
+        }
+
         try {
             if ($forceDelete) {
                 $this->deletionService->forceDeleteProduct($product);
