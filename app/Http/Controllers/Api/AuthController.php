@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use App\Models\User;
+use App\Models\DeviceSession;
 use App\Http\Resources\UserResource;
 
 /**
@@ -129,6 +130,10 @@ class AuthController extends Controller
         $request->validate([
             'username' => ['required', 'string'],
             'password' => ['required', 'string'],
+            // Client-generated id persisted in localStorage, identifying "this
+            // browser". Optional so older/other clients (e.g. a mobile app) that
+            // don't send it simply skip the same-device check below.
+            'device_id' => ['nullable', 'string'],
         ]);
 
         // Attempt to find the user by username
@@ -141,17 +146,41 @@ class AuthController extends Controller
             ]);
         }
 
+        // Refuse to log a different user in on a device that already has another
+        // user actively logged in — that user must log out first. A device is
+        // considered "free" if there's no recorded session for it, it already
+        // belongs to this same user, or its recorded user has no active tokens
+        // left (a stale record from a session that ended without a clean logout).
+        $deviceSession = null;
+        if ($request->filled('device_id')) {
+            $deviceSession = DeviceSession::firstOrNew(['device_id' => $request->device_id]);
+
+            if ($deviceSession->exists && $deviceSession->user_id && $deviceSession->user_id !== $user->id) {
+                $otherUser = User::find($deviceSession->user_id);
+                if ($otherUser && $otherUser->tokens()->exists()) {
+                    return response()->json([
+                        'message' => "يوجد مستخدم آخر ({$otherUser->name}) مسجّل دخول بالفعل على هذا الجهاز. يجب تسجيل الخروج أولاً قبل تسجيل دخول مستخدم مختلف.",
+                    ], 409);
+                }
+            }
+        }
+
         // Load relationships for UserResource
         $user->load('roles:id,name', 'permissions:id,name', 'warehouse:id,name');
-        
+
         // Get role names as array
         $roles = $user->getRoleNames()->toArray();
-        
+
         // --- Remove previous tokens if you want only one active token per user ---
         // $user->tokens()->delete(); // Optional: Invalidate all old tokens
 
         // Create a new token for the authenticated user
         $token = $user->createToken('auth_token')->plainTextToken;
+
+        if ($deviceSession) {
+            $deviceSession->user_id = $user->id;
+            $deviceSession->save();
+        }
 
         return response()->json([
             'message' => 'Logged in successfully.',
@@ -234,6 +263,16 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
+        // Free up this device's session record (only if it's still this same
+        // user's — avoids one device's logout clobbering another device that
+        // happens to reuse the same id, though that shouldn't normally happen).
+        $deviceId = $request->input('device_id');
+        if ($deviceId) {
+            DeviceSession::where('device_id', $deviceId)
+                ->where('user_id', $request->user()->id)
+                ->update(['user_id' => null]);
+        }
+
         // Revoke the token that was used to authenticate the current request
         $request->user()->currentAccessToken()->delete();
 
