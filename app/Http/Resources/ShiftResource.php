@@ -8,6 +8,22 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class ShiftResource extends JsonResource
 {
     /**
+     * When set, the stats breakdown only counts payments/expenses/returns
+     * recorded by this user id — used by the live POS "current shift" widget
+     * (scoped to the authenticated user) and by the "view a specific
+     * cashier's totals" report action (scoped to whichever user was picked).
+     * Leave null (default) to return the full shift totals, regardless of
+     * who is viewing.
+     */
+    protected ?int $scopeUserId;
+
+    public function __construct($resource, ?int $scopeUserId = null)
+    {
+        parent::__construct($resource);
+        $this->scopeUserId = $scopeUserId;
+    }
+
+    /**
      * Transform the resource into an array.
      *
      * @return array<string, mixed>
@@ -25,8 +41,8 @@ class ShiftResource extends JsonResource
             'is_open' => $this->is_open,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
-            'stats' => $this->whenLoaded('payments', function () use ($request) {
-                $currentUserId = $request->user()?->id;
+            'stats' => $this->whenLoaded('payments', function () {
+                $currentUserId = $this->scopeUserId;
 
                 // Calculate Sales Breakdown — iterate payments directly via shift_id
                 $salesBreakdown = [

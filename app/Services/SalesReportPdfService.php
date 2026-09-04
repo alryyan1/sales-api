@@ -116,11 +116,14 @@ class SalesReportPdfService
 
     private function renderKpi(TCPDF $pdf, array $stats): void
     {
+        // Placed left-to-right in the array, so list them in reverse reading
+        // order — the first logical item (عدد الفواتير) ends up the rightmost box.
         $items = [
-            'عدد الفواتير'    => number_format((int)($stats['totalSales']  ?? 0)),
-            'إجمالي المبيعات' => $this->fmt($stats['totalAmount'] ?? 0),
-            'المدفوع'         => $this->fmt($stats['totalPaid']   ?? 0),
-            'المتبقي'         => $this->fmt($stats['totalDue']    ?? 0),
+            'المتبقي'         => $this->fmt($stats['totalDue']      ?? 0),
+            'الخصم'           => $this->fmt($stats['totalDiscount'] ?? 0),
+            'المدفوع'         => $this->fmt($stats['totalPaid']     ?? 0),
+            'إجمالي المبيعات' => $this->fmt($stats['totalAmount']   ?? 0),
+            'عدد الفواتير'    => number_format((int)($stats['totalSales'] ?? 0)),
         ];
 
         $w = self::BODY_W / count($items);

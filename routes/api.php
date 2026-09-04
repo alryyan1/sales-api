@@ -74,6 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/shifts', [ShiftController::class, 'index'])->name('api.shifts.index');
     Route::get('/shifts/by-month', [ShiftController::class, 'byMonth'])->name('api.shifts.by-month');
     Route::get('/shifts/current', [ShiftController::class, 'current'])->name('api.shifts.current');
+    Route::get('/shifts/{shift}/payment-users', [ShiftController::class, 'paymentUsers'])->name('api.shifts.paymentUsers');
     Route::get('/shifts/{shift}', [ShiftController::class, 'show'])->name('api.shifts.show');
     Route::post('/shifts/open', [ShiftController::class, 'open'])->name('api.shifts.open');
     Route::post('/shifts/close', [ShiftController::class, 'close'])->name('api.shifts.close');

@@ -17,7 +17,7 @@ class ShiftCostPdfService
     private string $companyName;
     private PdfHeaderRenderer $renderer;
 
-    public function generate(Shift $shift): string
+    public function generate(Shift $shift, ?int $userId = null): string
     {
         $this->initializeSettings();
         $this->renderer = new PdfHeaderRenderer('shift_cost');
@@ -26,9 +26,12 @@ class ShiftCostPdfService
         $pdf->AddPage();
         $this->renderer->render($pdf);
 
-        $this->renderHeader($pdf, $shift);
+        $filterUser = $userId ? \App\Models\User::find($userId) : null;
+        $this->renderHeader($pdf, $shift, $filterUser);
 
-        $expenses = $shift->expenses()->with(['user', 'category'])->get();
+        $expenses = $shift->expenses()->with(['user', 'category'])
+            ->when($userId, fn($q) => $q->where('user_id', $userId))
+            ->get();
         if ($expenses->isEmpty()) {
             $pdf->SetFont(self::FONT_MAIN, '', 12);
             $pdf->Cell(0, 20, 'لا توجد مصروفات مسجلة لهذه الوردية.', 0, 1, 'C');
@@ -61,7 +64,7 @@ class ShiftCostPdfService
         return $pdf;
     }
 
-    private function renderHeader(TCPDF $pdf, Shift $shift): void
+    private function renderHeader(TCPDF $pdf, Shift $shift, ?\App\Models\User $filterUser = null): void
     {
         $pdf->SetFont(self::FONT_MAIN, 'B', 14);
         $pdf->Cell(0, 8, 'تقرير المصروفات - وردية رقم #' . $shift->id, 0, 1, 'C');
@@ -75,6 +78,12 @@ class ShiftCostPdfService
         }
 
         $pdf->Cell(0, 6, $info, 0, 1, 'C');
+
+        if ($filterUser) {
+            $pdf->SetFont(self::FONT_MAIN, 'B', 10);
+            $pdf->Cell(0, 6, 'مصروفات المستخدم: ' . $filterUser->name, 0, 1, 'C');
+            $pdf->SetFont(self::FONT_MAIN, '', 10);
+        }
         $pdf->Cell(0, 6, 'تاريخ الطباعة: ' . now()->format('Y-m-d h:i A'), 0, 1, 'C');
 
         $pdf->Ln(5);

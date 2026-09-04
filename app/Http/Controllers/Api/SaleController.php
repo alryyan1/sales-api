@@ -136,10 +136,53 @@ class SaleController extends Controller
             ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'payments.sale_id')
             ->sum('amount');
 
-        $returnedSum = (float) DB::table('sale_return_items')
+        // Returns are scoped by when/where they were *processed* (sale_returns.shift_id /
+        // sale_returns.created_at), not by the original sale's own date/shift — a return
+        // recorded today in shift 8 should count toward today/shift 8 even if the sale it
+        // refunds was made earlier. This mirrors the "Sales Returns Breakdown" convention
+        // used by the shift closing report (see ReportController). Filters that identify a
+        // sale/client/product rather than a point in time still apply via the joined sale.
+        $returnsQuery = DB::table('sale_return_items')
             ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
-            ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'sale_returns.sale_id')
-            ->sum(DB::raw('sale_return_items.quantity * sale_return_items.price'));
+            ->join('sales', 'sales.id', '=', 'sale_returns.sale_id');
+
+        if ($clientId = $request->input('client_id')) {
+            $returnsQuery->where('sales.client_id', $clientId);
+        }
+        if ($userId = $request->input('user_id')) {
+            $returnsQuery->where('sales.user_id', $userId);
+        }
+        if ($productId = $request->input('product_id')) {
+            $returnsQuery->where('sale_return_items.product_id', $productId);
+        }
+        if ($saleId = $request->input('sale_id')) {
+            $returnsQuery->where('sales.id', $saleId);
+        }
+        if ($search = $request->input('search')) {
+            $returnsQuery->where(function ($q) use ($search) {
+                $q->where('sales.id', $search)
+                    ->orWhere('sales.number', 'like', "%{$search}%")
+                    ->orWhereExists(function ($sub) use ($search) {
+                        $sub->selectRaw('1')
+                            ->from('clients')
+                            ->whereColumn('clients.id', 'sales.client_id')
+                            ->where('clients.name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        if ($shiftId = $request->input('shift_id')) {
+            $returnsQuery->where('sale_returns.shift_id', $shiftId);
+        } else {
+            if ($startDate = $request->input('start_date')) {
+                $returnsQuery->whereDate('sale_returns.created_at', '>=', $startDate);
+            }
+            if ($endDate = $request->input('end_date')) {
+                $returnsQuery->whereDate('sale_returns.created_at', '<=', $endDate);
+            }
+        }
+
+        $returnedSum = (float) $returnsQuery->sum(DB::raw('sale_return_items.quantity * sale_return_items.price'));
 
         // Same "unreliable stored cost" rule as CostPriceResolver::resolveSaleItemCost(), but
         // batched: only the (typically tiny) subset of current-month items that actually need
@@ -458,6 +501,8 @@ class SaleController extends Controller
             'items.product.purchaseItemsWithStock:id,product_id,batch_number,expiry_date,sale_price,unit_cost',
             'items.purchaseItemBatch:id,batch_number,unit_cost,expiry_date', // Load batch info for each sale item
             'payments.user:id,name,username', // Load user relationship for payments to get user_name
+            'returns:id,sale_id', // For SaleResource::total_returned_amount
+            'returns.items:id,sale_return_id,product_id,quantity,price',
         ]);
 
         return response()->json(['sale' => new SaleResource($sale)]);
@@ -583,6 +628,11 @@ class SaleController extends Controller
     {
         if (! Auth::user()->can('سداد')) {
             abort(403, 'This action is unauthorized.');
+        }
+
+        // Only the cashier who created the sale may record payments against it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can add payments to it.');
         }
 
         $validatedData = $request->validate([
@@ -827,6 +877,11 @@ class SaleController extends Controller
             abort(403, 'This action is unauthorized.');
         }
 
+        // Only the cashier who created the sale may delete its payments.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can delete its payments.');
+        }
+
         try {
             DB::transaction(function () use ($sale, $paymentId) {
                 // Find and delete the specific payment
@@ -854,6 +909,11 @@ class SaleController extends Controller
 
     public function addSaleItem(Request $request, Sale $sale)
     {
+        // Only the cashier who created the sale may add items to it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can add items to it.');
+        }
+
         $validatedData = $request->validate([
             'product_id' => 'required|exists:products,id',
             'quantity' => 'required|integer|min:1',

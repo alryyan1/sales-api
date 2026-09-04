@@ -17,7 +17,7 @@ class ShiftSoldItemsPdfService
     private string $companyName;
     private PdfHeaderRenderer $renderer;
 
-    public function generate(Shift $shift): string
+    public function generate(Shift $shift, ?int $userId = null): string
     {
         $this->initializeSettings();
         $this->renderer = new PdfHeaderRenderer('shift_sold_items');
@@ -25,11 +25,15 @@ class ShiftSoldItemsPdfService
 
         $pdf->AddPage();
         $this->renderer->render($pdf);
-        $this->renderHeader($pdf, $shift);
+        $filterUser = $userId ? \App\Models\User::find($userId) : null;
+        $this->renderHeader($pdf, $shift, $filterUser);
 
-        // Aggregate sold items from all sales in this shift
+        // Aggregate sold items from this shift's sales, optionally scoped to
+        // just the sales created by one cashier.
+        $sales = $userId ? $shift->sales->where('user_id', $userId) : $shift->sales;
+
         $soldItems = [];
-        foreach ($shift->sales as $sale) {
+        foreach ($sales as $sale) {
             foreach ($sale->items as $item) {
                 $productId = $item->product_id;
                 $productName = $item->product ? $item->product->name : ('صنف #' . $productId);
@@ -85,7 +89,7 @@ class ShiftSoldItemsPdfService
         return $pdf;
     }
 
-    private function renderHeader(TCPDF $pdf, Shift $shift): void
+    private function renderHeader(TCPDF $pdf, Shift $shift, ?\App\Models\User $filterUser = null): void
     {
         $pdf->SetFont(self::FONT_MAIN, 'B', 14);
         $pdf->Cell(0, 8, 'تقرير الأصناف المباعة - وردية رقم #' . $shift->id, 0, 1, 'C');
@@ -96,6 +100,12 @@ class ShiftSoldItemsPdfService
             $info .= ' | المستخدم: ' . $shift->user->name;
         }
         $pdf->Cell(0, 6, $info, 0, 1, 'C');
+
+        if ($filterUser) {
+            $pdf->SetFont(self::FONT_MAIN, 'B', 10);
+            $pdf->Cell(0, 6, 'أصناف المستخدم: ' . $filterUser->name, 0, 1, 'C');
+            $pdf->SetFont(self::FONT_MAIN, '', 10);
+        }
         $pdf->Cell(0, 6, 'تاريخ الطباعة: ' . now()->format('Y-m-d h:i A'), 0, 1, 'C');
 
         $pdf->Ln(5);

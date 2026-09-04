@@ -129,7 +129,7 @@ class ShiftController extends Controller
             ->first();
 
         return $shift
-            ? new ShiftResource($shift)
+            ? new ShiftResource($shift, $request->user()?->id)
             : response()->json(null, 204);
     }
 
@@ -146,6 +146,13 @@ class ShiftController extends Controller
      *         in="path",
      *         description="Shift ID",
      *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="user_id",
+     *         in="query",
+     *         description="Optional: scope the stats breakdown to just this user's payments/expenses/returns instead of the whole shift.",
+     *         required=false,
      *         @OA\Schema(type="integer")
      *     ),
      *     @OA\Response(
@@ -171,7 +178,52 @@ class ShiftController extends Controller
             'saleReturns.items'
         ])->findOrFail($id);
 
-        return new ShiftResource($shift);
+        $scopeUserId = $request->filled('user_id') ? (int) $request->input('user_id') : null;
+
+        // The shift detail view (e.g. the monthly shifts report) shows the
+        // whole shift's totals by default, or one cashier's totals when
+        // ?user_id= is given.
+        return new ShiftResource($shift, $scopeUserId);
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/api/shifts/{id}/payment-users",
+     *     summary="List users with activity in a shift",
+     *     description="Distinct users who recorded a payment during this shift, for the per-user breakdown in the shift detail view.",
+     *     operationId="getShiftPaymentUsers",
+     *     tags={"Shifts"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Shift ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Users who made payments in this shift",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", type="array", @OA\Items(type="object"))
+     *         )
+     *     )
+     * )
+     */
+    public function paymentUsers($id)
+    {
+        $shift = Shift::findOrFail($id);
+
+        $users = \App\Models\User::whereIn('id', function ($query) use ($shift) {
+                $query->select('user_id')
+                    ->from('payments')
+                    ->where('shift_id', $shift->id)
+                    ->whereNotNull('user_id');
+            })
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return response()->json(['data' => $users]);
     }
 
     /**
@@ -224,7 +276,7 @@ class ShiftController extends Controller
             'saleReturns.items'
         ]);
 
-        return new ShiftResource($shift);
+        return new ShiftResource($shift, $user->id);
     }
 
     /**
@@ -294,7 +346,7 @@ class ShiftController extends Controller
             'saleReturns.items'
         ]);
 
-        return new ShiftResource($shift);
+        return new ShiftResource($shift, $user->id);
     }
 
     /**

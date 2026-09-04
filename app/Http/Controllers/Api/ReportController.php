@@ -2377,11 +2377,12 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
+            'user_id' => 'nullable|integer|exists:users,id',
         ]);
 
         $shift = Shift::with(['user', 'expenses.user', 'expenses.category'])->findOrFail($validated['shift_id']);
 
-        $pdfContent = $pdfService->generate($shift);
+        $pdfContent = $pdfService->generate($shift, $validated['user_id'] ?? null);
 
         $filename = 'Shift_' . $shift->id . '_Costs_' . now()->format('Ymd_His') . '.pdf';
 
@@ -2397,11 +2398,12 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
+            'user_id' => 'nullable|integer|exists:users,id',
         ]);
 
         $shift = Shift::with(['user', 'saleReturns.user', 'saleReturns.items', 'saleReturns.sale'])->findOrFail($validated['shift_id']);
 
-        $pdfContent = $pdfService->generate($shift);
+        $pdfContent = $pdfService->generate($shift, $validated['user_id'] ?? null);
 
         $filename = 'Shift_' . $shift->id . '_Returns_' . now()->format('Ymd_His') . '.pdf';
 
@@ -2417,11 +2419,12 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
+            'user_id' => 'nullable|integer|exists:users,id',
         ]);
 
         $shift = Shift::with(['user', 'sales.items.product'])->findOrFail($validated['shift_id']);
 
-        $pdfContent = $pdfService->generate($shift);
+        $pdfContent = $pdfService->generate($shift, $validated['user_id'] ?? null);
 
         $filename = 'Shift_' . $shift->id . '_SoldItems_' . now()->format('Ymd_His') . '.pdf';
 
@@ -2437,11 +2440,12 @@ class ReportController extends Controller
     {
         $validated = $request->validate([
             'shift_id' => 'required|integer|exists:shifts,id',
+            'user_id' => 'nullable|integer|exists:users,id',
         ]);
 
         $shift = Shift::with(['user', 'sales.items.product', 'saleReturns.items.product'])->findOrFail($validated['shift_id']);
 
-        $pdfContent = $pdfService->generate($shift);
+        $pdfContent = $pdfService->generate($shift, $validated['user_id'] ?? null);
 
         $filename = 'Shift_' . $shift->id . '_InventoryEffects_' . now()->format('Ymd_His') . '.pdf';
 
