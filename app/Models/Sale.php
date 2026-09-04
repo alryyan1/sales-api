@@ -118,6 +118,14 @@ class Sale extends Model
     }
 
     /**
+     * Sale returns (refunds) recorded against this sale.
+     */
+    public function returns(): HasMany
+    {
+        return $this->hasMany(SaleReturn::class);
+    }
+
+    /**
      * Boot method to auto-generate number (unique per shift).
      */
     protected static function boot()

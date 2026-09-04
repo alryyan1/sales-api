@@ -29,7 +29,7 @@ class SaleController extends Controller
 
     public function index(Request $request)
     {
-        $query = Sale::with(['client:id,name', 'user:id,name', 'warehouse:id,name', 'items.product:id,name,image_url,is_service', 'items.product.warehouses']);
+        $query = Sale::with(['client:id,name', 'user:id,name', 'warehouse:id,name', 'items.product:id,name,image_url,is_service', 'items.product.warehouses', 'returns:id,sale_id', 'returns.items:id,sale_return_id,quantity,price']);
 
         $this->applySaleSearchFilter($query, $request);
         // Status filtering removed because the status column was dropped.
@@ -136,6 +136,11 @@ class SaleController extends Controller
             ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'payments.sale_id')
             ->sum('amount');
 
+        $returnedSum = (float) DB::table('sale_return_items')
+            ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
+            ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'sale_returns.sale_id')
+            ->sum(DB::raw('sale_return_items.quantity * sale_return_items.price'));
+
         // Same "unreliable stored cost" rule as CostPriceResolver::resolveSaleItemCost(), but
         // batched: only the (typically tiny) subset of current-month items that actually need
         // live re-resolution is looped in PHP — every other item is summed in the SQL above.
@@ -168,6 +173,7 @@ class SaleController extends Controller
             'total_amount' => (float) $itemAgg->subtotal - $discountSum,
             'paid_amount' => $paidSum,
             'total_cost' => (float) $itemAgg->raw_cost + $costAdjustment,
+            'returned_amount' => $returnedSum,
         ]);
     }
 

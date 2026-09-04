@@ -43,7 +43,10 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Tokens expire after this many minutes of absolute lifetime (default 12h,
+    // roughly one work shift). Set SANCTUM_TOKEN_EXPIRATION=0 or empty to keep
+    // tokens non-expiring. Pair with the `sanctum:prune-expired` scheduled task.
+    'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION', 720) ?: null,
 
     /*
     |--------------------------------------------------------------------------

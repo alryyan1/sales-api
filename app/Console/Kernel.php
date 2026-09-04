@@ -13,6 +13,11 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         // $schedule->command('inspire')->hourly();
+
+        // Drop personal access tokens that have been expired for over a day so
+        // the personal_access_tokens table doesn't grow without bound. Only does
+        // anything when SANCTUM_TOKEN_EXPIRATION is set (see config/sanctum.php).
+        $schedule->command('sanctum:prune-expired --hours=24')->daily();
     }
 
     /**

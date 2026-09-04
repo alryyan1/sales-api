@@ -15,7 +15,7 @@ use Illuminate\Validation\Rule;
 class SaleReturnController extends Controller
 {
     /**
-     * List sale returns for the current user with optional filters.
+     * List sale returns with optional filters (user, shift, date range).
      */
     public function index(Request $request)
     {
@@ -29,8 +29,11 @@ class SaleReturnController extends Controller
             'sale:id,number,sale_date',
             'shift:id,opened_at,closed_at',
             'items.product:id,name,sku',
-        ])->where('user_id', $user->id);
+        ]);
 
+        if ($userId = $request->input('user_id')) {
+            $query->where('user_id', $userId);
+        }
         if ($shiftId = $request->input('shift_id')) {
             $query->where('shift_id', $shiftId);
         }

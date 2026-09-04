@@ -70,6 +70,7 @@ class SettingsService
             'pos_show_expired_products' => 'bool',
             'pos_show_out_of_stock_products' => 'bool',
             'pos_show_expiry_date_column' => 'bool',
+            'pos_show_package_search' => 'bool',
             'sales_a4_show_unit_column' => 'bool',
             'purchase_use_batch_number' => 'bool',
             'purchase_use_expiry_date' => 'bool',
@@ -146,6 +147,8 @@ class SettingsService
             'pos_show_expired_products' => $c['pos_show_expired_products'] ?? false,
             'pos_show_out_of_stock_products' => $c['pos_show_out_of_stock_products'] ?? false,
             'pos_show_expiry_date_column' => $c['pos_show_expiry_date_column'] ?? true,
+            // Master switch for the POS top-bar "search for a package/group" box. Hidden by default.
+            'pos_show_package_search' => $c['pos_show_package_search'] ?? false,
             'sales_a4_show_unit_column' => $c['sales_a4_show_unit_column'] ?? true,
             'purchase_use_batch_number' => $c['purchase_use_batch_number'] ?? true,
             'purchase_use_expiry_date' => $c['purchase_use_expiry_date'] ?? true,

@@ -49,6 +49,14 @@ class SaleResource extends JsonResource
 
             'sale_date' => $this->sale_date->format('Y-m-d'),
             'is_returned' => $this->is_returned ?? false,
+            // Total value already refunded against this sale (sum of return items: quantity * price).
+            'total_returned_amount' => $this->relationLoaded('returns')
+                ? (float) $this->returns->sum(
+                    fn ($return) => $return->relationLoaded('items')
+                        ? $return->items->sum(fn ($item) => (float) $item->quantity * (float) $item->price)
+                        : 0
+                )
+                : 0.0,
             'is_quote' => $this->is_quote ?? false,
             'finance_exported_at' => $this->finance_exported_at?->toISOString(),
             'finance_export_error' => $this->finance_export_error,

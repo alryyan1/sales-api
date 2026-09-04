@@ -16,6 +16,7 @@ use App\Models\SaleItem;
 use App\Services\DailySalesPdfService;
 use App\Services\InventoryPdfService;
 use App\Services\SalesReportPdfService;
+use App\Services\SalesExcelService;
 use App\Services\ShiftCostPdfService;
 use App\Services\ShiftSalesReturnPdfService;
 use App\Services\MovedExpiredProductsPdfService;
@@ -1283,10 +1284,12 @@ class ReportController extends Controller
         }
         $allPayments = $paymentsBaseQuery->get();
 
-        $totalAmount = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
+        $totalSubtotal = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
+        $totalDiscount = (float) $sales->sum(fn($s) => (float) ($s->discount_amount ?? 0));
+        // "إجمالي المبيعات" is net of discount, matching the sales list page summary.
+        $totalAmount = max(0, $totalSubtotal - $totalDiscount);
         $totalPaid = (float) $allPayments->sum('amount');
         $totalSales = $sales->count();
-        $totalDiscount = 0;
         $totalDue = max(0, $totalAmount - $totalPaid);
 
         // Calculate Total Expenses for the period
@@ -1448,6 +1451,33 @@ class ReportController extends Controller
         return response($pdfContent, 200)
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', "inline; filename=\"{$pdfFileName}\"");
+    }
+
+    /**
+     * Download an Excel report of the sales list, honoring the same filters
+     * as the sales list page (date range / shift / client / cashier / status / search).
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function downloadSalesReportExcel(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+            'client_id' => 'nullable|integer|exists:clients,id',
+            'user_id' => 'nullable|integer|exists:users,id',
+            'shift_id' => 'nullable|integer|exists:shifts,id',
+            'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
+            'search' => 'nullable|string',
+        ]);
+
+        $excelContent = (new SalesExcelService())->generateSalesExcel($validated);
+        $fileName = 'sales_report_' . now()->format('Y-m-d_His') . '.xlsx';
+
+        return response($excelContent, 200)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Disposition', "inline; filename=\"{$fileName}\"");
     }
 
     /**
