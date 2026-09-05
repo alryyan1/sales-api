@@ -2443,7 +2443,7 @@ class ReportController extends Controller
             'user_id' => 'nullable|integer|exists:users,id',
         ]);
 
-        $shift = Shift::with(['user', 'sales.items.product', 'saleReturns.items.product'])->findOrFail($validated['shift_id']);
+        $shift = Shift::with(['user', 'sales.user', 'sales.items.product', 'saleReturns.user', 'saleReturns.items.product'])->findOrFail($validated['shift_id']);
 
         $pdfContent = $pdfService->generate($shift, $validated['user_id'] ?? null);
 

@@ -176,15 +176,16 @@ class MonthlyRevenuePdfService
     private function drawHeader(string $monthName): void
     {
         $W = $this->W();
+        $y = $this->pdf->GetY();
 
         $this->pdf->SetDrawColor(...self::BLACK);
         $this->pdf->SetLineWidth(1.2);
-        $this->pdf->Line(self::M, self::M, self::M + $W, self::M);
+        $this->pdf->Line(self::M, $y, self::M + $W, $y);
 
         $this->pdf->SetLineWidth(0.3);
-        $this->pdf->Line(self::M, self::M + 2.5, self::M + $W, self::M + 2.5);
+        $this->pdf->Line(self::M, $y + 2.5, self::M + $W, $y + 2.5);
 
-        $this->pdf->SetY(self::M + 7);
+        $this->pdf->SetY($y + 7);
 
         $this->pdf->SetFont(self::F, 'B', 16);
         $this->pdf->SetTextColor(...self::BLACK);
