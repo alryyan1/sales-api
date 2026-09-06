@@ -97,6 +97,8 @@ class InventoryLogPdfService
                 'sale' => 'بيع',
                 'adjustment' => 'تعديل مخزني',
                 'requisition_issue' => 'صرف طلبية',
+                'purchase_return' => 'مردود مشتريات',
+                'sale_return' => 'مردود مبيعات',
             ];
             $filterText[] = 'النوع: ' . ($typeLabels[$filters['type']] ?? $filters['type']);
         }
@@ -212,6 +214,10 @@ class InventoryLogPdfService
                 return [0, 0, 255]; // Blue
             case 'requisition_issue':
                 return [255, 165, 0]; // Orange
+            case 'purchase_return':
+                return [128, 0, 128]; // Purple
+            case 'sale_return':
+                return [13, 148, 136]; // Teal
             default:
                 return [0, 0, 0]; // Black
         }
@@ -309,12 +315,55 @@ class InventoryLogPdfService
             ->where('sri.status', 'issued')
             ->whereNotNull('sr.issue_date');
 
-        // Actual column names per query (aliases cannot be used in WHERE in MySQL)
-        $dateColumns   = ['p.purchase_date', 's.sale_date', 'sa.created_at', 'sr.issue_date'];
-        $batchColumns  = ['pi.batch_number', 'si.batch_number_sold', 'pi_batch.batch_number', 'sri.issued_batch_number'];
-        $docRefColumns = ['p.reference_number', null, 'sa.reason', null];
+        // Purchase Returns Query
+        $purchaseReturnsQuery = DB::table('purchase_return_items as pri')
+            ->join('purchase_returns as pr', 'pri.purchase_return_id', '=', 'pr.id')
+            ->join('products as prod', 'pri.product_id', '=', 'prod.id')
+            ->join('users as u', 'pr.user_id', '=', 'u.id')
+            ->leftJoin('purchases as p_orig', 'pr.purchase_id', '=', 'p_orig.id')
+            ->leftJoin('purchase_items as pi_batch', function ($join) {
+                $join->on('pi_batch.purchase_id', '=', 'p_orig.id')
+                    ->on('pi_batch.product_id', '=', 'pri.product_id');
+            })
+            ->select(
+                'pr.created_at as transaction_date',
+                DB::raw("'purchase_return' as type"),
+                'prod.id as product_id',
+                'prod.name as product_name',
+                'prod.sku as product_sku',
+                'pi_batch.batch_number as batch_number',
+                DB::raw('CAST(pri.quantity AS SIGNED) * -1 as quantity_change'),
+                DB::raw("CONCAT('PR-', pr.id) as document_reference"),
+                'pr.id as document_id',
+                'u.name as user_name',
+                'pr.reason as reason_notes'
+            );
 
-        $queryList = [$purchasesQuery, $salesQuery, $adjustmentsQuery, $requisitionIssuesQuery];
+        // Sale Returns Query
+        $saleReturnsQuery = DB::table('sale_return_items as srit')
+            ->join('sale_returns as sret', 'srit.sale_return_id', '=', 'sret.id')
+            ->join('products as prod', 'srit.product_id', '=', 'prod.id')
+            ->join('users as u', 'sret.user_id', '=', 'u.id')
+            ->select(
+                'sret.created_at as transaction_date',
+                DB::raw("'sale_return' as type"),
+                'prod.id as product_id',
+                'prod.name as product_name',
+                'prod.sku as product_sku',
+                DB::raw('NULL as batch_number'),
+                'srit.quantity as quantity_change',
+                DB::raw("CONCAT('SR-', sret.id) as document_reference"),
+                'sret.id as document_id',
+                'u.name as user_name',
+                'sret.reason as reason_notes'
+            );
+
+        // Actual column names per query (aliases cannot be used in WHERE in MySQL)
+        $dateColumns   = ['p.purchase_date', 's.sale_date', 'sa.created_at', 'sr.issue_date', 'pr.created_at', 'sret.created_at'];
+        $batchColumns  = ['pi.batch_number', 'si.batch_number_sold', 'pi_batch.batch_number', 'sri.issued_batch_number', 'pi_batch.batch_number', null];
+        $docRefColumns = ['p.reference_number', null, 'sa.reason', null, null, null];
+
+        $queryList = [$purchasesQuery, $salesQuery, $adjustmentsQuery, $requisitionIssuesQuery, $purchaseReturnsQuery, $saleReturnsQuery];
 
         foreach ($queryList as $i => $query) {
             if ($startDate) {
@@ -331,8 +380,10 @@ class InventoryLogPdfService
                 $docRefCol = $docRefColumns[$i];
                 $query->where(function ($q) use ($search, $batchCol, $docRefCol) {
                     $q->where('prod.name', 'like', "%{$search}%")
-                      ->orWhere('prod.sku', 'like', "%{$search}%")
-                      ->orWhere($batchCol, 'like', "%{$search}%");
+                      ->orWhere('prod.sku', 'like', "%{$search}%");
+                    if ($batchCol) {
+                        $q->orWhere($batchCol, 'like', "%{$search}%");
+                    }
                     if ($docRefCol) {
                         $q->orWhere($docRefCol, 'like', "%{$search}%");
                     }
@@ -355,18 +406,28 @@ class InventoryLogPdfService
                 case 'requisition_issue':
                     $query = $requisitionIssuesQuery;
                     break;
+                case 'purchase_return':
+                    $query = $purchaseReturnsQuery;
+                    break;
+                case 'sale_return':
+                    $query = $saleReturnsQuery;
+                    break;
                 default:
                     $query = $purchasesQuery
                         ->unionAll($salesQuery)
                         ->unionAll($adjustmentsQuery)
-                        ->unionAll($requisitionIssuesQuery);
+                        ->unionAll($requisitionIssuesQuery)
+                        ->unionAll($purchaseReturnsQuery)
+                        ->unionAll($saleReturnsQuery);
                     break;
             }
         } else {
             $query = $purchasesQuery
                 ->unionAll($salesQuery)
                 ->unionAll($adjustmentsQuery)
-                ->unionAll($requisitionIssuesQuery);
+                ->unionAll($requisitionIssuesQuery)
+                ->unionAll($purchaseReturnsQuery)
+                ->unionAll($saleReturnsQuery);
         }
 
         // Execute query and return results

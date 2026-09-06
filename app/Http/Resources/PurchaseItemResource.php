@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\DB;
 
 class PurchaseItemResource extends JsonResource
 {
@@ -37,6 +38,17 @@ class PurchaseItemResource extends JsonResource
             'purchase_date' => $this->whenLoaded('purchase', fn() => $this->purchase?->purchase_date),
             'purchase_currency' => $this->whenLoaded('purchase', fn() => $this->purchase?->currency ?? 'SDG'),
             'supplier_name' => $this->whenLoaded('purchase', fn() => $this->purchase?->supplier?->name),
+            'quantity_returned' => DB::table('purchase_return_items')
+                ->join('purchase_returns', 'purchase_return_items.purchase_return_id', '=', 'purchase_returns.id')
+                ->where('purchase_returns.purchase_id', $this->purchase_id)
+                ->where('purchase_return_items.product_id', $this->product_id)
+                ->sum('purchase_return_items.quantity') ?? 0,
+            'available_stock' => $this->whenLoaded('purchase', fn() =>
+                DB::table('product_warehouse')
+                    ->where('product_id', $this->product_id)
+                    ->where('warehouse_id', $this->purchase?->warehouse_id)
+                    ->value('quantity') ?? 0
+            ),
             'created_at' => $this->created_at?->toISOString(),
         ];
     }

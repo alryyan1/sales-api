@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SaleReminderController;
 use App\Http\Controllers\Api\SaleReturnController;
+use App\Http\Controllers\Api\PurchaseReturnController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\ShiftController;
 use App\Http\Controllers\Api\StockAdjustmentController;
@@ -218,6 +219,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // -- Sale Returns --
     Route::get('/sale-returns', [SaleReturnController::class, 'index'])->name('api.sale-returns.index');
     Route::post('/sale-returns', [SaleReturnController::class, 'store'])->name('api.sale-returns.store');
+
+    // -- Purchase Returns --
+    Route::get('/purchase-returns', [PurchaseReturnController::class, 'index'])->name('api.purchase-returns.index');
+    Route::post('/purchase-returns', [PurchaseReturnController::class, 'store'])->name('api.purchase-returns.store');
 
     // -- Products Management --
     Route::post('/product/by-ids', [ProductController::class, 'getByIds']);

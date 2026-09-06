@@ -54,11 +54,11 @@ class SupplierSummaryPdfService
 
     private function buildSummary(): array
     {
-        $suppliers = Supplier::with(['purchases', 'payments'])->orderBy('name')->get();
+        $suppliers = Supplier::with(['purchases', 'payments', 'purchaseReturns.items'])->orderBy('name')->get();
 
         return $suppliers->map(function ($supplier) {
             $totalDebit  = $supplier->purchases->sum('total_amount');
-            $totalCredit = $supplier->payments->sum('amount');
+            $totalCredit = $supplier->payments->sum('amount') + $supplier->purchaseReturns->sum('total_amount');
 
             return [
                 'name'    => $supplier->name,

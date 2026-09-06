@@ -101,12 +101,25 @@ class Supplier extends Model
     }
 
     /**
+     * Get the purchase returns recorded against this supplier.
+     */
+    public function purchaseReturns(): HasMany
+    {
+        return $this->hasMany(PurchaseReturn::class, 'supplier_id');
+    }
+
+    /**
      * Calculate the total amount owed to this supplier.
      */
     public function getTotalOwedAttribute(): float
     {
         $totalPurchases = $this->purchases()->sum('total_amount');
         $totalPayments = $this->payments()->sum('amount');
-        return $totalPurchases - $totalPayments;
+        $totalReturns = \Illuminate\Support\Facades\DB::table('purchase_return_items')
+            ->join('purchase_returns', 'purchase_return_items.purchase_return_id', '=', 'purchase_returns.id')
+            ->where('purchase_returns.supplier_id', $this->id)
+            ->selectRaw('COALESCE(SUM(purchase_return_items.quantity * purchase_return_items.unit_cost), 0) as total')
+            ->value('total');
+        return $totalPurchases - $totalPayments - $totalReturns;
     }
 }

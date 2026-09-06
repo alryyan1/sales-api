@@ -125,4 +125,12 @@ class Purchase extends Model
     {
         return $this->hasMany(PurchasePayment::class);
     }
+
+    /**
+     * Get the returns recorded against this purchase.
+     */
+    public function returns(): HasMany
+    {
+        return $this->hasMany(PurchaseReturn::class);
+    }
 }

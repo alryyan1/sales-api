@@ -22,9 +22,9 @@ class SupplierPaymentController extends Controller
     public function getLedger(Supplier $supplier)
     {
         try {
-            // Get all purchases for this supplier with their payments
+            // Get all purchases for this supplier with their payments and returns
             $purchases = $supplier->purchases()
-                ->with(['payments.user'])
+                ->with(['payments.user', 'returns.items'])
                 ->orderBy('purchase_date', 'desc')
                 ->orderBy('created_at', 'desc')
                 ->get();
@@ -48,14 +48,23 @@ class SupplierPaymentController extends Controller
             $totalDirectPayments = $directPayments->sum('amount');
 
             $totalPayments = $totalPaymentsAcrossPurchases + $totalDirectPayments;
-            $balance = $totalPurchases - $totalPayments;
+
+            // Total returns credited against this supplier's purchases
+            $totalReturns = $purchases->sum(function ($p) {
+                return $p->returns->sum('total_amount');
+            });
+
+            $balance = $totalPurchases - $totalPayments - $totalReturns;
+            $netPurchases = $totalPurchases - $totalReturns;
 
             $ledgerEntries = collect();
 
             // 1. Add Purchases as the main ledger entries
             foreach ($purchases as $purchase) {
                 $purchasePaid = $purchase->payments->sum('amount');
-                $purchaseBalance = $purchase->total_amount - $purchasePaid;
+                $purchaseReturned = $purchase->returns->sum('total_amount');
+                $purchaseCredit = $purchasePaid + $purchaseReturned;
+                $purchaseBalance = $purchase->total_amount - $purchaseCredit;
 
                 $ledgerEntries->push([
                     'id' => 'purchase_' . $purchase->id,
@@ -65,7 +74,9 @@ class SupplierPaymentController extends Controller
                     'type' => 'purchase',
                     'description' => 'Purchase #' . $purchase->id . ($purchase->reference_number ? ' (' . $purchase->reference_number . ')' : ''),
                     'debit' => $purchase->total_amount,
-                    'credit' => $purchasePaid,
+                    'credit' => $purchaseCredit,
+                    'paid_amount' => $purchasePaid,
+                    'return_amount' => $purchaseReturned,
                     'balance' => $purchaseBalance,
                     'reference' => $purchase->reference_number,
                     'created_at' => $purchase->created_at,
@@ -91,6 +102,7 @@ class SupplierPaymentController extends Controller
                     'description' => 'المدفوعات المباشرة (غير مرتبطة بمشتريات)',
                     'debit' => 0,
                     'credit' => $totalDirectPayments,
+                    'paid_amount' => $totalDirectPayments,
                     'balance' => -$totalDirectPayments,
                     'reference' => '-',
                     'created_at' => $directPayments->first()->created_at,
@@ -120,6 +132,8 @@ class SupplierPaymentController extends Controller
                     'total_purchases_sdg' => $totalPurchasesSDG,
                     'total_purchases_usd' => $totalPurchasesUSD,
                     'total_payments' => $totalPayments,
+                    'total_returns' => $totalReturns,
+                    'net_purchases' => $netPurchases,
                     'balance' => $balance,
                 ],
                 'ledger_entries' => $ledgerEntries->values(),

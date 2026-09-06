@@ -19,7 +19,7 @@ class InventoryLogController extends Controller
             'start_date' => 'nullable|date_format:Y-m-d',
             'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
             'product_id' => 'nullable|integer|exists:products,id',
-            'type' => 'nullable|string|in:purchase,sale,adjustment,requisition_issue',
+            'type' => 'nullable|string|in:purchase,sale,adjustment,requisition_issue,purchase_return,sale_return',
             'per_page' => 'nullable|integer|min:5|max:100',
             'search' => 'nullable|string|max:255', // Search on product name/sku, batch, ref
             'warehouse_id' => 'nullable|integer|exists:warehouses,id'
@@ -131,13 +131,62 @@ class InventoryLogController extends Controller
             ->where('sri.status', 'issued') // Only issued items
             ->whereNotNull('sr.issue_date');
 
+        // --- Purchase Returns (Stock Out - returned to supplier) ---
+        $purchaseReturnsQuery = DB::table('purchase_return_items as pri')
+            ->join('purchase_returns as pr', 'pri.purchase_return_id', '=', 'pr.id')
+            ->join('products as prod', 'pri.product_id', '=', 'prod.id')
+            ->join('users as u', 'pr.user_id', '=', 'u.id')
+            ->leftJoin('purchases as p_orig', 'pr.purchase_id', '=', 'p_orig.id')
+            ->leftJoin('purchase_items as pi_batch', function ($join) {
+                $join->on('pi_batch.purchase_id', '=', 'p_orig.id')
+                    ->on('pi_batch.product_id', '=', 'pri.product_id');
+            })
+            ->select(
+                'pr.created_at as transaction_date',
+                DB::raw("'purchase_return' as type"),
+                'prod.id as product_id',
+                'prod.name as product_name',
+                'prod.sku as product_sku',
+                'pi_batch.batch_number as batch_number',
+                DB::raw('CAST(pri.quantity AS SIGNED) * -1 as quantity_change'), // Negative — stock returned to supplier
+                DB::raw("CONCAT('PR-', pr.id) as document_reference"),
+                'pr.id as document_id',
+                'u.name as user_name',
+                'pr.reason as reason_notes',
+                'w.name as warehouse_name',
+                'w.id as warehouse_id'
+            )
+            ->join('warehouses as w', 'pr.warehouse_id', '=', 'w.id');
+
+        // --- Sale Returns (Stock In - returned by customer) ---
+        $saleReturnsQuery = DB::table('sale_return_items as srit')
+            ->join('sale_returns as sret', 'srit.sale_return_id', '=', 'sret.id')
+            ->join('products as prod', 'srit.product_id', '=', 'prod.id')
+            ->join('users as u', 'sret.user_id', '=', 'u.id')
+            ->leftJoin('sales as s_orig', 'sret.sale_id', '=', 's_orig.id')
+            ->leftJoin('warehouses as w', 's_orig.warehouse_id', '=', 'w.id')
+            ->select(
+                'sret.created_at as transaction_date',
+                DB::raw("'sale_return' as type"),
+                'prod.id as product_id',
+                'prod.name as product_name',
+                'prod.sku as product_sku',
+                DB::raw('NULL as batch_number'), // Not tracked per-batch on sale returns
+                'srit.quantity as quantity_change', // Positive — stock returned by customer
+                DB::raw("CONCAT('SR-', sret.id) as document_reference"),
+                'sret.id as document_id',
+                'u.name as user_name',
+                'sret.reason as reason_notes',
+                'w.name as warehouse_name',
+                'w.id as warehouse_id'
+            );
 
         // Actual column names per query (aliases cannot be used in WHERE in MySQL)
-        $dateColumns   = ['p.purchase_date', 's.sale_date', 'sa.created_at', 'sr.issue_date'];
-        $batchColumns  = ['pi.batch_number', 'si.batch_number_sold', 'pi_batch.batch_number', 'sri.issued_batch_number'];
-        $docRefColumns = ['p.reference_number', null, 'sa.reason', null]; // CONCAT expressions not searchable in subquery WHERE
+        $dateColumns   = ['p.purchase_date', 's.sale_date', 'sa.created_at', 'sr.issue_date', 'pr.created_at', 'sret.created_at'];
+        $batchColumns  = ['pi.batch_number', 'si.batch_number_sold', 'pi_batch.batch_number', 'sri.issued_batch_number', 'pi_batch.batch_number', null];
+        $docRefColumns = ['p.reference_number', null, 'sa.reason', null, null, null]; // CONCAT expressions not searchable in subquery WHERE
 
-        $queryList = [$purchasesQuery, $salesQuery, $adjustmentsQuery, $requisitionIssuesQuery];
+        $queryList = [$purchasesQuery, $salesQuery, $adjustmentsQuery, $requisitionIssuesQuery, $purchaseReturnsQuery, $saleReturnsQuery];
 
         foreach ($queryList as $i => $query) {
             if ($startDate) {
@@ -157,8 +206,10 @@ class InventoryLogController extends Controller
                 $docRefCol = $docRefColumns[$i];
                 $query->where(function ($q) use ($search, $batchCol, $docRefCol) {
                     $q->where('prod.name', 'like', "%{$search}%")
-                      ->orWhere('prod.sku', 'like', "%{$search}%")
-                      ->orWhere($batchCol, 'like', "%{$search}%");
+                      ->orWhere('prod.sku', 'like', "%{$search}%");
+                    if ($batchCol) {
+                        $q->orWhere($batchCol, 'like', "%{$search}%");
+                    }
                     if ($docRefCol) {
                         $q->orWhere($docRefCol, 'like', "%{$search}%");
                     }
@@ -181,11 +232,19 @@ class InventoryLogController extends Controller
                 case 'requisition_issue':
                     $query = $requisitionIssuesQuery;
                     break;
+                case 'purchase_return':
+                    $query = $purchaseReturnsQuery;
+                    break;
+                case 'sale_return':
+                    $query = $saleReturnsQuery;
+                    break;
                 default: // Build union if no specific type or invalid type
                     $query = $purchasesQuery
                         ->unionAll($salesQuery)
                         ->unionAll($adjustmentsQuery)
-                        ->unionAll($requisitionIssuesQuery);
+                        ->unionAll($requisitionIssuesQuery)
+                        ->unionAll($purchaseReturnsQuery)
+                        ->unionAll($saleReturnsQuery);
                     break;
             }
         } else {
@@ -193,7 +252,9 @@ class InventoryLogController extends Controller
             $query = $purchasesQuery
                 ->unionAll($salesQuery)
                 ->unionAll($adjustmentsQuery)
-                ->unionAll($requisitionIssuesQuery);
+                ->unionAll($requisitionIssuesQuery)
+                ->unionAll($purchaseReturnsQuery)
+                ->unionAll($saleReturnsQuery);
         }
 
         // Order the final combined result set
@@ -226,7 +287,7 @@ class InventoryLogController extends Controller
             'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
             'product_id' => 'nullable|integer|exists:products,id',
             'warehouse_id' => 'nullable|integer|exists:warehouses,id',
-            'type' => 'nullable|string|in:purchase,sale,adjustment,requisition_issue',
+            'type' => 'nullable|string|in:purchase,sale,adjustment,requisition_issue,purchase_return,sale_return',
             'search' => 'nullable|string|max:255'
         ]);
 

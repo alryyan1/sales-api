@@ -890,7 +890,10 @@ class PurchaseController extends Controller
     public function getItems(Request $request, Purchase $purchase)
     {
         $query = $purchase->items()->getQuery()
-            ->with(['product:id,name,sku,image_url,units_per_stocking_unit']);
+            ->with([
+                'product:id,name,sku,image_url,units_per_stocking_unit',
+                'purchase:id,warehouse_id',
+            ]);
 
         // Search functionality
         if ($search = $request->input('search')) {

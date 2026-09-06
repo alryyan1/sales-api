@@ -325,11 +325,12 @@ class SupplierController extends Controller
     public function summary()
     {
         try {
-            $suppliers = Supplier::with(['purchases', 'payments'])->get();
+            $suppliers = Supplier::with(['purchases', 'payments', 'purchaseReturns.items'])->get();
 
             $summary = $suppliers->map(function ($supplier) {
                 $totalDebit = $supplier->purchases->sum('total_amount');
-                $totalCredit = $supplier->payments->sum('amount');
+                $totalReturns = $supplier->purchaseReturns->sum('total_amount');
+                $totalCredit = $supplier->payments->sum('amount') + $totalReturns;
                 $balance = $totalDebit - $totalCredit;
 
                 return [
@@ -397,8 +398,8 @@ class SupplierController extends Controller
             $collectionName = $settings['firebase_collection_name'] ?? 'none';
         }
 
-        // Load suppliers with purchases and payments for balance calculation
-        $suppliers = Supplier::with(['purchases', 'payments'])->get();
+        // Load suppliers with purchases, payments and returns for balance calculation
+        $suppliers = Supplier::with(['purchases', 'payments', 'purchaseReturns.items'])->get();
 
         $syncedCount = 0;
         $batchSize   = 450;
@@ -409,7 +410,7 @@ class SupplierController extends Controller
 
             foreach ($chunk as $supplier) {
                 $totalDebit  = (float) $supplier->purchases->sum('total_amount');
-                $totalCredit = (float) $supplier->payments->sum('amount');
+                $totalCredit = (float) $supplier->payments->sum('amount') + (float) $supplier->purchaseReturns->sum('total_amount');
                 $balance     = $totalDebit - $totalCredit;
 
                 $docPath = "projects/{$projectId}/databases/(default)/documents/pharmacies/{$collectionName}/suppliers/{$supplier->id}";
