@@ -244,9 +244,10 @@ class SaleController extends Controller
             return SaleResource::collection(collect());
         }
 
-        // POS: only show sales belonging to the current user
+        // POS: only show sales belonging to the current user, unless they can settle
+        // payments across the whole shift regardless of who created the sale.
         $user = $request->user();
-        if ($user) {
+        if ($user && ! $user->can('سداد فواتير كل المستخدمين')) {
             $query->where('user_id', $user->id);
         }
 
@@ -515,6 +516,11 @@ class SaleController extends Controller
      */
     public function update(Request $request, Sale $sale)
     {
+        // Only the cashier who created the sale may edit it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can edit it.');
+        }
+
         // Prevent editing if sale is, for example, cancelled or too old
         // if ($sale->status === 'cancelled' || $sale->sale_date < Carbon::now()->subMonths(1)) {
         //     return response()->json(['message' => 'This sale cannot be updated.'], Response::HTTP_FORBIDDEN);
@@ -560,6 +566,11 @@ class SaleController extends Controller
     {
         if (! Auth::user()->can('حذف فاتورة')) {
             abort(403, 'This action is unauthorized.');
+        }
+
+        // Only the cashier who created the sale may delete it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can delete it.');
         }
 
         if ($sale->payments()->exists()) {
@@ -630,8 +641,9 @@ class SaleController extends Controller
             abort(403, 'This action is unauthorized.');
         }
 
-        // Only the cashier who created the sale may record payments against it.
-        if ((int) $sale->user_id !== (int) Auth::id()) {
+        // Only the cashier who created the sale may record payments against it,
+        // unless the user is allowed to settle payments across the whole shift.
+        if ((int) $sale->user_id !== (int) Auth::id() && ! Auth::user()->can('سداد فواتير كل المستخدمين')) {
             abort(403, 'Only the user who created this sale can add payments to it.');
         }
 
@@ -745,6 +757,16 @@ class SaleController extends Controller
 
     public function addSinglePayment(Request $request, Sale $sale)
     {
+        if (! Auth::user()->can('سداد')) {
+            abort(403, 'This action is unauthorized.');
+        }
+
+        // Only the cashier who created the sale may record payments against it,
+        // unless the user is allowed to settle payments across the whole shift.
+        if ((int) $sale->user_id !== (int) Auth::id() && ! Auth::user()->can('سداد فواتير كل المستخدمين')) {
+            abort(403, 'Only the user who created this sale can add payments to it.');
+        }
+
         $validatedData = $request->validate([
             'method' => ['required', 'string', \App\Support\PaymentMethods::validationRule()],
             'amount' => 'required|numeric|min:0.01',
@@ -794,6 +816,11 @@ class SaleController extends Controller
     {
         if (! Auth::user()->can('تخفيض')) {
             abort(403, 'This action is unauthorized.');
+        }
+
+        // Only the cashier who created the sale may edit it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can edit it.');
         }
 
         $validated = $request->validate([
@@ -1080,6 +1107,11 @@ class SaleController extends Controller
 
     public function updateSaleItem(Request $request, Sale $sale, $saleItemId)
     {
+        // Only the cashier who created the sale may edit it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can edit it.');
+        }
+
         $validatedData = $request->validate([
             'quantity' => 'required|integer|min:1',
             'unit_price' => 'required|numeric|min:0',
@@ -1204,6 +1236,11 @@ class SaleController extends Controller
     {
         if (! Auth::user()->can('حذف منتج مضاف في عمليه بيع')) {
             abort(403, 'This action is unauthorized.');
+        }
+
+        // Only the cashier who created the sale may edit it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can edit it.');
         }
 
         try {
@@ -1752,6 +1789,11 @@ class SaleController extends Controller
      */
     public function addMultipleSaleItems(Request $request, Sale $sale)
     {
+        // Only the cashier who created the sale may edit it.
+        if ((int) $sale->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale can edit it.');
+        }
+
         $validatedData = $request->validate([
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',

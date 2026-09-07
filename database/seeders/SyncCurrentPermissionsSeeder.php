@@ -32,6 +32,7 @@ class SyncCurrentPermissionsSeeder extends Seeder
             'اغلاق ورديه',
             'تعديل سعر الدولار',
             'حذف فاتورة',
+            'سداد فواتير كل المستخدمين',
             'اضافة منتج',
             'تعديل منتج',
             'حذف منتج',
@@ -62,7 +63,6 @@ class SyncCurrentPermissionsSeeder extends Seeder
                 'اغلاق ورديه',
                 'تعديل سعر الدولار',
                 'حذف فاتورة',
-                'view-purchases',
             ],
             'مسوول المخزن' => [
                 'اضافة منتج',
@@ -88,6 +88,13 @@ class SyncCurrentPermissionsSeeder extends Seeder
             $adminRole = Role::where('name', $adminRoleName)->first();
             $adminRole?->givePermissionTo(Permission::all());
         }
+
+        // "view-purchases" is always active for everyone (the frontend never gates on it
+        // per-role — see ALWAYS_GRANTED_PERMISSIONS in useAuthorization.ts) — grant it to
+        // every role so the database reflects that instead of looking selectively restricted.
+        Role::all()->each(fn (Role $role) => $role->givePermissionTo('view-purchases'));
+
+        $this->command->info('Granted view-purchases (always-on) to every role.');
 
         $this->command->info('Permissions synced successfully.');
     }
