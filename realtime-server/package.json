@@ -1,0 +1,20 @@
+{
+  "name": "sales-realtime-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone relay: Laravel POSTs sale/payment events here, this server fans them out to POS browser tabs over Socket.IO.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "install-service": "node install-service.js",
+    "uninstall-service": "node uninstall-service.js",
+    "postinstall": "node install-service.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-windows": "^1.0.0-beta.8",
+    "socket.io": "^4.8.1"
+  }
+}

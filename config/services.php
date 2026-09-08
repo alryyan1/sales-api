@@ -46,4 +46,12 @@ return [
         'endpoint' => env('AIRTEL_SMS_ENDPOINT', 'https://www.airtel.sd/api/rest_send_sms/'),
     ],
 
+    // Standalone Node/Socket.IO relay server (see sales-api/realtime-server) that pushes
+    // sale/payment updates to POS browser tabs. Left empty, the app behaves exactly as
+    // before — RealtimeNotifier no-ops when this URL isn't set.
+    'realtime' => [
+        'url' => env('REALTIME_SERVER_URL'),
+        'secret' => env('REALTIME_SERVER_SECRET'),
+    ],
+
 ];

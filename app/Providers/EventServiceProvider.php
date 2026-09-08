@@ -5,7 +5,9 @@ namespace App\Providers;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\PurchaseItem;
+use App\Models\Sale;
 use App\Observers\ProductObserver;
+use App\Observers\SaleObserver;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -22,6 +24,7 @@ class EventServiceProvider extends ServiceProvider
 
         ],
         Product::class => [ProductObserver::class],
+        Sale::class => [SaleObserver::class],
     ];
     /**
      * The event to listener mappings for the application.
