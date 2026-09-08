@@ -7,6 +7,7 @@ class PaymentResource extends JsonResource {
         return [
             'id' => $this->id,
             'sale_id' => $this->sale_id,
+            'user_id' => $this->user_id,
             'user_name' => $this->whenLoaded('user', fn() => $this->user?->name),
             'method' => $this->method,
             'amount' => $this->amount,

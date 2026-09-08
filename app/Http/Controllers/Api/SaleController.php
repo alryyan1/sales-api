@@ -904,15 +904,17 @@ class SaleController extends Controller
             abort(403, 'This action is unauthorized.');
         }
 
-        // Only the cashier who created the sale may delete its payments.
-        if ((int) $sale->user_id !== (int) Auth::id()) {
-            abort(403, 'Only the user who created this sale can delete its payments.');
+        $payment = $sale->payments()->findOrFail($paymentId);
+
+        // The cashier who created the sale may delete any payment on it. Someone who
+        // recorded a payment on another cashier's sale (via "سداد فواتير كل المستخدمين")
+        // may cancel that specific payment of theirs, but not one recorded by someone else.
+        if ((int) $sale->user_id !== (int) Auth::id() && (int) $payment->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who created this sale, or who recorded this payment, can delete it.');
         }
 
         try {
-            DB::transaction(function () use ($sale, $paymentId) {
-                // Find and delete the specific payment
-                $payment = $sale->payments()->findOrFail($paymentId);
+            DB::transaction(function () use ($payment) {
                 $payment->delete();
             });
 
@@ -1568,6 +1570,8 @@ class SaleController extends Controller
                 $pdf->SetFont('arial', '', 8);
                 $pdf->MultiCell(0, 4, 'الهاتف: '.$companyPhone, 0, 'C', 0, 1);
             }
+            $pdf->SetFont('arial', 'B', 9);
+            $pdf->MultiCell(0, 4, 'رقم الفاتورة بالوردية: '.$sale->number, 0, 'C', 0, 1);
             // if ($vatNumber) {
             //     $pdf->MultiCell(0, 4, 'الرقم الضريبي: ' . $vatNumber, 0, 'C', 0, 1);
             // }
@@ -1678,7 +1682,10 @@ class SaleController extends Controller
             $pageW = $pdf->getPageWidth();
             $barcodeX = ($pageW - $barcodeW) / 2;
             $barcodeY = $pdf->GetY();
-            $pdf->write1DBarcode("$barcodeCode", 'C128', 50, $barcodeY, $barcodeW, $barcodeH, null, [], 'N');
+            // TCPDF's default 'fitwidth' style shrinks the barcode to its natural width without
+            // re-centering it inside $barcodeW unless 'cellfitalign' is set — without this it renders
+            // flush to $barcodeX instead of centered on the page.
+            $pdf->write1DBarcode("$barcodeCode", 'C128', $barcodeX, $barcodeY, $barcodeW, $barcodeH, null, ['cellfitalign' => 'C'], 'N');
             $pdf->Ln(2);
             $pdf->SetFont('arial', '', 6);
             $pdf->Cell(0, 3, $barcodeCode, 0, 1, 'C');

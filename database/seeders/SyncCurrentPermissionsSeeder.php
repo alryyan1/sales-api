@@ -83,10 +83,16 @@ class SyncCurrentPermissionsSeeder extends Seeder
             $this->command->info("Synced " . count($permissionNames) . " permissions to role: {$roleName}");
         }
 
-        // ادمن always gets everything.
+        // ادمن always gets everything, except permissions that must be turned on manually
+        // even for admins (see ADMIN_MUST_OPT_IN_PERMISSIONS in useAuthorization.ts — the
+        // frontend mirrors this exemption so the admin bypass doesn't apply to them either).
+        $adminOptInPermissions = ['سداد فواتير كل المستخدمين'];
+        $adminAutoGrantedPermissions = Permission::all()->reject(
+            fn (Permission $p) => in_array($p->name, $adminOptInPermissions, true)
+        );
         foreach (['ادمن', 'admin'] as $adminRoleName) {
             $adminRole = Role::where('name', $adminRoleName)->first();
-            $adminRole?->givePermissionTo(Permission::all());
+            $adminRole?->givePermissionTo($adminAutoGrantedPermissions);
         }
 
         // "view-purchases" is always active for everyone (the frontend never gates on it
