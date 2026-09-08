@@ -2,11 +2,15 @@
 
 namespace App\Providers;
 
+use App\Events\SaleCreated;
+use App\Listeners\PushSaleCreatedToRealtimeServer;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\PurchaseItem;
 use App\Models\Sale;
+use App\Models\SaleItem;
 use App\Observers\ProductObserver;
+use App\Observers\SaleItemObserver;
 use App\Observers\SaleObserver;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
@@ -24,6 +28,7 @@ class EventServiceProvider extends ServiceProvider
 
         ],
         Product::class => [ProductObserver::class],
+        SaleItem::class => [SaleItemObserver::class],
         Sale::class => [SaleObserver::class],
     ];
     /**
@@ -34,6 +39,9 @@ class EventServiceProvider extends ServiceProvider
     protected $listen = [
         Registered::class => [
             SendEmailVerificationNotification::class,
+        ],
+        SaleCreated::class => [
+            PushSaleCreatedToRealtimeServer::class,
         ],
     ];
 

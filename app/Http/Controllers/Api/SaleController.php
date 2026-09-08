@@ -906,11 +906,11 @@ class SaleController extends Controller
 
         $payment = $sale->payments()->findOrFail($paymentId);
 
-        // The cashier who created the sale may delete any payment on it. Someone who
-        // recorded a payment on another cashier's sale (via "سداد فواتير كل المستخدمين")
-        // may cancel that specific payment of theirs, but not one recorded by someone else.
-        if ((int) $sale->user_id !== (int) Auth::id() && (int) $payment->user_id !== (int) Auth::id()) {
-            abort(403, 'Only the user who created this sale, or who recorded this payment, can delete it.');
+        // Only the exact user who recorded this payment may cancel it — no exception for
+        // the sale's owner, and no exception for admins either. This is deliberately
+        // stricter than sale ownership: a payment is tied to whoever entered it.
+        if ((int) $payment->user_id !== (int) Auth::id()) {
+            abort(403, 'Only the user who recorded this payment can delete it.');
         }
 
         try {

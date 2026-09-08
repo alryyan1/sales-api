@@ -2,29 +2,23 @@
 
 namespace App\Observers;
 
-use App\Http\Resources\SaleResource;
 use App\Models\Sale;
 use App\Services\RealtimeNotifier;
 
+/**
+ * Sale *creation* is pushed via the SaleCreated event/listener instead (see
+ * App\Listeners\PushSaleCreatedToRealtimeServer) — that fires once items/discount/payments
+ * are fully assembled, whereas this model's "created" event fires the instant the bare sale
+ * row is inserted (before its items exist). Deletion has no such timing concern: the sale is
+ * already fully formed, so hooking Eloquent's "deleted" event directly here is fine.
+ */
 class SaleObserver
 {
-    // Pushes every newly created sale to the realtime relay so it appears in every
-    // cashier's shift sales list live, without a page reload.
-    public function created(Sale $sale): void
+    public function deleted(Sale $sale): void
     {
-        $sale->load([
-            'client:id,name',
-            'user:id,name',
-            'warehouse:id,name',
-            'items.product:id,name,sku,scientific_name,image_url,is_service',
-            'payments.user:id,name,username',
-            'returns:id,sale_id',
-            'returns.items:id,sale_return_id,product_id,quantity,price',
-        ]);
-
-        app(RealtimeNotifier::class)->notify('sale.created', [
+        app(RealtimeNotifier::class)->notify('sale.deleted', [
+            'id' => $sale->id,
             'shift_id' => $sale->shift_id,
-            'sale' => (new SaleResource($sale))->resolve(),
         ]);
     }
 }
