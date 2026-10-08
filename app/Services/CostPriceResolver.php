@@ -39,8 +39,13 @@ class CostPriceResolver
     }
 
     /**
-     * Resolve cost price for a product from the latest purchase invoice.
-     * Falls back to product->cost_price if no purchase item exists.
+     * Resolve cost price for a product, in local currency:
+     * - The product's own manually-set cost_price wins when > 0 — the same priority the
+     *   product page uses (Product::getLatestCostPerSellableUnitAttribute), so a cost the
+     *   user typed in (e.g. 0.06 USD) is what sales are costed at.
+     * - Otherwise the latest purchase invoice's cost per sellable unit.
+     * Currency follows ProductResource::last_purchase_currency: preferred_currency, falling
+     * back to the latest purchase's currency.
      */
     public static function resolveCostPrice(Product $product): float
     {
@@ -51,6 +56,13 @@ class CostPriceResolver
             ->select('purchase_items.*', 'purchases.currency as purchase_currency')
             ->first();
 
+        if ((float) ($product->cost_price ?? 0) > 0) {
+            return self::convertCostToLocalCurrency(
+                (float) $product->cost_price,
+                $product->preferred_currency ?? $lastItem?->purchase_currency
+            );
+        }
+
         if ($lastItem) {
             $cost = (float) ($lastItem->cost_per_sellable_unit > 0
                 ? $lastItem->cost_per_sellable_unit
@@ -59,7 +71,7 @@ class CostPriceResolver
             return self::convertCostToLocalCurrency($cost, $lastItem->purchase_currency);
         }
 
-        return self::convertCostToLocalCurrency((float) ($product->cost_price ?? 0), $product->preferred_currency);
+        return 0.0;
     }
 
     /**

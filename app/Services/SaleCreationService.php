@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Product;
-use App\Models\PurchaseItem;
 use App\Models\Sale;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -94,19 +93,6 @@ class SaleCreationService
 
     private function resolveCostPrice(Product $product): float
     {
-        $lastItem = PurchaseItem::where('purchase_items.product_id', $product->id)
-            ->join('purchases', 'purchases.id', '=', 'purchase_items.purchase_id')
-            ->orderBy('purchases.purchase_date', 'desc')
-            ->orderBy('purchase_items.created_at', 'desc')
-            ->select('purchase_items.*')
-            ->first();
-
-        if ($lastItem) {
-            return (float) ($lastItem->cost_per_sellable_unit > 0
-                ? $lastItem->cost_per_sellable_unit
-                : ($lastItem->unit_cost ?? 0));
-        }
-
-        return (float) ($product->cost_price ?? 0);
+        return CostPriceResolver::resolveCostPrice($product);
     }
 }
