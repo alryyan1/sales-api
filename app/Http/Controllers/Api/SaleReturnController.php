@@ -37,6 +37,9 @@ class SaleReturnController extends Controller
         if ($shiftId = $request->input('shift_id')) {
             $query->where('shift_id', $shiftId);
         }
+        if ($warehouseId = $request->input('warehouse_id')) {
+            $query->whereHas('sale', fn ($q) => $q->where('warehouse_id', $warehouseId));
+        }
         if ($start = $request->input('start_date')) {
             $query->whereDate('created_at', '>=', $start);
         }
@@ -80,7 +83,7 @@ class SaleReturnController extends Controller
 
         // Check if sale is fully paid
         $totalPaid = \Illuminate\Support\Facades\DB::table('payments')->where('sale_id', $sale->id)->sum('amount');
-        $totalAmount = \Illuminate\Support\Facades\DB::table('sale_items')->where('sale_id', $sale->id)->sum('total_price') - ($sale->discount_amount ?? 0);
+        $totalAmount = $sale->applyCopay((float) \Illuminate\Support\Facades\DB::table('sale_items')->where('sale_id', $sale->id)->sum('total_price') - (float) ($sale->discount_amount ?? 0));
         if (round($totalPaid, 2) < round($totalAmount, 2)) {
             throw ValidationException::withMessages([
                 'sale_id' => ['لا يمكن إرجاع أصناف من فاتورة غير مسددة بالكامل.']

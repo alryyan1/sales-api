@@ -49,6 +49,7 @@ class ReportController extends Controller
             'client_id' => 'nullable|integer|exists:clients,id',
             'user_id' => 'nullable|integer|exists:users,id',
             'shift_id' => 'nullable|integer|exists:shifts,id',
+            'warehouse_id' => 'nullable|integer|exists:warehouses,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'per_page' => 'nullable|integer', // Control pagination size
             // Add validation for sort_by, sort_direction if implementing dynamic sorting
@@ -1213,6 +1214,7 @@ class ReportController extends Controller
             'client_id' => 'nullable|integer|exists:clients,id',
             'user_id' => 'nullable|integer|exists:users,id',
             'shift_id' => 'nullable|integer|exists:shifts,id',
+            'warehouse_id' => 'nullable|integer|exists:warehouses,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'has_discount' => 'nullable|boolean',
         ]);
@@ -1247,6 +1249,9 @@ class ReportController extends Controller
         }
         if (!empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
+        }
+        if (!empty($validated['warehouse_id'])) {
+            $query->where('warehouse_id', $validated['warehouse_id']);
         }
         if (!empty($validated['shift_id'])) {
             $query->where('shift_id', $validated['shift_id']);
@@ -1468,6 +1473,7 @@ class ReportController extends Controller
             'client_id' => 'nullable|integer|exists:clients,id',
             'user_id' => 'nullable|integer|exists:users,id',
             'shift_id' => 'nullable|integer|exists:shifts,id',
+            'warehouse_id' => 'nullable|integer|exists:warehouses,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'search' => 'nullable|string',
         ]);

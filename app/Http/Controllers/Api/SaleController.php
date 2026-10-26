@@ -91,6 +91,9 @@ class SaleController extends Controller
         if ($userId = $request->input('user_id')) {
             $query->where('user_id', $userId);
         }
+        if ($warehouseId = $request->input('warehouse_id')) {
+            $query->where('warehouse_id', $warehouseId);
+        }
         if ($saleId = $request->input('sale_id')) {
             $query->where('id', $saleId);
         }
@@ -132,6 +135,13 @@ class SaleController extends Controller
 
         $discountSum = (float) (clone $filtered)->sum('discount_amount');
 
+        // Portion of insured sales covered by the insurance company (not owed by the patient).
+        $insuranceCoveredSum = (float) DB::table('sales')
+            ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'sales.id')
+            ->whereNotNull('sales.copay_percentage')
+            ->selectRaw('COALESCE(SUM(((SELECT COALESCE(SUM(si.total_price), 0) FROM sale_items si WHERE si.sale_id = sales.id) - COALESCE(sales.discount_amount, 0)) * (100 - sales.copay_percentage) / 100), 0) as covered')
+            ->value('covered');
+
         $paidSum = (float) DB::table('payments')
             ->joinSub($filteredIds, 'filtered_sales', 'filtered_sales.id', '=', 'payments.sale_id')
             ->sum('amount');
@@ -151,6 +161,9 @@ class SaleController extends Controller
         }
         if ($userId = $request->input('user_id')) {
             $returnsQuery->where('sales.user_id', $userId);
+        }
+        if ($warehouseId = $request->input('warehouse_id')) {
+            $returnsQuery->where('sales.warehouse_id', $warehouseId);
         }
         if ($productId = $request->input('product_id')) {
             $returnsQuery->where('sale_return_items.product_id', $productId);
@@ -213,7 +226,7 @@ class SaleController extends Controller
         }
 
         return response()->json([
-            'total_amount' => (float) $itemAgg->subtotal - $discountSum,
+            'total_amount' => (float) $itemAgg->subtotal - $discountSum - $insuranceCoveredSum,
             'paid_amount' => $paidSum,
             'total_cost' => (float) $itemAgg->raw_cost + $costAdjustment,
             'returned_amount' => $returnedSum,
@@ -848,8 +861,12 @@ class SaleController extends Controller
                 }
 
                 // Ensure discount does not reduce total below amount already paid
+                // (with an insurance co-pay the patient only owes copay% of the discounted total)
                 $paidAmount = (float) $sale->payments()->sum('amount');
-                $maxDiscountAllowed = max(0.0, $subtotal - $paidAmount);
+                $copayFactor = $sale->copay_percentage !== null ? (float) $sale->copay_percentage / 100 : 1.0;
+                $maxDiscountAllowed = $copayFactor > 0
+                    ? max(0.0, $subtotal - $paidAmount / $copayFactor)
+                    : $subtotal;
                 if ($discountValue > $maxDiscountAllowed) {
                     throw ValidationException::withMessages([
                         'discount_amount' => [
@@ -1511,14 +1528,16 @@ class SaleController extends Controller
                 'user:id,name',
                 'warehouse:id,name',
                 'items.product:id,name,sku,scientific_name,image_url,is_service',
+                'patient.insuranceCompany:id,name',
                 // No need to load purchaseItemBatch for thermal receipt unless showing batch no.
             ]);
 
             // --- PDF Setup for Thermal (e.g., 80mm width) ---
-            // Dynamic height: base + items + payments + space for barcode at bottom
+            // Dynamic height: base + items + payments + insurance block + space for barcode at bottom
             $itemsCount = $sale->items?->count() ?? 0;
             $paymentsCount = $sale->payments?->count() ?? 0;
-            $pageHeightMm = 125 + (5 * $itemsCount) + (5 * $paymentsCount);
+            $pageHeightMm = 125 + (5 * $itemsCount) + (5 * $paymentsCount)
+                + ($sale->patient ? 32 : 0) + ((float) ($sale->discount_amount ?? 0) > 0 ? 5 : 0);
 
             // Log::info("Generating thermal PDF for Sale {$sale->id}. Height: {$pageHeightMm}mm");
 
@@ -1564,6 +1583,10 @@ class SaleController extends Controller
                 }
             }
 
+            // Text content is laid out right-to-left: in RTL mode the first Cell of a row
+            // sits at the right edge. (Logo above and barcode below stay in LTR coordinates.)
+            $pdf->setRTL(true);
+
             $pdf->SetFont('arial', 'B', 10); // Or your preferred Arabic thermal font
             $pdf->MultiCell(0, 5, $companyName, 0, 'C', 0, 1);
             if ($companyPhone) {
@@ -1598,10 +1621,10 @@ class SaleController extends Controller
             // Text: Item | Qty | Price | Total
             // Align: R  | C   | R     | R
             $pdf->SetFont('arial', 'B', 9);
-            $pdf->Cell(18, 5, 'الإجمالي', 0, 0, 'R'); // Total
-            $pdf->Cell(18, 5, 'السعر', 0, 0, 'R');    // Price
+            $pdf->Cell(26, 5, 'الصنف', 0, 0, 'R');    // Item Name
             $pdf->Cell(10, 5, 'كمية', 0, 0, 'C');   // Qty
-            $pdf->Cell(26, 5, 'الصنف', 0, 1, 'R');    // Item Name (remaining width)
+            $pdf->Cell(18, 5, 'السعر', 0, 0, 'C');    // Price
+            $pdf->Cell(18, 5, 'الإجمالي', 0, 1, 'L'); // Total
             $pdf->Ln(0.5);
             $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY()); // Separator
             $pdf->Ln(0.5);
@@ -1620,12 +1643,10 @@ class SaleController extends Controller
                 $itemQty = (string) $item->quantity;
 
                 // Using MultiCell for name to handle potential (though short) wrapping
-                $currentY = $pdf->GetY();
-                $pdf->Cell(18, 4, $itemTotal, 0, 0, 'R');
-                $pdf->Cell(18, 4, $itemPrice, 0, 0, 'R');
+                $pdf->Cell(26, 4, $productName, 0, 0, 'R', false, '', 1);
                 $pdf->Cell(10, 4, $itemQty, 0, 0, 'C');
-                $pdf->MultiCell(26, 4, $productName, 0, 'C', 0, 1); // Set X explicitly
-                $pdf->SetX(4); // Reset X for next line to start from left margin (for RTL Cell flow)
+                $pdf->Cell(18, 4, $itemPrice, 0, 0, 'C');
+                $pdf->Cell(18, 4, $itemTotal, 0, 1, 'L');
                 // $pdf->Ln(0.5); // Small space between items
             }
             $pdf->Ln(0.5);
@@ -1633,24 +1654,56 @@ class SaleController extends Controller
             $pdf->Ln(1);
 
             $itemsSubtotal = (float) ($sale->items?->sum('total_price') ?? 0);
+            $discountAmount = (float) ($sale->discount_amount ?? 0);
+            $totalBeforeCopay = $itemsSubtotal - $discountAmount;
             $paidAmount = (float) ($sale->payments?->sum('amount') ?? 0);
-            $finalTotal = $itemsSubtotal;
+            $finalTotal = $sale->applyCopay($totalBeforeCopay);
             $due = max(0, $finalTotal - $paidAmount);
 
             $pdf->SetFont('arial', 'B', 9);
-            $pdf->Cell(46, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
-            $pdf->Cell(26, 5, $this->formatMoney($itemsSubtotal), 0, 1, 'R');
+            $pdf->Cell(42, 5, 'الإجمالي الفرعي:', 0, 0, 'R');
+            $pdf->Cell(30, 5, $this->formatMoney($itemsSubtotal), 0, 1, 'L');
+
+            if ($discountAmount > 0) {
+                $pdf->SetFont('arial', '', 8);
+                $pdf->Cell(42, 5, 'الخصم:', 0, 0, 'R');
+                $pdf->Cell(30, 5, $this->formatMoney($discountAmount), 0, 1, 'L');
+            }
+
+            // --- Insurance block (only for sales with a registered patient) ---
+            if ($sale->patient) {
+                $pdf->Ln(0.5);
+                $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY());
+                $pdf->Ln(0.5);
+                $pdf->SetFont('arial', '', 8);
+                // Names/card can be long: give the value a wider column and shrink-to-fit (stretch=1).
+                $pdf->Cell(26, 4, 'شركة التأمين:', 0, 0, 'R');
+                $pdf->Cell(46, 4, (string) ($sale->patient->insuranceCompany?->name ?? '-'), 0, 1, 'L', false, '', 1);
+                $pdf->Cell(26, 4, 'اسم المريض:', 0, 0, 'R');
+                $pdf->Cell(46, 4, (string) $sale->patient->name, 0, 1, 'L', false, '', 1);
+                $pdf->Cell(26, 4, 'رقم البطاقة:', 0, 0, 'R');
+                $pdf->Cell(46, 4, (string) $sale->patient->insurance_card_number, 0, 1, 'L', false, '', 1);
+                $pdf->Cell(42, 4, 'إجمالي الفاتورة الأصلي:', 0, 0, 'R');
+                $pdf->Cell(30, 4, $this->formatMoney($totalBeforeCopay), 0, 1, 'L');
+                if ($sale->copay_percentage !== null) {
+                    $pdf->Cell(42, 4, 'نسبة التحمل:', 0, 0, 'R');
+                    $pdf->Cell(30, 4, rtrim(rtrim(number_format((float) $sale->copay_percentage, 2, '.', ''), '0'), '.').'%', 0, 1, 'L');
+                }
+                $pdf->Ln(0.5);
+                $pdf->Line($pdf->GetX(), $pdf->GetY(), $pdf->getPageWidth() - $pdf->GetX(), $pdf->GetY());
+                $pdf->Ln(0.5);
+            }
 
             $pdf->SetFont('arial', 'B', 9);
-            $pdf->Cell(46, 6, 'الإجمالي النهائي:', 0, 0, 'R');
-            $pdf->Cell(26, 6, $this->formatMoney($finalTotal), 0, 1, 'R');
+            $pdf->Cell(42, 6, $sale->patient && $sale->copay_percentage !== null ? 'المبلغ بعد التحمل:' : 'الإجمالي النهائي:', 0, 0, 'R');
+            $pdf->Cell(30, 6, $this->formatMoney($finalTotal), 0, 1, 'L');
 
             $pdf->SetFont('arial', '', 8);
-            $pdf->Cell(46, 5, 'المدفوع:', 0, 0, 'R');
-            $pdf->Cell(26, 5, $this->formatMoney($paidAmount), 0, 1, 'R');
+            $pdf->Cell(42, 5, 'المدفوع:', 0, 0, 'R');
+            $pdf->Cell(30, 5, $this->formatMoney($paidAmount), 0, 1, 'L');
             $pdf->SetFont('arial', 'B', 8);
-            $pdf->Cell(46, 5, 'المتبقي:', 0, 0, 'R');
-            $pdf->Cell(26, 5, $this->formatMoney($due), 0, 1, 'R');
+            $pdf->Cell(42, 5, 'المتبقي:', 0, 0, 'R');
+            $pdf->Cell(30, 5, $this->formatMoney($due), 0, 1, 'L');
             $pdf->Ln(1);
 
             // --- Payment Methods Used ---
@@ -1663,8 +1716,8 @@ class SaleController extends Controller
                     if (function_exists('config')) {
                         $methodLabel = config('app_settings.payment_methods_ar.'.$payment->method, $payment->method);
                     }
-                    $pdf->Cell(46, 4, $methodLabel.':', 0, 0, 'R');
-                    $pdf->Cell(26, 4, $this->formatMoney($payment->amount), 0, 1, 'R');
+                    $pdf->Cell(42, 4, $methodLabel.':', 0, 0, 'R');
+                    $pdf->Cell(30, 4, $this->formatMoney($payment->amount), 0, 1, 'L');
                 }
                 $pdf->Ln(1);
             }
@@ -1675,6 +1728,7 @@ class SaleController extends Controller
             $pdf->MultiCell(0, 4, $thermalFooter, 0, 'C', 0, 1);
 
             // --- Barcode at bottom (invoice/sale identifier for scanning) ---
+            $pdf->setRTL(false);
             $pdf->Ln(3);
             $barcodeCode = $sale->id;
             $barcodeW = 60;

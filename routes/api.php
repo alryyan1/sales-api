@@ -9,6 +9,9 @@ use App\Http\Controllers\Api\ExpenseCategoryController;
 use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\InventoryCountController;
 use App\Http\Controllers\Api\PackageController;
+use App\Http\Controllers\Api\InsuranceClaimReportController;
+use App\Http\Controllers\Api\InsuranceCompanyController;
+use App\Http\Controllers\Api\SalePatientController;
 use App\Http\Controllers\Api\PdfReportSettingController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\ProductController;
@@ -115,6 +118,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('admin/pdf-report-settings', [PdfReportSettingController::class, 'index'])->name('pdf-report-settings.index');
     Route::put('admin/pdf-report-settings/{reportKey}', [PdfReportSettingController::class, 'update'])->name('pdf-report-settings.update');
 
+    // -- Insurance Companies (managed from Settings) --
+    Route::apiResource('admin/insurance-companies', InsuranceCompanyController::class)
+        ->parameters(['insurance-companies' => 'insuranceCompany']);
+
     // -- Database Backup Management --
     Route::prefix('admin')->name('api.admin.')->group(function () {
         Route::get('/backups', [BackupController::class, 'index'])->name('backups.index');
@@ -126,6 +133,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // -- Reporting Routes --
     Route::prefix('reports')->name('api.reports.')->group(function () {
         Route::get('/sales', [ReportController::class, 'salesReport'])->name('sales');
+        Route::get('/insurance-claims', [InsuranceClaimReportController::class, 'index'])->name('insurance-claims');
+        Route::get('/insurance-claims-excel', [InsuranceClaimReportController::class, 'excel'])->name('insurance-claims-excel');
         Route::get('/purchases', [ReportController::class, 'purchasesReport'])->name('purchases');
         Route::get('/inventory', [ReportController::class, 'inventoryReport'])->name('inventory');
         Route::get('/profit-loss', [ReportController::class, 'profitLossReport'])->name('profit-loss');
@@ -282,6 +291,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/sales/{sale}/payments', [SaleController::class, 'deletePayments'])->name('api.sales.deletePayments');
     Route::post('/sales/{sale}/payments/single', [SaleController::class, 'addSinglePayment'])->name('api.sales.addSinglePayment');
     Route::put('/sales/{sale}/discount', [SaleController::class, 'updateDiscount'])->name('api.sales.updateDiscount');
+    Route::post('/sales/{sale}/patient', [SalePatientController::class, 'attach'])->name('api.sales.attachPatient');
+    Route::delete('/sales/{sale}/patient', [SalePatientController::class, 'detach'])->name('api.sales.detachPatient');
+    Route::put('/sales/{sale}/copay', [SalePatientController::class, 'updateCopay'])->name('api.sales.updateCopay');
     Route::delete('/sales/{sale}/payments/{payment}', [SaleController::class, 'deleteSinglePayment'])->name('api.sales.deleteSinglePayment');
     Route::post('/sales/{sale}/items', [SaleController::class, 'addSaleItem'])->name('api.sales.addSaleItem');
     Route::post('/sales/{sale}/items/multiple', [SaleController::class, 'addMultipleSaleItems'])->name('api.sales.addMultipleSaleItems');

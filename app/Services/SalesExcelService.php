@@ -285,6 +285,9 @@ class SalesExcelService
         if (!empty($filters['user_id'])) {
             $query->where('user_id', $filters['user_id']);
         }
+        if (!empty($filters['warehouse_id'])) {
+            $query->where('warehouse_id', $filters['warehouse_id']);
+        }
         if (!empty($filters['status'])) {
             $query->where('status', $filters['status']);
         }

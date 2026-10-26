@@ -50,6 +50,7 @@ class Sale extends Model
     protected $fillable = [
         'warehouse_id',
         'client_id',
+        'patient_id',
         'user_id',
         'shift_id',
         'sale_date',
@@ -58,6 +59,7 @@ class Sale extends Model
         'is_quote',
         'total_cost',
         'discount_amount',
+        'copay_percentage',
         'finance_exported_at',
         'finance_export_error',
     ];
@@ -67,6 +69,7 @@ class Sale extends Model
         'is_returned' => 'boolean',
         'is_quote' => 'boolean',
         'discount_amount' => 'decimal:4',
+        'copay_percentage' => 'decimal:2',
         'finance_exported_at' => 'datetime',
     ];
 
@@ -76,6 +79,14 @@ class Sale extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    /**
+     * Insured patient linked to this sale (optional).
+     */
+    public function patient(): BelongsTo
+    {
+        return $this->belongsTo(Patient::class);
     }
 
     /**
@@ -155,23 +166,34 @@ class Sale extends Model
         return (float) $this->payments()->sum('amount');
     }
 
-    // Accessor for due amount (subtotal - discount_amount - paid)
-    public function getCalculatedDueAmountAttribute(): float
+    /**
+     * Reduce an amount (subtotal - discount) to the patient's share when an
+     * insurance co-pay percentage is set; returns it unchanged otherwise.
+     */
+    public function applyCopay(float $amount): float
     {
-        $itemsTotal = (float) $this->items()->sum('total_price');
-        $discount = (float) ($this->discount_amount ?? 0);
-        $paid = $this->getCalculatedPaidAmountAttribute();
+        if ($this->copay_percentage === null) {
+            return $amount;
+        }
 
-        return (float) max(0, $itemsTotal - $discount - $paid);
+        return round($amount * (float) $this->copay_percentage / 100, 4);
     }
 
-    // Accessor for the sale's total revenue (subtotal - discount_amount), regardless of payment status
+    // Accessor for due amount (subtotal - discount_amount, reduced by co-pay - paid)
+    public function getCalculatedDueAmountAttribute(): float
+    {
+        $paid = $this->getCalculatedPaidAmountAttribute();
+
+        return (float) max(0, $this->getCalculatedTotalAmountAttribute() - $paid);
+    }
+
+    // Accessor for the sale's total revenue (subtotal - discount_amount, reduced by co-pay), regardless of payment status
     public function getCalculatedTotalAmountAttribute(): float
     {
         $itemsTotal = (float) $this->items()->sum('total_price');
         $discount = (float) ($this->discount_amount ?? 0);
 
-        return (float) max(0, $itemsTotal - $discount);
+        return (float) max(0, $this->applyCopay($itemsTotal - $discount));
     }
 
     // Accessor for the sale's total cost of goods sold. Uses the same live resolution

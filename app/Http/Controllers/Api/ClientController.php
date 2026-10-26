@@ -78,7 +78,7 @@ class ClientController extends Controller
                 $totalDebit = $client->sales->sum(function ($sale) {
                     $itemsTotal = $sale->items->sum('total_price');
                     $discount = (float) ($sale->discount_amount ?? 0);
-                    return $itemsTotal - $discount;
+                    return $sale->applyCopay($itemsTotal - $discount);
                 });
 
                 $totalCredit = $client->payments->sum('amount');
@@ -403,7 +403,7 @@ class ClientController extends Controller
         foreach ($clients as $client) {
             // --- Financial totals ---
             $totalDebit = $client->sales->sum(function ($sale) {
-                return $sale->items->sum('total_price') - (float) ($sale->discount_amount ?? 0);
+                return $sale->applyCopay($sale->items->sum('total_price') - (float) ($sale->discount_amount ?? 0));
             });
             $totalCredit = $client->payments->sum('amount');
             $balance     = $totalDebit - $totalCredit;
@@ -434,7 +434,7 @@ class ClientController extends Controller
             foreach ($client->sales as $sale) {
                 $itemsTotal  = (float) $sale->items->sum('total_price');
                 $discount    = (float) ($sale->discount_amount ?? 0);
-                $saleTotal   = $itemsTotal - $discount;
+                $saleTotal   = $sale->applyCopay($itemsTotal - $discount);
                 $paidAmount  = (float) $sale->payments->sum('amount');
                 $dueAmount   = max(0, $saleTotal - $paidAmount);
 

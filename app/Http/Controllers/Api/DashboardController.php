@@ -628,7 +628,7 @@ class DashboardController extends Controller
             ->selectRaw("
                 sales.id, sales.number, sales.sale_date,
                 COALESCE(clients.name,'—') as client_name,
-                COALESCE(it.total,0) - COALESCE(sales.discount_amount,0) - COALESCE(pt.total,0) as due_amount
+                (COALESCE(it.total,0) - COALESCE(sales.discount_amount,0)) * (COALESCE(sales.copay_percentage,100) / 100) - COALESCE(pt.total,0) as due_amount
             ")
             ->havingRaw('due_amount > 0')
             ->orderByDesc('due_amount')
@@ -824,7 +824,7 @@ class DashboardController extends Controller
             ->where('is_quote', false)
             ->leftJoinSub($debtItemQ, 'it', 'it.sale_id', '=', 'sales.id')
             ->leftJoinSub($debtPaidQ, 'pt', 'pt.sale_id', '=', 'sales.id')
-            ->selectRaw('SUM(GREATEST(0, COALESCE(it.items_total,0) - COALESCE(sales.discount_amount,0) - COALESCE(pt.paid_total,0))) as debt')
+            ->selectRaw('SUM(GREATEST(0, (COALESCE(it.items_total,0) - COALESCE(sales.discount_amount,0)) * (COALESCE(sales.copay_percentage,100) / 100) - COALESCE(pt.paid_total,0))) as debt')
             ->value('debt') ?? 0);
 
         // ── Purchases for this branch ─────────────────────────────────────────
@@ -861,7 +861,7 @@ class DashboardController extends Controller
             ->select(
                 'sales.id', 'sales.number', 'sales.sale_date',
                 DB::raw("COALESCE(clients.name,'—') as client_name"),
-                DB::raw('COALESCE(it.items_total,0) - COALESCE(sales.discount_amount,0) as total_amount'),
+                DB::raw('(COALESCE(it.items_total,0) - COALESCE(sales.discount_amount,0)) * (COALESCE(sales.copay_percentage,100) / 100) as total_amount'),
                 DB::raw('COALESCE(pt.paid_total,0) as paid_amount')
             )
             ->orderByDesc('sales.sale_date')

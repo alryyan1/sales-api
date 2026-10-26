@@ -61,10 +61,17 @@ class SaleResource extends JsonResource
             'finance_exported_at' => $this->finance_exported_at?->toISOString(),
             'finance_export_error' => $this->finance_export_error,
 
-            // Subtotal from items; discount stored as amount; total = subtotal - discount
+            // Insured patient (optional) — lazy-loaded only for sales that have one.
+            'patient_id' => $this->patient_id,
+            'patient' => $this->patient_id ? $this->patientPayload() : null,
+            'copay_percentage' => $this->copay_percentage !== null ? (float) $this->copay_percentage : null,
+
+            // Subtotal from items; discount stored as amount; total = subtotal - discount,
+            // reduced to the patient's co-pay share when one is set.
             'subtotal' => (float) $this->items->sum('total_price'),
             'discount_amount' => (float) ($this->discount_amount ?? 0),
-            'total_amount' => (float) ($this->items->sum('total_price') - ($this->discount_amount ?? 0)),
+            'total_before_copay' => (float) ($this->items->sum('total_price') - ($this->discount_amount ?? 0)),
+            'total_amount' => (float) $this->applyCopay((float) ($this->items->sum('total_price') - ($this->discount_amount ?? 0))),
             // Total cost of goods sold, in local currency (sum of each item's resolved_cost_price).
             'total_cost' => (float) $this->items->sum(fn ($item) => (float) $item->resolved_cost_price * (float) $item->quantity),
             'created_at' => $this->created_at ? $this->created_at->toISOString() : null,
@@ -76,6 +83,22 @@ class SaleResource extends JsonResource
             'due_amount' => $this->getCalculatedDueAmountAttribute(),   // computed from items, discount, and payments
             'payments' => PaymentResource::collection($this->whenLoaded('payments')),
 
+        ];
+    }
+
+    private function patientPayload(): ?array
+    {
+        $patient = $this->patient;
+        if (! $patient) {
+            return null;
+        }
+
+        return [
+            'id' => $patient->id,
+            'name' => $patient->name,
+            'insurance_card_number' => $patient->insurance_card_number,
+            'insurance_company_id' => $patient->insurance_company_id,
+            'insurance_company_name' => $patient->insuranceCompany?->name,
         ];
     }
 }

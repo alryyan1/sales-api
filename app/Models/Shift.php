@@ -74,10 +74,13 @@ class Shift extends Model
     {
         $sales = $this->sales()->where('is_quote', false)->with('items')->get();
 
-        $subtotal = $sales->sum(fn($sale) => $sale->items->sum('total_price'));
-        $discounts = $sales->sum(fn($sale) => (float) ($sale->discount_amount ?? 0));
+        // Each sale's total is (items - discount), reduced to the patient's share when an
+        // insurance co-pay is set.
+        $total = $sales->sum(fn($sale) => $sale->applyCopay(
+            (float) $sale->items->sum('total_price') - (float) ($sale->discount_amount ?? 0)
+        ));
 
-        return max(0.0, $subtotal - $discounts);
+        return max(0.0, $total);
     }
 
     /**

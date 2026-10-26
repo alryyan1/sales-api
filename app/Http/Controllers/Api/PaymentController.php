@@ -25,7 +25,7 @@ class PaymentController extends Controller
         ]);
 
         $query = Payment::with([
-            'sale:id,sale_date,client_id,discount_amount',
+            'sale:id,sale_date,client_id,discount_amount,copay_percentage',
             'sale.client:id,name',
             'sale.items:id,sale_id,quantity,unit_price',
             'sale.payments:id,sale_id,amount',
@@ -53,7 +53,7 @@ class PaymentController extends Controller
         return response()->json([
             'data' => $payments->map(function ($p) {
                 $sale      = $p->sale;
-                $saleTotal = $sale ? $sale->items->sum(fn($i) => $i->quantity * $i->unit_price) - (float) ($sale->discount_amount ?? 0) : 0;
+                $saleTotal = $sale ? $sale->applyCopay($sale->items->sum(fn($i) => $i->quantity * $i->unit_price) - (float) ($sale->discount_amount ?? 0)) : 0;
                 $salePaid  = $sale ? $sale->payments->sum(fn($pay) => (float) $pay->amount) : 0;
                 $saleDue   = max(0, $saleTotal - $salePaid);
 
