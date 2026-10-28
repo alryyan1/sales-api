@@ -1217,6 +1217,7 @@ class ReportController extends Controller
             'warehouse_id' => 'nullable|integer|exists:warehouses,id',
             'status' => ['nullable', 'string', Rule::in(['completed', 'pending', 'draft', 'cancelled'])],
             'has_discount' => 'nullable|boolean',
+            'search' => 'nullable|string',
         ]);
 
         // Fetch and Filter Sales Data
@@ -1269,25 +1270,24 @@ class ReportController extends Controller
                 });
             }
         }
+        if (!empty($validated['search'])) {
+            $search = $validated['search'];
+            $query->where(function ($q) use ($search) {
+                $q->where('id', $search)
+                    ->orWhere('number', 'like', "%{$search}%")
+                    ->orWhereHas('client', fn ($clientQuery) => $clientQuery->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        // Payments of the filtered sales only — matches the sales list page summary
+        // (SaleController::summary). Filtering by payment_date instead would pull in
+        // payments collected this period for sales made in earlier periods.
+        $allPayments = Payment::query()
+            ->whereIn('sale_id', (clone $query)->select('id'))
+            ->get();
+
         $sales = $query->orderBy('sale_date', 'desc')->orderBy('id', 'desc')->get();
         $sales->load(['items']);
-
-        // Query payments directly by shift_id or payment_date
-        $paymentsBaseQuery = Payment::query();
-        if (!empty($validated['shift_id'])) {
-            $paymentsBaseQuery->where('shift_id', $validated['shift_id']);
-        } else {
-            if ($startDate) {
-                $paymentsBaseQuery->whereDate('payment_date', '>=', $startDate);
-            }
-            if ($endDate) {
-                $paymentsBaseQuery->whereDate('payment_date', '<=', $endDate);
-            }
-        }
-        if (!empty($validated['user_id'])) {
-            $paymentsBaseQuery->where('user_id', $validated['user_id']);
-        }
-        $allPayments = $paymentsBaseQuery->get();
 
         $totalSubtotal = (float) $sales->sum(fn($s) => $s->items->sum('total_price'));
         $totalDiscount = (float) $sales->sum(fn($s) => (float) ($s->discount_amount ?? 0));

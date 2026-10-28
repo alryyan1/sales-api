@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Sale;
 use App\Models\Client;
 use App\Models\User;
+use App\Models\Warehouse;
 use App\Services\Pdf\PdfHeaderRenderer;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
@@ -55,6 +56,7 @@ class SalesReportPdfService
         $this->renderer->render($pdf);
         $this->sectionTitle($pdf, 'سجل المبيعات التفصيلي');
         $this->renderSalesTable($pdf, $sales);
+        $this->renderApprovals($pdf);
 
         return $pdf->Output('Report_' . now()->format('Y-m-d') . '.pdf', 'S');
     }
@@ -77,9 +79,13 @@ class SalesReportPdfService
 
     private function renderHeader(TCPDF $pdf, array $stats, ?Carbon $start, ?Carbon $end, array $filters): void
     {
-        // Title
-        $pdf->SetFont(self::FONT, 'B', 14);
-        $pdf->Cell(self::BODY_W, 8, 'تقرير المبيعات', 0, 1, 'C');
+        // Main title
+        $pdf->SetFont(self::FONT, 'B', 15);
+        $pdf->Cell(self::BODY_W, 8, 'إدارة المالية والمخازن', 0, 1, 'C');
+
+        // Report title (depends on user / warehouse filters)
+        $pdf->SetFont(self::FONT, 'B', 12);
+        $pdf->Cell(self::BODY_W, 7, $this->buildReportTitle($filters), 0, 1, 'C');
 
         // Shift / period line
         $pdf->SetFont(self::FONT, '', 8);
@@ -98,6 +104,30 @@ class SalesReportPdfService
 
         $this->hRule($pdf, 0.2);
         $pdf->Ln(3);
+    }
+
+    private function buildReportTitle(array $filters): string
+    {
+        $parts = [];
+        if (!empty($filters['user_id'])) {
+            $parts[] = 'المستخدم: ' . $this->ltr(User::find($filters['user_id'])?->name);
+        }
+        if (!empty($filters['warehouse_id'])) {
+            $parts[] = 'المخزن: ' . $this->ltr(Warehouse::find($filters['warehouse_id'])?->name);
+        }
+        return $parts ? 'تقرير مبيعات ' . implode(' / ', $parts) : 'تقرير المبيعات';
+    }
+
+    /**
+     * Wrap a non-Arabic name in an LTR embedding (LRE … PDF) so TCPDF's bidi pass
+     * doesn't reverse its word order inside an Arabic line ("Super Admin" → "Admin Super").
+     * Arabic names are left untouched — embedding them as LTR would reverse them instead.
+     */
+    private function ltr(?string $name): string
+    {
+        if ($name === null || $name === '') return '—';
+        if (preg_match('/\p{Arabic}/u', $name)) return $name;
+        return "\u{202A}" . $name . "\u{202C}";
     }
 
     private function buildSubTitle(array $stats, ?Carbon $start, ?Carbon $end): string
@@ -240,12 +270,12 @@ class SalesReportPdfService
             ['w' =>  8, 't' => '#'],
             ['w' => 19, 't' => 'التاريخ'],
             ['w' => 24, 't' => 'المستخدم'],
-            ['w' => 24, 't' => 'العميل'],
+            ['w' => 40, 't' => 'العميل'],
             ['w' => 18, 't' => 'الإجمالي'],
             ['w' => 13, 't' => 'الخصم'],
             ['w' => 18, 't' => 'المدفوع'],
             ['w' => 13, 't' => 'المتبقي'],
-            ['w' => 45, 't' => 'طريقة الدفع'],
+            ['w' => 29, 't' => 'طريقة الدفع'],
         ];
 
         $this->tableHeader($pdf, $cols);
@@ -270,12 +300,12 @@ class SalesReportPdfService
             $pdf->Cell($cols[0]['w'], $rowH, (string)($sale->number ?? $sale->id),                                1, 0, 'C');
             $pdf->Cell($cols[1]['w'], $rowH, $sale->sale_date ? date('Y-m-d', strtotime($sale->sale_date)) : '—', 1, 0, 'C');
             $pdf->Cell($cols[2]['w'], $rowH, $sale->user?->name   ?? '—',                                         1, 0, 'C');
-            $pdf->Cell($cols[3]['w'], $rowH, $sale->client?->name ?? 'عميل عام',                                  1, 0, 'C');
+            $pdf->Cell($cols[3]['w'], $rowH, $sale->client?->name ?? 'عميل عام',                                  1, 0, 'C', false, '', 1);
             $pdf->Cell($cols[4]['w'], $rowH, $this->fmt($total),                                                   1, 0, 'C');
             $pdf->Cell($cols[5]['w'], $rowH, $this->fmt($discount),                                                1, 0, 'C');
             $pdf->Cell($cols[6]['w'], $rowH, $this->fmt($paid),                                                    1, 0, 'C');
             $pdf->Cell($cols[7]['w'], $rowH, $this->fmt($due),                                                     1, 0, 'C');
-            $pdf->Cell($cols[8]['w'], $rowH, $sale->is_quote ? 'تسعيره' : $this->formatPayments($sale),           1, 1, 'C');
+            $pdf->Cell($cols[8]['w'], $rowH, $sale->is_quote ? 'تسعيره' : $this->formatPayments($sale),           1, 1, 'C', false, '', 1);
         }
 
         // Totals footer
@@ -292,6 +322,27 @@ class SalesReportPdfService
         $pdf->Cell($cols[6]['w'], $rowH, $this->fmt($sumPaid),     1, 0, 'C');
         $pdf->Cell($cols[7]['w'], $rowH, $this->fmt($sumDue),      1, 0, 'C');
         $pdf->Cell($cols[8]['w'], $rowH, '',                        1, 1, 'C');
+    }
+
+    // ── Approvals (signature block) ───────────────────────────────────────────
+
+    private function renderApprovals(TCPDF $pdf): void
+    {
+        // Keep the whole block on one page — move to a new page if it won't fit.
+        if ($pdf->GetY() > 297 - 12 - 20) {
+            $pdf->AddPage();
+            $this->renderer->render($pdf);
+        }
+
+        $pdf->Ln(12);
+        $colW = self::BODY_W / 2;
+        // Cells run left-to-right, so the rightmost (first in Arabic reading order) goes last.
+        $titles = ['اعتماد المدير العام', 'اعتماد المدير المالي'];
+
+        $pdf->SetFont(self::FONT, 'B', 10);
+        foreach ($titles as $i => $t) {
+            $pdf->Cell($colW, 7, $t, 0, $i === 1 ? 1 : 0, 'C');
+        }
     }
 
     // ── Shared helpers ────────────────────────────────────────────────────────
@@ -341,11 +392,11 @@ class SalesReportPdfService
         $parts = [];
         if (!empty($filters['client_id'])) {
             $c = Client::find($filters['client_id']);
-            $parts[] = 'العميل: ' . ($c?->name ?? '—');
+            $parts[] = 'العميل: ' . $this->ltr($c?->name);
         }
         if (!empty($filters['user_id'])) {
             $u = User::find($filters['user_id']);
-            $parts[] = 'المستخدم: ' . ($u?->name ?? '—');
+            $parts[] = 'المستخدم: ' . $this->ltr($u?->name);
         }
         return implode('  |  ', $parts);
     }
