@@ -81,7 +81,7 @@ class SalesReportPdfService
     {
         // Main title
         $pdf->SetFont(self::FONT, 'B', 15);
-        $pdf->Cell(self::BODY_W, 8, 'إدارة المالية والمخازن', 0, 1, 'C');
+        $pdf->Cell(self::BODY_W, 8, 'الإدارة المالية والمخازن', 0, 1, 'C');
 
         // Report title (depends on user / warehouse filters)
         $pdf->SetFont(self::FONT, 'B', 12);
@@ -108,14 +108,16 @@ class SalesReportPdfService
 
     private function buildReportTitle(array $filters): string
     {
-        $parts = [];
-        if (!empty($filters['user_id'])) {
-            $parts[] = 'المستخدم: ' . $this->ltr(User::find($filters['user_id'])?->name);
-        }
+        $user = !empty($filters['user_id'])
+            ? $this->ltr(User::find($filters['user_id'])?->name)
+            : null;
+
         if (!empty($filters['warehouse_id'])) {
-            $parts[] = 'المخزن: ' . $this->ltr(Warehouse::find($filters['warehouse_id'])?->name);
+            $title = 'تقرير مبيعات: ' . $this->ltr(Warehouse::find($filters['warehouse_id'])?->name);
+            return $user ? $title . ' / المستخدم: ' . $user : $title;
         }
-        return $parts ? 'تقرير مبيعات ' . implode(' / ', $parts) : 'تقرير المبيعات';
+
+        return $user ? 'تقرير مبيعات المستخدم: ' . $user : 'تقرير المبيعات';
     }
 
     /**
