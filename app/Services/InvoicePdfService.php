@@ -38,8 +38,12 @@ class InvoicePdfService
             $title = $isFinal ? 'فاتورة نهائية' : 'فاتورة مبدئية';
         }
 
-        if (($settings['invoice_template'] ?? 'classic') === 'modern') {
+        $template = $settings['invoice_template'] ?? 'classic';
+        if ($template === 'modern') {
             return $this->generateModernInvoicePdf($sale, $settings, $isFinal, $priceMode);
+        }
+        if ($template === 'letterhead') {
+            return $this->generateLetterheadInvoicePdf($sale, $settings, $title, $isFinal, $priceMode);
         }
 
         return $this->generateArabicProformaPdf($sale, $settings, $title, $isFinal, $priceMode);
@@ -303,6 +307,253 @@ class InvoicePdfService
     }
 
     /**
+     * Letterhead invoice template — reproduces the company's printed invoice:
+     * logo on both sides with the Arabic/English company names between them, tax
+     * number under the left logo, "Invoice" title, Bill To / Invoice No / Date,
+     * a lines-only items table, total + amount in words, and the address/phones
+     * with "Page x/y" in the footer. Header and footer repeat on every A4 page.
+     */
+    private function generateLetterheadInvoicePdf(Sale $sale, array $settings, string $title, bool $isFinal = false, string $priceMode = 'local'): string
+    {
+        // TCPDF calls Header()/Footer() on every page, so the letterhead repeats on
+        // each A4 page and long invoices continue on a new page instead of running
+        // over the footer.
+        $pdf = new class('P', 'mm', 'A4', true, 'UTF-8', false) extends TCPDF {
+            public ?\Closure $drawHeader = null;
+            public ?\Closure $drawFooter = null;
+
+            public function Header()
+            {
+                if ($this->drawHeader) ($this->drawHeader)($this);
+            }
+
+            public function Footer()
+            {
+                if ($this->drawFooter) ($this->drawFooter)($this);
+            }
+        };
+
+        $pageW = $pdf->getPageWidth();
+        $pageH = $pdf->getPageHeight();
+        $leftM = 14;
+        $rightM = 15;
+        $usableW = $pageW - $leftM - $rightM;
+        $logoPath = $this->resolveImagePath($settings['company_logo_url'] ?? null);
+
+        // Positions below (mm) are measured from the company's printed invoice.
+        $headerBottom = 60;
+        $footerTop = 274;
+
+        $pdf->drawHeader = function (TCPDF $pdf) use ($settings, $logoPath, $pageW) {
+            // Logo on both sides
+            if ($logoPath) {
+                foreach ([12, $pageW - 12 - 34] as $logoX) {
+                    try {
+                        @$pdf->Image($logoPath, $logoX, 12, 34, 34, '', '', '', false, 300, '', false, false, 0, 'CM');
+                    } catch (\Throwable $e) {}
+                }
+            }
+
+            // Arabic name + underlined English name, centred between the logos
+            $textX = 48;
+            $textW = $pageW - 2 * $textX;
+            $pdf->SetTextColor(0, 0, 0);
+
+            $nameAr = $this->bidiSafe($settings['company_name'] ?? '');
+            $pdf->SetFont('dejavusans', 'B', $this->fitFontSize($pdf, $nameAr, 'dejavusans', 'B', 22, $textW));
+            $pdf->SetXY($textX, 36);
+            $pdf->Cell($textW, 11, $nameAr, 0, 1, 'C');
+
+            if (! empty($settings['company_name_en'])) {
+                $nameEn = $settings['company_name_en'];
+                $pdf->SetFont('helvetica', 'U', $this->fitFontSize($pdf, $nameEn, 'helvetica', 'U', 15, $textW));
+                $pdf->SetXY($textX, 49);
+                $pdf->Cell($textW, 8, $nameEn, 0, 1, 'C');
+            }
+        };
+
+        $pdf->drawFooter = function (TCPDF $pdf) use ($settings, $leftM, $usableW, $footerTop) {
+            $pdf->SetTextColor(0, 0, 0);
+
+            // Address followed by the phone numbers, on one centred line
+            $line = trim(implode('   ', array_filter([
+                $settings['company_address'] ?? null,
+                $settings['company_phone'] ?? null,
+                $settings['company_phone_2'] ?? null,
+            ])));
+            if ($line !== '') {
+                $pdf->SetFont('arial', '', 9);
+                $pdf->SetXY($leftM, $footerTop);
+                $pdf->Cell($usableW, 6, $this->bidiSafe($line), 0, 1, 'C');
+            }
+
+            $pdf->SetFont('helvetica', '', 9);
+            $pdf->SetXY($leftM, $footerTop + 7);
+            $pdf->Cell($usableW, 6, 'Page ' . $pdf->getAliasNumPage() . '/' . $pdf->getAliasNbPages(), 0, 0, 'C');
+        };
+
+        $pdf->setPrintHeader(true);
+        $pdf->setPrintFooter(true);
+        $pdf->setHeaderMargin(0);
+        $pdf->setFooterMargin(0);
+        $pdf->setRTL(false);
+        $pdf->SetFont('arial', '', 10);
+        // Content area = between the header block and the footer lines.
+        $pdf->SetMargins($leftM, $headerBottom, $rightM);
+        $pdf->SetAutoPageBreak(true, $pageH - $footerTop + 4);
+        $pdf->AddPage();
+
+        // ── TAX NUMBER (under the left logo) ─────────────────────────────────
+        if (! empty($settings['tax_number'])) {
+            $pdf->SetXY($leftM, 63);
+            $pdf->SetFont('arial', '', 8);
+            $pdf->Cell(30, 5, 'الرقم التعريفي', 0, 1, 'C');
+            $pdf->SetX($leftM);
+            $pdf->SetFont('helvetica', '', 10);
+            $pdf->Cell(30, 5, $settings['tax_number'], 0, 1, 'C');
+        }
+
+        // ── TITLE ────────────────────────────────────────────────────────────
+        $pdf->SetXY($leftM, 84);
+        $pdf->SetFont('helvetica', '', 15);
+        $pdf->Cell($usableW, 9, $sale->is_quote ? 'Quotation' : 'Invoice', 0, 1, 'C');
+
+        // ── BILL TO / INVOICE NO / DATE ──────────────────────────────────────
+        $infoY = 98;
+        $pdf->SetXY($leftM, $infoY);
+        $pdf->SetFont('helvetica', '', 13);
+        $pdf->Cell(22, 8, 'Bill To', 0, 0, 'L');
+        $pdf->SetFont('arial', '', 12);
+        $clientName = $sale->client ? $sale->client->name : 'عميل نقدي';
+        $pdf->Cell(95, 8, $this->bidiSafe($clientName), 0, 0, 'L');
+
+        $pdf->SetXY($leftM + $usableW - 55, $infoY + 3);
+        $pdf->SetFont('helvetica', '', 10);
+        $pdf->Cell(37, 8, 'Invoice No #', 0, 0, 'R');
+        $pdf->Cell(18, 8, (string) $sale->id, 0, 0, 'R');
+
+        $pdf->SetXY($leftM, $infoY + 11);
+        $pdf->SetFont('helvetica', '', 10);
+        $pdf->Cell(22, 7, 'Date', 0, 0, 'L');
+        $pdf->Cell(60, 7, date('Y-m-d', strtotime($sale->sale_date)), 0, 1, 'L');
+
+        // ── ITEMS TABLE (horizontal rules only) ─────────────────────────────
+        $showUnit = $settings['sales_a4_show_unit_column'] ?? true;
+        // No, Item, Qty, Unit, Price, Amount — without the unit column its width goes to Item.
+        $w = $showUnit ? [14, 87, 16, 17, 22, 25] : [14, 104, 16, 0, 22, 25];
+        $rowH = 8.5;
+        $tableRight = $leftM + array_sum($w);
+
+        $drawTableHeader = function () use ($pdf, $w, $showUnit, $leftM, $tableRight) {
+            $y = $pdf->GetY();
+            $pdf->SetLineWidth(0.3);
+            $pdf->Line($leftM, $y, $tableRight, $y);
+            $pdf->SetFont('helvetica', '', 11);
+            $pdf->SetX($leftM);
+            $pdf->Cell($w[0], 8, 'No', 0, 0, 'C');
+            $pdf->Cell($w[1], 8, 'Item', 0, 0, 'C');
+            $pdf->Cell($w[2], 8, 'QTY', 0, 0, 'C');
+            if ($showUnit) {
+                $pdf->Cell($w[3], 8, 'Unit', 0, 0, 'C');
+            }
+            $pdf->Cell($w[4], 8, 'Price', 0, 0, 'R');
+            $pdf->Cell($w[5], 8, 'Amount', 0, 1, 'R');
+            $y = $pdf->GetY();
+            $pdf->Line($leftM, $y, $tableRight, $y);
+            $pdf->Line($leftM, $y + 0.8, $tableRight, $y + 0.8);
+            $pdf->SetY($y + 1.5);
+            $pdf->SetLineWidth(0.2);
+            $pdf->SetFont('arial', '', 9);
+        };
+
+        $pdf->SetY($infoY + 23);
+        $drawTableHeader();
+
+        foreach ($sale->items as $idx => $item) {
+            if ($pdf->GetY() + $rowH > $pageH - $pdf->getBreakMargin()) {
+                $pdf->AddPage();
+                $drawTableHeader();
+            }
+
+            $productName = $item->product->name ?? '';
+            $maxW = $w[1] - 4;
+            if ($pdf->GetStringWidth($productName) > $maxW) {
+                while ($pdf->GetStringWidth($productName . '...') > $maxW && mb_strlen($productName) > 0) {
+                    $productName = mb_substr($productName, 0, -1);
+                }
+                $productName .= '...';
+            }
+
+            $unitPrice = $this->resolveDisplayUnitPrice($item, $priceMode);
+            $lineTotal = $unitPrice * $item->quantity;
+
+            $pdf->SetX($leftM);
+            $pdf->Cell($w[0], $rowH, (string) ($idx + 1), 0, 0, 'C');
+            $pdf->Cell($w[1], $rowH, $this->bidiSafe($productName), 0, 0, 'L');
+            $pdf->Cell($w[2], $rowH, (string) $item->quantity, 0, 0, 'C');
+            if ($showUnit) {
+                $pdf->Cell($w[3], $rowH, $this->bidiSafe($item->product->sellableUnit->name ?? ''), 0, 0, 'C');
+            }
+            $pdf->Cell($w[4], $rowH, $this->formatDisplayMoney($unitPrice, $priceMode), 0, 0, 'R');
+            $pdf->Cell($w[5], $rowH, $this->formatDisplayMoney($lineTotal, $priceMode), 0, 1, 'R');
+
+            $y = $pdf->GetY();
+            $pdf->Line($leftM, $y, $tableRight, $y);
+        }
+
+        // ── TOTAL: words (left) · amount · "اجمالي" (right), all underlined ──
+        $subtotal = (float) $sale->items->sum(fn($item) => $this->resolveDisplayUnitPrice($item, $priceMode) * $item->quantity);
+        $discount = (float) ($sale->discount_amount ?? 0);
+        $net = $subtotal - $discount;
+
+        $totalRows = [];
+        if ($discount > 0) {
+            $totalRows[] = ['المجموع', $subtotal, false];
+            $totalRows[] = ['الخصم', $discount, false];
+        }
+        $totalRows[] = ['اجمالي', $net, true];
+
+        $pdf->Ln(4);
+        if ($pdf->GetY() + 9 * count($totalRows) > $pageH - $pdf->getBreakMargin()) {
+            $pdf->AddPage();
+        }
+
+        foreach ($totalRows as [$label, $amount, $isTotal]) {
+            $rowY = $pdf->GetY();
+
+            if ($isTotal && $priceMode !== 'usd') {
+                $words = $this->numberToArabicWords($net) . ' جنيه فقط لا غير';
+                $pdf->SetFont('arial', 'U', $this->fitFontSize($pdf, $words, 'arial', 'U', 11, 96));
+                $pdf->SetXY($leftM + 20, $rowY);
+                $pdf->Cell(96, 8, $words, 0, 0, 'R');
+            }
+
+            $pdf->SetFont('helvetica', 'U', $isTotal ? 13 : 11);
+            $pdf->SetXY($leftM + 122, $rowY);
+            $pdf->Cell(30, 8, $this->formatDisplayMoney($amount, $priceMode), 0, 0, 'R');
+
+            $pdf->SetFont('arial', 'U', 11);
+            $pdf->SetXY($leftM + 155, $rowY);
+            $pdf->Cell(22, 8, $label, 0, 1, 'R');
+        }
+
+        $pdf->SetFont('arial', '', 10);
+        $this->generateStampAndSignature($pdf, $settings);
+
+        return $pdf->Output('', 'S');
+    }
+
+    /** Largest font size ≤ $size at which $text fits in $maxW mm. */
+    private function fitFontSize(TCPDF $pdf, string $text, string $family, string $style, float $size, float $maxW): float
+    {
+        while ($size > 6 && $pdf->GetStringWidth($text, $family, $style, $size) > $maxW) {
+            $size -= 0.5;
+        }
+
+        return $size;
+    }
+
+    /**
      * Modern invoice template — a clean international-style layout (logo top-left,
      * "INVOICE" title top-right, Date/Due Date/Balance Due box, dark-header items
      * table, Subtotal/Tax/Total summary). Selected via the `invoice_template`
@@ -483,7 +734,8 @@ class InvoicePdfService
         return $text;
     }
 
-    private function generateArabicProformaHeader(TCPDF $pdf, \App\Services\Pdf\PdfHeaderRenderer $renderer, Sale $sale, string $title, array $settings = []): void
+    /** $renderer is null when the caller already drew its own header (letterhead template). */
+    private function generateArabicProformaHeader(TCPDF $pdf, ?\App\Services\Pdf\PdfHeaderRenderer $renderer, Sale $sale, string $title, array $settings = []): void
     {
         $pageW   = $pdf->getPageWidth(); // 210mm
         $leftM   = 10;
@@ -494,19 +746,21 @@ class InvoicePdfService
         $companyAddress = $settings['company_address'] ?? null;
 
         // ── BRANDING HEADER (logo / header image / text) ──────────────────────
-        $renderer->render($pdf);
+        if ($renderer) {
+            $renderer->render($pdf);
 
-        // ── TAX NUMBER (top, below branding header) ───────────────────────────
-        // if ($taxNumber) {
-        //     $pdf->SetFont('arial', '', 9);
-        //     $pdf->Cell(0, 6, 'الرقم التعريفي: ' . $taxNumber, 0, 1, 'C');
-        // }
+            // ── TAX NUMBER (top, below branding header) ───────────────────────
+            // if ($taxNumber) {
+            //     $pdf->SetFont('arial', '', 9);
+            //     $pdf->Cell(0, 6, 'الرقم التعريفي: ' . $taxNumber, 0, 1, 'C');
+            // }
 
-        // ── DIVIDER ───────────────────────────────────────────────────────────
-        $pdf->SetDrawColor(180, 180, 180);
-        $pdf->Line($leftM, $pdf->GetY(), $pageW - $rightM, $pdf->GetY());
-        $pdf->SetDrawColor(0, 0, 0);
-        $pdf->Ln(2); // Reduced from 3
+            // ── DIVIDER ───────────────────────────────────────────────────────
+            $pdf->SetDrawColor(180, 180, 180);
+            $pdf->Line($leftM, $pdf->GetY(), $pageW - $rightM, $pdf->GetY());
+            $pdf->SetDrawColor(0, 0, 0);
+            $pdf->Ln(2); // Reduced from 3
+        }
 
         // ── TITLE BANNER ─────────────────────────────────────────────────────
         $pdf->SetFont('arial', 'B', 16);
@@ -571,34 +825,37 @@ class InvoicePdfService
 
     private function generateArabicProformaTable(TCPDF $pdf, Sale $sale, array $settings = [], string $priceMode = 'local'): void
     {
-        $pdf->SetFillColor(240, 240, 240);
-        $pdf->SetFont('arial', 'B', 9); // Reduced from 10
-
         $showUnit = $settings['sales_a4_show_unit_column'] ?? true;
 
-        if ($showUnit) {
-            // Column widths
-            $w = [10, 80, 15, 15, 25, 45]; // م, البيان, الوحده, العدد, السعر, المبلغ
+        // Column widths: م, البيان, الوحده, العدد, السعر, المبلغ — without the unit
+        // column its 15mm is folded into البيان (same 190mm total).
+        $w = $showUnit ? [10, 80, 15, 15, 25, 45] : [10, 95, 0, 15, 25, 45];
+
+        $drawTableHeader = function () use ($pdf, $w, $showUnit) {
+            $pdf->SetFillColor(240, 240, 240);
+            $pdf->SetFont('arial', 'B', 9); // Reduced from 10
 
             $pdf->Cell($w[0], 7, 'م', 1, 0, 'C', true);
             $pdf->Cell($w[1], 7, 'البيان', 1, 0, 'C', true);
-            $pdf->Cell($w[2], 7, 'الوحده', 1, 0, 'C', true);
+            if ($showUnit) {
+                $pdf->Cell($w[2], 7, 'الوحده', 1, 0, 'C', true);
+            }
             $pdf->Cell($w[3], 7, 'العدد', 1, 0, 'C', true);
             $pdf->Cell($w[4], 7, 'السعر', 1, 0, 'C', true);
             $pdf->Cell($w[5], 7, 'المبلغ', 1, 1, 'C', true);
-        } else {
-            // Same total width as above (190mm), unit column's 15mm folded into البيان.
-            $w = [10, 95, 0, 15, 25, 45]; // م, البيان, -, العدد, السعر, المبلغ
 
-            $pdf->Cell($w[0], 7, 'م', 1, 0, 'C', true);
-            $pdf->Cell($w[1], 7, 'البيان', 1, 0, 'C', true);
-            $pdf->Cell($w[3], 7, 'العدد', 1, 0, 'C', true);
-            $pdf->Cell($w[4], 7, 'السعر', 1, 0, 'C', true);
-            $pdf->Cell($w[5], 7, 'المبلغ', 1, 1, 'C', true);
-        }
+            $pdf->SetFont('arial', '', 8); // Reduced from 10
+        };
 
-        $pdf->SetFont('arial', '', 8); // Reduced from 10
+        $drawTableHeader();
         foreach ($sale->items as $idx => $item) {
+            // Templates with auto page break (letterhead): start a new page before a
+            // row would cross the bottom margin, and repeat the column headings there.
+            if ($pdf->getAutoPageBreak() && $pdf->GetY() + 6 > $pdf->getPageHeight() - $pdf->getBreakMargin()) {
+                $pdf->AddPage();
+                $drawTableHeader();
+            }
+
             $productName = $item->product->name ?? '';
             $maxW = $w[1] - 2; // Subtract some padding
             if ($pdf->GetStringWidth($productName) > $maxW) {

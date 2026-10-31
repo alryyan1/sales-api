@@ -29,6 +29,7 @@ class SettingsService
     {
         return [
             'company_name' => 'string',
+            'company_name_en' => 'string', // secondary (English) name line on the letterhead invoice
             'company_address' => 'string',
             'company_phone' => 'string',
             'company_phone_2' => 'string',
@@ -48,7 +49,7 @@ class SettingsService
             'tax_number' => 'string',
             'account_number' => 'string',
             'stamp_position' => 'string', // 'left', 'center', 'right'
-            'invoice_template' => 'string', // 'classic' or 'modern'
+            'invoice_template' => 'string', // 'classic', 'modern' or 'letterhead'
             'purchase_sync_product_sale_price' => 'bool',
             'pdf_font' => 'string',
             'pos_mode' => 'string', // 'shift' or 'days'
@@ -96,6 +97,7 @@ class SettingsService
         $c = config('app_settings', []);
         return [
             'company_name' => $c['company_name'] ?? '',
+            'company_name_en' => $c['company_name_en'] ?? '',
             'company_address' => $c['company_address'] ?? '',
             'company_phone' => $c['company_phone'] ?? '',
             'company_phone_2' => $c['company_phone_2'] ?? null,
@@ -247,7 +249,7 @@ class SettingsService
         $rules['currency_symbol'] = ['nullable', 'string', 'max:5'];
         $rules['pos_mode'] = ['nullable', 'string', Rule::in(['shift', 'days'])];
         $rules['stamp_position'] = ['nullable', 'string', Rule::in(['left', 'center', 'right'])];
-        $rules['invoice_template'] = ['nullable', 'string', Rule::in(['classic', 'modern'])];
+        $rules['invoice_template'] = ['nullable', 'string', Rule::in(['classic', 'modern', 'letterhead'])];
         $rules['business_type'] = ['nullable', 'string', Rule::in(['equipment', 'pharmacy'])];
         $rules['default_purchase_currency'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
         $rules['currency_code'] = ['nullable', 'string', Rule::in(['SDG', 'OMR', 'USD'])];
