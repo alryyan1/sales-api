@@ -360,7 +360,7 @@ class InvoicePdfService
             $pdf->SetTextColor(0, 0, 0);
 
             $nameAr = $this->bidiSafe($settings['company_name'] ?? '');
-            $pdf->SetFont('dejavusans', 'B', $this->fitFontSize($pdf, $nameAr, 'dejavusans', 'B', 22, $textW));
+            $pdf->SetFont('arial', 'B', $this->fitFontSize($pdf, $nameAr, 'arial', 'B', 22, $textW));
             $pdf->SetXY($textX, 36);
             $pdf->Cell($textW, 11, $nameAr, 0, 1, 'C');
 
@@ -451,7 +451,7 @@ class InvoicePdfService
             $pdf->SetFont('helvetica', '', 11);
             $pdf->SetX($leftM);
             $pdf->Cell($w[0], 8, 'No', 0, 0, 'C');
-            $pdf->Cell($w[1], 8, 'Item', 0, 0, 'C');
+            $pdf->Cell($w[1], 8, 'Item', 0, 0, 'L');
             $pdf->Cell($w[2], 8, 'QTY', 0, 0, 'C');
             if ($showUnit) {
                 $pdf->Cell($w[3], 8, 'Unit', 0, 0, 'C');
