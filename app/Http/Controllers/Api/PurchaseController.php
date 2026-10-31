@@ -1172,6 +1172,7 @@ class PurchaseController extends Controller
         ]);
 
         $payment = $purchase->payments()->create([
+            'supplier_id' => $purchase->supplier_id,
             'user_id' => auth()->id(),
             'amount' => $validatedData['amount'],
             'method' => $validatedData['method'],
