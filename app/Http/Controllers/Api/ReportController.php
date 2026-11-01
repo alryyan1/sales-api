@@ -1368,6 +1368,10 @@ class ReportController extends Controller
         if (!empty($validated['user_id'])) {
             $returnsQuery->where('user_id', $validated['user_id']);
         }
+        // A return belongs to the warehouse of its original sale invoice.
+        if (!empty($validated['warehouse_id'])) {
+            $returnsQuery->whereHas('sale', fn ($q) => $q->where('warehouse_id', $validated['warehouse_id']));
+        }
         $returnsData = $returnsQuery->with('items')->get();
 
         $returnsByMethod = [
