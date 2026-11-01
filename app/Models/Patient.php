@@ -10,10 +10,15 @@ class Patient extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name', 'insurance_card_number', 'insurance_company_id'];
+    protected $fillable = ['name', 'insurance_card_number', 'insurance_company_id', 'insurance_sub_company_id'];
 
     public function insuranceCompany(): BelongsTo
     {
         return $this->belongsTo(InsuranceCompany::class);
+    }
+
+    public function insuranceSubCompany(): BelongsTo
+    {
+        return $this->belongsTo(InsuranceSubCompany::class);
     }
 }

@@ -9,6 +9,7 @@ use App\Models\Sale;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -29,6 +30,13 @@ class SalePatientController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'insurance_card_number' => ['required', 'string', 'max:255'],
             'insurance_company_id' => ['required', 'integer', 'exists:insurance_companies,id'],
+            // Optional; must belong to the chosen insurance company.
+            'insurance_sub_company_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('insurance_sub_companies', 'id')
+                    ->where('insurance_company_id', $request->input('insurance_company_id')),
+            ],
         ]);
 
         DB::transaction(function () use ($validated, $sale) {
@@ -37,10 +45,20 @@ class SalePatientController extends Controller
                     'insurance_company_id' => $validated['insurance_company_id'],
                     'insurance_card_number' => $validated['insurance_card_number'],
                 ],
-                ['name' => $validated['name']]
+                [
+                    'name' => $validated['name'],
+                    'insurance_sub_company_id' => $validated['insurance_sub_company_id'] ?? null,
+                ]
             );
 
-            $sale->update(['patient_id' => $patient->id]);
+            $company = $patient->insuranceCompany;
+            if ($company->hasFixedCopay()) {
+                // Fixed co-pay companies set the rate themselves; it can't be changed at the POS.
+                $this->assertCopayCoversPayments($sale, $company->copay_percentage);
+                $sale->update(['patient_id' => $patient->id, 'copay_percentage' => $company->copay_percentage]);
+            } else {
+                $sale->update(['patient_id' => $patient->id]);
+            }
         });
 
         return $this->saleResponse($sale);
@@ -77,9 +95,23 @@ class SalePatientController extends Controller
             ]);
         }
 
-        $copay = $validated['copay_percentage'];
+        if ($sale->patient?->insuranceCompany?->hasFixedCopay()) {
+            throw ValidationException::withMessages([
+                'copay_percentage' => ['نسبة التحمل ثابتة لهذه الشركة ولا يمكن تعديلها.'],
+            ]);
+        }
 
-        // The patient's share must not drop below what has already been paid.
+        $copay = $validated['copay_percentage'];
+        $this->assertCopayCoversPayments($sale, $copay);
+
+        $sale->update(['copay_percentage' => $copay]);
+
+        return $this->saleResponse($sale);
+    }
+
+    /** The patient's share must not drop below what has already been paid. */
+    private function assertCopayCoversPayments(Sale $sale, float|int|string|null $copay): void
+    {
         $totalBeforeCopay = (float) $sale->items()->sum('total_price') - (float) ($sale->discount_amount ?? 0);
         $newTotal = $copay === null ? $totalBeforeCopay : $totalBeforeCopay * (float) $copay / 100;
         $paid = (float) $sale->payments()->sum('amount');
@@ -88,10 +120,6 @@ class SalePatientController extends Controller
                 'copay_percentage' => ['Co-pay amount cannot be less than the amount already paid.'],
             ]);
         }
-
-        $sale->update(['copay_percentage' => $copay]);
-
-        return $this->saleResponse($sale);
     }
 
     private function authorizeSaleOwner(Sale $sale): void
@@ -108,7 +136,8 @@ class SalePatientController extends Controller
             'client:id,name,email,phone',
             'user:id,name',
             'warehouse:id,name',
-            'patient.insuranceCompany:id,name',
+            'patient.insuranceCompany:id,name,invoice_cap,copay_type,copay_percentage',
+            'patient.insuranceSubCompany:id,name',
             'items',
             'items.product:id,name,sku,scientific_name,stock_alert_level,sellable_unit_id,image_url,is_service',
             'items.product.sellableUnit:id,name',

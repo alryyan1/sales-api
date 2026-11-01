@@ -669,6 +669,11 @@ class SaleController extends Controller
             'payments.*.notes' => 'nullable|string|max:65535',
         ]);
 
+        // Clearing payments is always allowed; recording any is blocked over the insurance cap.
+        if (! empty($validatedData['payments']) && $sale->exceedsInsuranceCap()) {
+            return $this->insuranceCapExceededResponse($sale);
+        }
+
         $latestShift = Shift::orderBy('id', 'desc')->first();
 
         try {
@@ -787,6 +792,10 @@ class SaleController extends Controller
             'notes' => 'nullable|string|max:65535',
         ]);
 
+        if ($sale->exceedsInsuranceCap()) {
+            return $this->insuranceCapExceededResponse($sale);
+        }
+
         $latestShift = Shift::orderBy('id', 'desc')->first();
         if (! $latestShift) {
             return response()->json([
@@ -822,6 +831,28 @@ class SaleController extends Controller
                 'message' => 'Failed to add payment. Please try again.',
                 'error' => $e->getMessage(),
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private function insuranceCapExceededResponse(Sale $sale)
+    {
+        return response()->json([
+            'message' => 'إجمالي الفاتورة الأصلي يتجاوز سقف شركة التأمين ('.$this->formatMoney($sale->insuranceInvoiceCap()).'). احذف منتجاً لإتمام العملية.',
+            'code' => 'insurance_cap_exceeded',
+            'invoice_cap' => $sale->insuranceInvoiceCap(),
+        ], Response::HTTP_UNPROCESSABLE_ENTITY);
+    }
+
+    /**
+     * Called inside an item add/update transaction after the change is
+     * written: throwing rolls the change (and its stock movement) back.
+     */
+    private function assertWithinInsuranceCap(Sale $sale): void
+    {
+        if ($sale->exceedsInsuranceCap()) {
+            throw ValidationException::withMessages([
+                'insurance_cap' => ['لا يمكن إضافة المنتج: إجمالي الفاتورة سيتجاوز سقف شركة التأمين ('.$this->formatMoney($sale->insuranceInvoiceCap()).').'],
+            ]);
         }
     }
 
@@ -1014,6 +1045,8 @@ class SaleController extends Controller
                     $existingSaleItem->total_price = $newQuantity * $resolvedUnitPrice;
                     $existingSaleItem->save();
 
+                    $this->assertWithinInsuranceCap($sale);
+
                     $newTotal = (float) $sale->items()->sum('total_price');
                     $paidAmount = (float) $sale->payments()->sum('amount');
                     $newDueAmount = max(0, $newTotal - $paidAmount);
@@ -1066,6 +1099,8 @@ class SaleController extends Controller
                 if (! $sale->is_quote) {
                     $product->decrementWarehouseStock($warehouseId, $validatedData['quantity']);
                 }
+
+                $this->assertWithinInsuranceCap($sale);
 
                 $newTotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');
@@ -1140,6 +1175,7 @@ class SaleController extends Controller
         try {
             $result = DB::transaction(function () use ($validatedData, $sale, $saleItemId) {
                 $saleItem = $sale->items()->findOrFail($saleItemId);
+                $oldItemTotal = (float) $saleItem->total_price;
                 $product = $saleItem->product;
                 $batch = $saleItem->purchaseItemBatch; // May be null when no specific batch was used
 
@@ -1209,6 +1245,11 @@ class SaleController extends Controller
                 $saleItem->total_price = $newQuantity * $validatedData['unit_price'];
                 $saleItem->save();
                 \Log::info('updateSaleItem: item saved');
+
+                // Only an increase is blocked, so lowering a quantity always works.
+                if ((float) $saleItem->total_price > $oldItemTotal + 1e-6) {
+                    $this->assertWithinInsuranceCap($sale);
+                }
 
                 $newSubtotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');
@@ -1924,6 +1965,8 @@ class SaleController extends Controller
                         $errors[] = "Failed to add product at index {$index}: ".$e->getMessage();
                     }
                 }
+
+                $this->assertWithinInsuranceCap($sale);
 
                 $newTotal = (float) $sale->items()->sum('total_price');
                 $paidAmount = (float) $sale->payments()->sum('amount');

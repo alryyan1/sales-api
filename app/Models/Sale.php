@@ -179,6 +179,34 @@ class Sale extends Model
         return round($amount * (float) $this->copay_percentage / 100, 4);
     }
 
+    /**
+     * The insured patient's invoice cap (from their insurance company), or
+     * null when the sale has no patient or the company has no cap.
+     */
+    public function insuranceInvoiceCap(): ?float
+    {
+        $cap = $this->patient?->insuranceCompany?->invoice_cap;
+
+        return $cap !== null ? (float) $cap : null;
+    }
+
+    /**
+     * True when the original invoice total (subtotal - discount, before
+     * co-pay) exceeds the patient's insurance cap. Such a sale cannot be paid
+     * until items are removed.
+     */
+    public function exceedsInsuranceCap(): bool
+    {
+        $cap = $this->insuranceInvoiceCap();
+        if ($cap === null) {
+            return false;
+        }
+
+        $total = (float) $this->items()->sum('total_price') - (float) ($this->discount_amount ?? 0);
+
+        return $total > $cap + 1e-6;
+    }
+
     // Accessor for due amount (subtotal - discount_amount, reduced by co-pay - paid)
     public function getCalculatedDueAmountAttribute(): float
     {

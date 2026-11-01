@@ -1171,6 +1171,14 @@ class PurchaseController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        // A payment may not exceed what is still owed on the purchase.
+        $remaining = (float) $purchase->total_amount - (float) $purchase->payments()->sum('amount');
+        if ((float) $validatedData['amount'] > $remaining + 1e-6) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'amount' => ['المبلغ أكبر من المتبقي على الفاتورة ('.number_format(max(0, $remaining), 2).').'],
+            ]);
+        }
+
         $payment = $purchase->payments()->create([
             'supplier_id' => $purchase->supplier_id,
             'user_id' => auth()->id(),

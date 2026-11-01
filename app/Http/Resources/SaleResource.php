@@ -99,6 +99,12 @@ class SaleResource extends JsonResource
             'insurance_card_number' => $patient->insurance_card_number,
             'insurance_company_id' => $patient->insurance_company_id,
             'insurance_company_name' => $patient->insuranceCompany?->name,
+            'insurance_sub_company_id' => $patient->insurance_sub_company_id,
+            'insurance_sub_company_name' => $patient->insuranceSubCompany?->name,
+            // Max original invoice total (before co-pay) for this patient; null = no cap.
+            'invoice_cap' => $patient->insuranceCompany?->invoice_cap,
+            // 'fixed' = co-pay set by the company and locked at the POS; 'variable' = cashier enters it.
+            'copay_type' => $patient->insuranceCompany?->copay_type ?? 'variable',
         ];
     }
 }

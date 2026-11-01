@@ -106,7 +106,7 @@ class UserController extends Controller
 
     /**
      * Update the specified user in storage.
-     * Handles name, email, and role updates. Does NOT handle password changes.
+     * Handles name, username, role updates, and an optional password change.
      */
     public function update(Request $request, User $user)
     {
@@ -126,12 +126,17 @@ class UserController extends Controller
             'warehouse_id' => 'nullable|exists:warehouses,id',
             'allowed_navs' => 'nullable|array',
             'allowed_navs.*' => 'string',
+            // Optional: only changed when a new password is sent.
+            'password' => ['nullable', 'string', Password::defaults(), 'confirmed'],
         ]);
 
         try {
             $user = DB::transaction(function () use ($validatedData, $user, $request) {
                 // Update basic fields
                 $user->fill(Arr::only($validatedData, ['name', 'username', 'warehouse_id', 'allowed_navs']));
+                if (! empty($validatedData['password'])) {
+                    $user->password = Hash::make($validatedData['password']);
+                }
                 // Prevent assigning roles if 'admin' is missing, but only for user with ID 1
                 if ($user->id === 1 && !in_array('admin', $validatedData['roles']) && !in_array('ادمن', $validatedData['roles'])) {
                     throw new \Exception('The "admin" role cannot be removed for this user.');
