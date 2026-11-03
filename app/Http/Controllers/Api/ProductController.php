@@ -104,6 +104,14 @@ class ProductController extends Controller
                 });
         }
 
+        // Totals of cost / sale price across all filtered products (mirrors the
+        // latest_cost_per_sellable_unit & last_sale_price_per_sellable_unit accessors)
+        $totals = \Illuminate\Support\Facades\DB::query()
+            ->fromSub((clone $query)->toBase(), 'p')
+            ->selectRaw('COALESCE(SUM(COALESCE(p.cost_price, p.latest_purchase_cost_raw / NULLIF(p.units_per_stocking_unit, 0))), 0) as total_cost_price')
+            ->selectRaw('COALESCE(SUM(COALESCE(p.sale_price, p.last_sale_price_raw)), 0) as total_sale_price')
+            ->first();
+
         // Sorting
         $sortBy = $request->input('sort_by', 'created_at'); // Default sort field
         $sortDirection = $request->input('sort_direction', 'desc'); // Default sort direction
@@ -143,7 +151,12 @@ class ProductController extends Controller
         $perPage = $request->input('per_page', 15); // Default items per page
         $products = $query->paginate($perPage);
 
-        return ProductResource::collection($products);
+        return ProductResource::collection($products)->additional([
+            'totals' => [
+                'cost_price' => round((float) $totals->total_cost_price, 2),
+                'sale_price' => round((float) $totals->total_sale_price, 2),
+            ],
+        ]);
     }
 
     public function store(Request $request)

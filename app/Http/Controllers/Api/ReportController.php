@@ -315,7 +315,51 @@ class ReportController extends Controller
 
         // --- Return Paginated Resource Collection ---
         // PurchaseItemResource should already format expiry_date and include product info (name, sku)
-        return PurchaseItemResource::collection($nearExpiryItems);
+        return PurchaseItemResource::collection($nearExpiryItems)->additional([
+            'product_items' => $nearExpiryItems->currentPage() === 1
+                ? $this->productLevelExpiryItems(
+                    fn($q) => $q->whereBetween('expire_date', [$today, $expiryCutoffDate]),
+                    $validated['product_id'] ?? null
+                )
+                : [],
+        ]);
+    }
+
+    /**
+     * Products whose expiry date is set directly on the product (products.expire_date)
+     * rather than on a purchase batch. Shaped like PurchaseItemResource rows.
+     */
+    private function productLevelExpiryQuery(callable $dateFilter)
+    {
+        $query = Product::query()
+            ->whereNotNull('expire_date')
+            ->where('is_service', false)
+            ->whereHas('warehouses', fn($q) => $q->where('product_warehouse.quantity', '>', 0));
+        $dateFilter($query);
+
+        return $query;
+    }
+
+    private function productLevelExpiryItems(callable $dateFilter, $productId = null): array
+    {
+        $query = $this->productLevelExpiryQuery($dateFilter)->orderBy('expire_date');
+        if ($productId) {
+            $query->where('id', $productId);
+        }
+
+        return $query->get(['id', 'name', 'sku', 'expire_date', 'sale_price', 'cost_price'])
+            ->map(fn(Product $p) => [
+                'id' => 'product-' . $p->id,
+                'source' => 'product',
+                'product_id' => $p->id,
+                'product_name' => $p->name,
+                'product_sku' => $p->sku,
+                'batch_number' => null,
+                'expiry_date' => $p->expire_date->format('Y-m-d'),
+                'sale_price' => $p->sale_price,
+                'unit_cost' => $p->cost_price,
+            ])
+            ->all();
     }
 
     /**
@@ -370,7 +414,14 @@ class ReportController extends Controller
         $expiredItems = $query->paginate($perPage);
 
         // --- Return Paginated Resource Collection ---
-        return PurchaseItemResource::collection($expiredItems);
+        return PurchaseItemResource::collection($expiredItems)->additional([
+            'product_items' => $expiredItems->currentPage() === 1
+                ? $this->productLevelExpiryItems(
+                    fn($q) => $q->where('expire_date', '<', $today),
+                    $validated['product_id'] ?? null
+                )
+                : [],
+        ]);
     }
 
     /**
@@ -391,13 +442,17 @@ class ReportController extends Controller
         $expiryCutoffDate = Carbon::today()->addDays($daysThreshold)->toDateString();
 
         // Count near-expiring products (between today and cutoff date)
+        // Distinct products from purchase batches + products with an expiry date set directly on them
         $nearExpiringCount = PurchaseItem::query()
             ->where('is_moved_to_expired', false)
             ->whereNotNull('expiry_date')
             ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->whereBetween('expiry_date', [$today, $expiryCutoffDate])
-            ->distinct('product_id')
-            ->count('product_id');
+            ->distinct()
+            ->pluck('product_id')
+            ->merge($this->productLevelExpiryQuery(fn($q) => $q->whereBetween('expire_date', [$today, $expiryCutoffDate]))->pluck('id'))
+            ->unique()
+            ->count();
 
         // Count expired products (before today)
         $expiredCount = PurchaseItem::query()
@@ -405,8 +460,11 @@ class ReportController extends Controller
             ->whereNotNull('expiry_date')
             ->whereHas('product', fn($q) => $q->whereHas('warehouses', fn($q2) => $q2->where('product_warehouse.quantity', '>', 0)))
             ->where('expiry_date', '<', $today)
-            ->distinct('product_id')
-            ->count('product_id');
+            ->distinct()
+            ->pluck('product_id')
+            ->merge($this->productLevelExpiryQuery(fn($q) => $q->where('expire_date', '<', $today))->pluck('id'))
+            ->unique()
+            ->count();
 
         return response()->json([
             'near_expiring_count' => $nearExpiringCount,
