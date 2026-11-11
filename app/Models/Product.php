@@ -285,6 +285,24 @@ class Product extends Model
     }
 
     /**
+     * Scope a query to only include expired products: the product-level expire_date
+     * has passed, or any batch not yet moved to expired has a past expiry_date.
+     */
+    public function scopeExpired($query)
+    {
+        $today = now()->toDateString();
+
+        return $query->where(function ($q) use ($today) {
+            $q->whereDate('products.expire_date', '<', $today)
+                ->orWhereHas('purchaseItems', function ($pi) use ($today) {
+                    $pi->whereNotNull('expiry_date')
+                        ->whereDate('expiry_date', '<', $today)
+                        ->where('is_moved_to_expired', false);
+                });
+        });
+    }
+
+    /**
      * Scope a query to only include products that are low on stock.
      * Uses product_warehouse as source of truth.
      */

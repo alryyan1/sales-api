@@ -97,9 +97,12 @@ class ProductPdfService
                 // one query per access, not cached) — computing it here as a single
                 // correlated subquery avoids an N+1 that made this report very slow for
                 // any real product count (it was being read multiple times per row).
+                // Scoped to the selected warehouse when one is filtered, matching the
+                // products page's stock column.
                 'stock_quantity_raw' => DB::table('product_warehouse')
                     ->selectRaw('COALESCE(SUM(quantity), 0)')
-                    ->whereColumn('product_id', 'products.id'),
+                    ->whereColumn('product_id', 'products.id')
+                    ->when(!empty($filters['warehouse_id']), fn($q) => $q->where('warehouse_id', $filters['warehouse_id'])),
             ])
             ->with(['category', 'stockingUnit', 'sellableUnit']);
 
@@ -113,6 +116,11 @@ class ProductPdfService
         if (!empty($filters['category_id']))   $query->where('category_id', $filters['category_id']);
         if (!empty($filters['in_stock_only']))  $query->hasStock();
         if (!empty($filters['low_stock_only'])) $query->lowStock();
+        if (!empty($filters['out_of_stock_only'])) {
+            $query->where('is_service', false)
+                ->whereDoesntHave('warehouses', fn($q) => $q->where('product_warehouse.quantity', '>', 0));
+        }
+        if (!empty($filters['expired_only'])) $query->expired();
 
         return $query->orderBy('name');
     }
@@ -144,6 +152,12 @@ class ProductPdfService
         if (!empty($filters['search']))        $notes[] = 'بحث: ' . $filters['search'];
         if (!empty($filters['in_stock_only']))  $notes[] = 'المتوفر فقط';
         if (!empty($filters['low_stock_only'])) $notes[] = 'المخزون المنخفض';
+        if (!empty($filters['out_of_stock_only'])) $notes[] = 'غير المتوفر فقط';
+        if (!empty($filters['expired_only']))   $notes[] = 'منتهية الصلاحية';
+        if (!empty($filters['warehouse_id'])) {
+            $wh = \App\Models\Warehouse::find($filters['warehouse_id']);
+            if ($wh) $notes[] = 'المخزن: ' . $wh->name;
+        }
         if (!empty($filters['category_id'])) {
             $cat = \App\Models\Category::find($filters['category_id']);
             if ($cat) $notes[] = 'الفئة: ' . $cat->name;
@@ -298,37 +312,32 @@ class ProductPdfService
         $pdf   = $this->pdf;
         $pageW = $pdf->getPageWidth() - self::MARGIN * 2;
 
-        $totalCost = $products->sum(fn($p) =>
-            ((float) ($p->latest_cost_per_sellable_unit ?? 0)) * $this->stockQty($p)
-        );
+        // Column totals of unit cost / sale price — same figures as the products page's
+        // totals row (ProductController::index 'totals').
+        $sumCost = $products->sum(fn($p) => (float) ($p->latest_cost_per_sellable_unit ?? 0));
+        $sumSale = $products->sum(fn($p) => (float) ($p->last_sale_price_per_sellable_unit ?? 0));
 
         // The rows loop only checks room for one row at a time, so a table that ends right
         // at the bottom margin would otherwise push this whole block past the page edge with
         // no header on the overflow page (auto page break has no header, since setPrintHeader
         // is off and the header is drawn manually after each AddPage() elsewhere).
-        $footerHeight = 2 + self::ROW_H + 3 + 1.5 + 4;
+        $footerHeight = self::ROW_H + 1 + 3 + 1.5 + 4;
         if ($pdf->GetY() + $footerHeight > $pdf->getPageHeight() - self::MARGIN) {
             $pdf->AddPage();
+            $pdf->SetTextColor(self::COLOR_TEXT[0], self::COLOR_TEXT[1], self::COLOR_TEXT[2]);
             $this->renderer->render($pdf);
         }
 
-        $pdf->Ln(2);
-
-        // Total cost row
-        [$r, $g, $b] = self::COLOR_TOTAL_BG;
+        // Totals row aligned under the cost / sale price columns
+        [$r, $g, $b] = self::COLOR_TITLE_BAND;
         $pdf->SetFillColor($r, $g, $b);
-        $pdf->SetTextColor(255, 255, 255);
-        $pdf->SetFont('arial', 'B', self::F_SECTION);
-
-        $labelW = 55;
-        $valueW = 40;
-        $spacer = $pageW - $labelW - $valueW;
-
-        $totalH = self::ROW_H + 2;
-        $pdf->Cell($spacer, $totalH, '', 0, 0);
-        $pdf->RoundedRect(self::MARGIN + $spacer, $pdf->GetY(), $labelW + $valueW, $totalH, 1.5, '1111', 'F');
-        $pdf->Cell($labelW, $totalH, 'إجمالي تكلفة المخزون:', 0, 0, 'R');
-        $pdf->Cell($valueW, $totalH, number_format($totalCost, 2), 0, 1, 'C');
+        $pdf->SetTextColor(self::COLOR_HEADER_BG[0], self::COLOR_HEADER_BG[1], self::COLOR_HEADER_BG[2]);
+        $pdf->SetFont('arial', 'B', self::F_BODY);
+        $labelSpan = array_sum(array_slice(self::COLS, 0, 7));
+        $pdf->Cell($labelSpan, self::ROW_H + 1, 'الإجمالي (' . number_format($products->count()) . ' منتج)', 0, 0, 'C', true);
+        $pdf->Cell(self::COLS[7], self::ROW_H + 1, number_format($sumCost, 2), 0, 0, 'C', true);
+        $pdf->Cell(self::COLS[8], self::ROW_H + 1, number_format($sumSale, 2), 0, 0, 'C', true);
+        $pdf->Cell(self::COLS[9], self::ROW_H + 1, '', 0, 1, 'C', true);
 
         // Footer rule + page info
         $pdf->Ln(3);

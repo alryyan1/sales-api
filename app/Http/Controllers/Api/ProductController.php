@@ -104,6 +104,11 @@ class ProductController extends Controller
                 });
         }
 
+        // Filter by expired products
+        if ($request->boolean('expired_only')) {
+            $query->expired();
+        }
+
         // Totals of cost / sale price across all filtered products (mirrors the
         // latest_cost_per_sellable_unit & last_sale_price_per_sellable_unit accessors)
         $totals = \Illuminate\Support\Facades\DB::query()
@@ -394,6 +399,9 @@ class ProductController extends Controller
             'category_id' => $request->input('category_id'),
             'in_stock_only' => $request->boolean('in_stock_only'),
             'low_stock_only' => $request->boolean('low_stock_only'),
+            'out_of_stock_only' => $request->boolean('out_of_stock_only'),
+            'expired_only' => $request->boolean('expired_only'),
+            'warehouse_id' => $request->input('warehouse_id'),
         ];
 
         $pdfService = new ProductPdfService();
