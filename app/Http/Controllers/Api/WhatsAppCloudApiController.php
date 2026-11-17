@@ -579,6 +579,20 @@ class WhatsAppCloudApiController extends Controller
                 return;
             }
 
+            // Payload format: "returns_368|collection:aisha_bakhit"
+            // First segment = report type + shift id; the rest are key:value pairs.
+            // Parse before lowercasing so the collection name keeps its exact case.
+            $payloadSegments = explode('|', $buttonPayload);
+            $buttonPayload   = array_shift($payloadSegments);
+            foreach ($payloadSegments as $segment) {
+                if (str_contains($segment, ':')) {
+                    [$key, $val] = explode(':', $segment, 2);
+                    if (trim($key) === 'collection' && trim($val) !== '') {
+                        $collection = trim($val);
+                    }
+                }
+            }
+
             $buttonPayload = strtolower($buttonPayload);
 
             // Identify the report type from the button

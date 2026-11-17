@@ -411,6 +411,11 @@ class ShiftController extends Controller
                 $templateName = 'shift_closed_ar';
                 $languageCode = 'ar';
 
+                // Firestore collection (tenant) the shift PDFs were uploaded to.
+                // Embedded in each button payload so the webhook knows where to look.
+                $collectionName = $settings['firebase_collection_name'] ?? 'none';
+                $payloadSuffix  = '|collection:' . $collectionName;
+
                 $components = [
                     [
                         'type' => 'body',
@@ -431,7 +436,7 @@ class ShiftController extends Controller
                         'sub_type'   => 'quick_reply',
                         'index'      => '0',
                         'parameters' => [
-                            ['type' => 'payload', 'payload' => 'sales_' . $shift->id],
+                            ['type' => 'payload', 'payload' => 'sales_' . $shift->id . $payloadSuffix],
                         ],
                     ],
                     [
@@ -439,7 +444,7 @@ class ShiftController extends Controller
                         'sub_type'   => 'quick_reply',
                         'index'      => '1',
                         'parameters' => [
-                            ['type' => 'payload', 'payload' => 'sold_items_' . $shift->id],
+                            ['type' => 'payload', 'payload' => 'sold_items_' . $shift->id . $payloadSuffix],
                         ],
                     ],
                     [
@@ -447,7 +452,7 @@ class ShiftController extends Controller
                         'sub_type'   => 'quick_reply',
                         'index'      => '2',
                         'parameters' => [
-                            ['type' => 'payload', 'payload' => 'returns_' . $shift->id],
+                            ['type' => 'payload', 'payload' => 'returns_' . $shift->id . $payloadSuffix],
                         ],
                     ],
                 ];
